@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ironcore
+      # The owner bootstraps the database; Laravel connects as non-superuser
+      # ironcore_app so FORCE ROW LEVEL SECURITY cannot be bypassed.
+      POSTGRES_USER: ironcore_owner
+      POSTGRES_PASSWORD: change-me-owner
+    volumes:
+      - ironcore_postgres:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ironcore_owner -d ironcore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - ironcore_redis:/data
+
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    ports: ["8000:8000"]
+    command: php artisan serve --host=0.0.0.0 --port=8000
+
+volumes:
+  ironcore_postgres:
+  ironcore_redis:

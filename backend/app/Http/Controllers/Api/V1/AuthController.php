@@ -1,0 +1,93 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\LoginRequest;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
+
+class AuthController extends Controller
+{
+    public function login(LoginRequest $request): JsonResponse
+    {
+        $usesBearerToken = $request->boolean('use_bearer_token');
+        if (! $usesBearerToken && ! $request->hasSession()) {
+            // Reject non-stateful origins before credential lookup so an
+            // untrusted caller cannot trigger a session error or probe users.
+            return response()->json([
+                'message' => 'A stateful browser origin is required for session login.',
+            ], 400);
+        }
+
+        $email = mb_strtolower((string) $request->string('email'));
+        $password = (string) $request->string('password');
+        $user = \App\Models\User::query()->where('email', $email)->first();
+
+        if (! $user || ! Hash::check($password, $user->password)) {
+            throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
+        }
+
+        if ($usesBearerToken) {
+            $deviceName = (string) $request->string('device_name', 'native-client');
+            $user->tokens()->where('name', $deviceName)->delete();
+            $token = $user->createToken($deviceName, ['app:use'])->plainTextToken;
+
+            return response()->json([
+                'data' => [
+                    'authentication' => 'bearer',
+                    'token' => $token,
+                    'token_type' => 'Bearer',
+                    'user' => $this->userPayload($user->load('gyms')),
+                ],
+            ]);
+        }
+
+        // Sanctum's stateful middleware starts the server-side session. The
+        // identifier is rotated at login to prevent session fixation, while
+        // the browser receives only encrypted/HttpOnly cookie state.
+        Auth::guard('web')->login($user);
+        $request->session()->regenerate();
+
+        return response()->json([
+            'data' => [
+                'authentication' => 'session',
+                'user' => $this->userPayload($user->load('gyms')),
+            ],
+        ]);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->userPayload($request->user()->load('gyms'))]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        if ($request->user()->currentAccessToken()) {
+            $request->user()->currentAccessToken()->delete();
+        } else {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
+        return response()->json(status: 204);
+    }
+
+    private function userPayload($user): array
+    {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'platform_role' => $user->platform_role?->value,
+            'gyms' => $user->relationLoaded('gyms')
+                ? $user->gyms->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
+                : [],
+        ];
+    }
+}

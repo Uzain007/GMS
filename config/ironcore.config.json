@@ -1,0 +1,9 @@
+{
+  "product": "IronCore",
+  "architecture": "multi-tenant",
+  "initialCapacity": { "gyms": 100, "members": 1000000 },
+  "currencies": ["GBP", "USD", "PKR", "AED", "SAR"],
+  "roles": ["super_admin", "gym_owner", "gym_manager", "receptionist", "trainer", "member"],
+  "paymentMethods": ["card", "cash", "bank_transfer", "manual_adjustment"],
+  "auditRequiredFor": ["manual_payment_create", "payment_status_change", "refund", "membership_price_change", "role_change"]
+}
