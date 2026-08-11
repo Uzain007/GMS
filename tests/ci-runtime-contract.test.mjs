@@ -8,6 +8,15 @@ const runtimeTest = await readFile(
   "backend/tests/Feature/ProductionRuntimeGateTest.php",
   "utf8",
 );
+const userModel = await readFile("backend/app/Models/User.php", "utf8");
+const accountSecurityController = await readFile(
+  "backend/app/Http/Controllers/Api/V1/AccountSecurityController.php",
+  "utf8",
+);
+const mfaController = await readFile(
+  "backend/app/Http/Controllers/Api/V1/MfaController.php",
+  "utf8",
+);
 
 test("CI is read-only and exercises locked web checks plus live PostgreSQL and Redis", () => {
   assert.match(workflow, /permissions:\s*\n\s*contents: read/);
@@ -29,6 +38,14 @@ test("CI is read-only and exercises locked web checks plus live PostgreSQL and R
   const contractsPosition = workflow.indexOf("node --test tests/*.test.mjs");
   assert.ok(buildPosition !== -1 && buildPosition < contractsPosition);
   assert.doesNotMatch(workflow, /fail-fast:/);
+});
+
+test("cookie-authenticated Sanctum sessions never treat TransientToken as a stored token", () => {
+  assert.match(userModel, /currentPersonalAccessTokenId\(\): \?int/);
+  assert.match(userModel, /\$token instanceof Model/);
+  assert.match(userModel, /deleteCurrentPersonalAccessToken\(\): bool/);
+  assert.doesNotMatch(accountSecurityController, /currentAccessToken\(\)\?->getKey/);
+  assert.doesNotMatch(mfaController, /currentAccessToken\(\)\?->getKey/);
 });
 
 test("the hosted runtime gate fails closed on privileged PostgreSQL or missing FORCE RLS", () => {

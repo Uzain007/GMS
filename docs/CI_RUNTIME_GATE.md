@@ -40,3 +40,5 @@ A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate and pr
 ## First hosted-run repair
 
 The first `main` run after Milestone 12 exposed two ordering/namespace defects that local build-first validation could not reveal: rendered-output contracts executed before `dist/server/index.js` existed, and the member-export policy read `app.current_gym_id` while the shared tenant context writes `ironcore.current_gym_id`. Milestone 13 makes the verified build precede the portable contracts, aligns the export policy with the established fail-closed setting, removes an unsupported setup action input, and adds regression assertions for both contracts.
+
+The next hosted run passed the web job and then exposed a Laravel-only authentication boundary: Sanctum represents cookie-authenticated sessions with a non-persisted `TransientToken`. IronCore now treats only Eloquent-backed access tokens as bearer credentials when retaining or deleting a current token, while session credential rotation continues through `auth_version` and session regeneration.

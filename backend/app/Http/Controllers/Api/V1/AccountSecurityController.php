@@ -113,7 +113,7 @@ class AccountSecurityController extends Controller
     {
         /** @var User $requestUser */
         $requestUser = $request->user();
-        $currentTokenId = $requestUser->currentAccessToken()?->getKey();
+        $currentTokenId = $requestUser->currentPersonalAccessTokenId();
         $user = DB::transaction(function () use ($request, $requestUser, $currentTokenId): User {
             // Serialize credential changes for this identity so concurrent
             // requests cannot lose an authentication-generation increment.

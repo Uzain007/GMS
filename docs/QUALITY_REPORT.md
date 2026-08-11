@@ -211,3 +211,4 @@ This workspace cannot execute PHP, PostgreSQL or Redis. The first GitHub-hosted 
 - The backend failure is prevented by aligning member-export forced RLS with the shared `ironcore.current_gym_id` connection setting and fail-closed empty-string conversion.
 - Portable contracts now assert build-before-render ordering, reject the unsupported setup input and reject the incorrect export RLS namespace.
 - A new GitHub-hosted run remains the authoritative PHP/PostgreSQL/Redis result.
+- The second hosted run passed the complete web job and exposed a Sanctum runtime incompatibility in the backend: cookie-authenticated tests receive a non-persisted `TransientToken`, which has no Eloquent key. Credential rotation and logout now distinguish that session marker from stored bearer tokens, with a portable regression contract guarding every affected controller.

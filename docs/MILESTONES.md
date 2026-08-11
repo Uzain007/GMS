@@ -118,7 +118,8 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 13 — Hosted runtime-gate repair
 
-**Status: implementation complete; GitHub-hosted rerun pending**
+**Status: second runtime repair complete; GitHub-hosted rerun pending**
 - Build and artifact validation now run before contracts that import rendered worker output
 - Member-export forced RLS uses the shared `ironcore.current_gym_id` session setting with fail-closed empty handling
 - Unsupported PHP setup input removed and regression contracts added for workflow order and tenant-setting consistency
+- Cookie-authenticated Sanctum `TransientToken` instances no longer enter persisted bearer-token ID/deletion paths

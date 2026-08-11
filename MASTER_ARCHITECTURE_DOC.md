@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.18.0 — Milestone 13 hosted runtime-gate repair |
+| MAD version | 0.18.1 — Milestone 13 Sanctum runtime repair |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-13-ci-runtime-repair` |
-| Active milestone | Milestone 13 — implementation complete; repaired GitHub-hosted rerun pending |
+| Active branch | `fix/milestone-13-sanctum-runtime` |
+| Active milestone | Milestone 13 — Sanctum runtime repair complete; GitHub-hosted rerun pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -999,7 +999,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 11 — production CI runtime gate | First hosted run failed; repair implemented in M13 | Web rendered-output tests ran before the artifact existed; member-export RLS used a session-setting namespace inconsistent with `TenantContext` |
 | Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
 | Milestone 12 — member data export lifecycle | Implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending | Portable contracts pass locally; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
-| Milestone 13 — hosted runtime-gate repair | Implementation complete; hosted rerun pending | Web artifact now precedes rendered contracts, export RLS uses `ironcore.current_gym_id`, and the unsupported PHP-action input is removed; portable/build gates pass locally |
+| Milestone 13 — hosted runtime-gate repair | Second repair complete; hosted rerun pending | Web gate passes; export RLS uses `ironcore.current_gym_id`; cookie-authenticated Sanctum `TransientToken` is now distinguished from persisted bearer tokens during credential rotation |
 
 ## Change control
 

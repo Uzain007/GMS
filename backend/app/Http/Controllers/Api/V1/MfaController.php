@@ -83,7 +83,7 @@ class MfaController extends Controller
     ): JsonResponse {
         /** @var User $requestUser */
         $requestUser = $request->user();
-        $currentTokenId = $requestUser->currentAccessToken()?->getKey();
+        $currentTokenId = $requestUser->currentPersonalAccessTokenId();
 
         [$user, $recoveryCodes] = DB::transaction(function () use ($request, $requestUser, $currentTokenId, $totp, $mfa, $audit): array {
             $user = User::query()->lockForUpdate()->findOrFail($requestUser->getKey());
@@ -153,7 +153,7 @@ class MfaController extends Controller
     {
         /** @var User $requestUser */
         $requestUser = $request->user();
-        $currentTokenId = $requestUser->currentAccessToken()?->getKey();
+        $currentTokenId = $requestUser->currentPersonalAccessTokenId();
 
         $user = DB::transaction(function () use ($request, $requestUser, $currentTokenId, $mfa, $audit): User {
             $user = User::query()->lockForUpdate()->findOrFail($requestUser->getKey());

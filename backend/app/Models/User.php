@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\UserRole;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -41,6 +42,27 @@ class User extends Authenticatable
     public function mfaEnabled(): bool
     {
         return $this->mfa_secret !== null && $this->mfa_confirmed_at !== null;
+    }
+
+    public function currentPersonalAccessTokenId(): ?int
+    {
+        $token = $this->currentAccessToken();
+
+        // Sanctum assigns a non-persisted TransientToken to cookie-authenticated
+        // users. Only a stored token has an ID that can be retained during
+        // credential rotation; browser sessions intentionally return null.
+        return $token instanceof Model ? (int) $token->getKey() : null;
+    }
+
+    public function deleteCurrentPersonalAccessToken(): bool
+    {
+        $token = $this->currentAccessToken();
+
+        if (! $token instanceof Model) {
+            return false;
+        }
+
+        return (bool) $token->delete();
     }
 
     public function gyms(): BelongsToMany
