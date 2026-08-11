@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.11.0 — Milestone 6B dedicated gym-client portal foundation |
-| Last verified | 7 August 2026 |
+| MAD version | 0.12.0 — Milestone 7 linked-member self-service portal |
+| Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-6b-gym-client-portal` |
-| Active milestone | Milestone 6B — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
+| Active branch | `feature/milestone-7-member-portal-recovery` |
+| Active milestone | Milestone 7 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -714,6 +714,12 @@ All successful JSON payloads are versioned under `/api/v1`.
 | POST | `/gyms/{gym}/saas-subscription/checkout` | tenant; owner/super admin | Create or reuse an idempotent Stripe-hosted subscription Checkout session |
 | POST | `/gyms/{gym}/saas-subscription/portal` | tenant; owner/super admin | Create a short-lived Stripe customer-portal session for payment methods, invoices, plan changes and cancellation |
 | POST | `/gyms/{gym}/members/{member}/access-credential` | tenant; owner/manager/receptionist/super admin | Revoke the previous QR credential, issue a new opaque credential once and retain only its SHA-256 hash |
+| GET/PATCH | `/gyms/{gym}/member/me` | tenant; linked member self | Read or update only the authenticated user's linked member profile; updates are limited to name/contact/date-of-birth fields |
+| GET | `/gyms/{gym}/member/membership` | tenant; linked member self | Read the linked member's current membership with safe plan and branch summaries |
+| GET | `/gyms/{gym}/member/invoices` | tenant; linked member self | List only the linked member's bounded invoice history |
+| GET | `/gyms/{gym}/member/payments` | tenant; linked member self | List only the linked member's bounded payment history and safe refund evidence |
+| GET | `/gyms/{gym}/member/attendance` | tenant; linked member self | Cursor-list at most 90 days of the linked member's own attendance history |
+| GET/POST | `/gyms/{gym}/member/access-credential` | tenant; linked member self | Read safe pass metadata or rotate a one-time opaque QR value while retaining only its tenant-scoped SHA-256 digest |
 | GET | `/gyms/{gym}/attendance` | tenant; owner/manager/receptionist/trainer/super admin | Cursor-list a bounded, time-filtered branch attendance history |
 | POST | `/gyms/{gym}/attendance/check-ins` | tenant; owner/manager/receptionist/super admin | Admit an eligible member by QR credential, member code or selected member ID |
 | POST | `/gyms/{gym}/attendance/{attendance}/check-out` | tenant; owner/manager/receptionist/super admin | Close the selected tenant attendance row once |
@@ -812,7 +818,10 @@ member      = [self.read, self.update_limited, membership.self.read,
 - `NEXT_PUBLIC_IRONCORE_DEMO_MODE=true` (or an absent public API origin) renders representative preview data only. Configured API mode exposes only integrated live modules, so representative data is never presented as production tenant data.
 - Preview mode supplies isolated representative branches, plans and memberships to the same operational views while labelling them as preview records. Authenticated mode continues to construct these collections exclusively from the explicitly selected gym's bounded API responses.
 - Platform and gym-client portals use distinct landing views and role-aware navigation. The gym dashboard composes only collections already returned for the explicitly selected gym; its cards and navigation are presentational and never grant access or expand the server-authoritative permission scope.
-- Representative preview mode may switch between the platform and gym-client shells for product review. The switch is labelled as a preview, does not persist tenant data, and is unavailable as an authorization mechanism in configured API mode.
+- Linked members receive a dedicated mobile-first shell for their profile, current membership, billing history, own attendance, classes, training, progress, preferences and access pass. The server resolves every member identifier from the authenticated `user_id`; the client cannot choose or override that link.
+- A newly rotated QR credential exists in component memory only, is returned once, and is cleared on navigation away from the pass, reload, logout or tenant change. No offline cache contains the credential plaintext.
+- The install manifest provides standalone PWA presentation metadata only. IronCore deliberately defines no offline data cache until a separately reviewed encrypted/offline threat model exists.
+- Representative preview mode may switch between the platform, gym-client and member shells for product review. The switch is labelled as a preview, does not persist tenant data, and is unavailable as an authorization mechanism in configured API mode.
 
 ## Currency and money contract
 
@@ -885,6 +894,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Security, load and deployment preparation | Implemented; load/deployment gate pending | Named report/readiness throttles, generic PostgreSQL/Redis readiness, synthetic k6 probe, secret scan, deployment runbook and launch checklist |
 | Milestone 6A — reporting and operational hardening | Feature-complete; runtime/load gate pending | 40 static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass, including preview navigation and attendance layout regression coverage |
 | Milestone 6B — dedicated gym-client portal | Feature-complete; runtime gate pending | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
+| Linked member self-service API and least-privilege resources | Implemented; runtime gate pending | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
+| Milestone 7 — linked-member self-service portal | Feature-complete; runtime gate pending | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 
 ## Change control
 

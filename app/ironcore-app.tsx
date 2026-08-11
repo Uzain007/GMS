@@ -3,6 +3,7 @@
 import { ArrowRight, Building2, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IronCoreDashboard, type DashboardMember, type NewDashboardMember, type View } from "./ironcore-dashboard";
+import { MemberPortal, type MemberPortalData } from "./member-portal";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
 import type { SaasBillingData } from "./saas-billing-management";
 import type { EngagementData } from "./engagement-management";
@@ -46,6 +47,9 @@ import {
   type NewProgressMeasurement,
   type UpdateNotificationPreference,
   type ReportOverviewRecord,
+  type MemberSelfRecord,
+  type MemberSelfCredentialRecord,
+  type UpdateMemberSelf,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -57,6 +61,16 @@ type SaasState = { plans: SaasPlanRecord[]; subscription: GymSubscriptionRecord 
 type EngagementState = { attendance: AttendanceRecord[]; sessions: ClassSessionRecord[]; bookings: ClassBookingRecord[]; loading: boolean; error: string | null };
 type CoachingState = { assignments: TrainerAssignmentRecord[]; plans: WorkoutPlanRecord[]; sessions: WorkoutSessionRecord[]; measurements: ProgressMeasurementRecord[]; preference: NotificationPreferenceRecord | null; deliveries: NotificationDeliveryRecord[]; loading: boolean; error: string | null };
 type ReportState = { report: ReportOverviewRecord | null; from: string; to: string; currency: GymSummary["base_currency"]; loading: boolean; error: string | null };
+type MemberSelfState = {
+  profile: MemberSelfRecord | null;
+  membership: MembershipRecord | null;
+  invoices: InvoiceRecord[];
+  payments: PaymentRecord[];
+  attendance: AttendanceRecord[];
+  credential: MemberSelfCredentialRecord | null;
+  loading: boolean;
+  error: string | null;
+};
 
 const apiOrigin = process.env.NEXT_PUBLIC_IRONCORE_API_URL?.trim() ?? "";
 const demoMode = process.env.NEXT_PUBLIC_IRONCORE_DEMO_MODE === "true" || !apiOrigin;
@@ -181,6 +195,31 @@ const demoCoaching: CoachingData = {
   onLogSession: async () => undefined, onRecordProgress: async () => undefined, onUpdatePreference: async () => undefined,
 };
 
+const demoMemberPortal: MemberPortalData = {
+  gym: { id: "demo-gym", name: "Forge Fitness", base_currency: "GBP", timezone: "Europe/London" },
+  profile: { member_number: "MBR-1042", first_name: "Amelia", last_name: "Hart", email: "amelia@example.com", phone: "+44 7700 900142", date_of_birth: "1996-04-18", status: "active", joined_at: "2026-08-04" },
+  membership: { id: "demo-membership-1", gym_id: "demo-gym", member_id: "demo-1", plan_id: "demo-plan-1", branch_id: "demo-branch-1", status: "active", starts_at: "2026-08-01", ends_at: null, next_billing_at: "2026-09-01", price_amount_minor: 8900, currency: "GBP", joining_fee_minor: 0, billing_interval: "monthly", interval_count: 1, auto_renew: true, plan: { id: "demo-plan-1", name: "Unlimited", code: "UNLIMITED" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, created_at: "2026-08-01T09:00:00Z" },
+  invoices: [],
+  payments: [],
+  attendance: demoEngagement.attendance.slice(0, 1),
+  classes: demoEngagement.sessions,
+  bookings: demoEngagement.bookings.filter((booking) => booking.member_id === "demo-1"),
+  workoutPlans: demoCoaching.plans,
+  workoutSessions: demoCoaching.sessions,
+  measurements: demoCoaching.measurements,
+  preference: demoCoaching.preference,
+  credential: { credential_hint: "6A10", status: "active", expires_at: null, last_used_at: null, created_at: "2026-08-07T12:00:00Z" },
+  loading: false,
+  error: null,
+};
+
+function demoCredential(): MemberSelfCredentialRecord {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto?.getRandomValues(bytes);
+  const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { credential_hint: value.slice(-4).toUpperCase(), status: "active", expires_at: null, last_used_at: null, created_at: new Date().toISOString(), credential: `icqr_demo_${value}` };
+}
+
 function isoDate(date: Date): string { return date.toISOString().slice(0, 10); }
 
 function initialReportRange(): { from: string; to: string } {
@@ -289,7 +328,7 @@ function TenantPicker({ user, gyms, notice, onSelect, onLogout }: { user: Authen
 export function IronCoreApp() {
   const api = useMemo(() => demoMode ? null : new IronCoreApi(apiOrigin), []);
   const defaultReportRange = useMemo(() => initialReportRange(), []);
-  const [demoPortal, setDemoPortal] = useState<"platform" | "gym">("platform");
+  const [demoPortal, setDemoPortal] = useState<"platform" | "gym" | "member">("platform");
   const [phase, setPhase] = useState<"booting" | "anonymous" | "authenticated">(demoMode ? "authenticated" : "booting");
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [gyms, setGyms] = useState<GymAccess[]>([]);
@@ -311,6 +350,8 @@ export function IronCoreApp() {
   const [engagementRefresh, setEngagementRefresh] = useState(0);
   const [coaching, setCoaching] = useState<CoachingState>({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null });
   const [coachingRefresh, setCoachingRefresh] = useState(0);
+  const [memberSelf, setMemberSelf] = useState<MemberSelfState>({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null });
+  const [memberSelfRefresh, setMemberSelfRefresh] = useState(0);
   const [reports, setReports] = useState<ReportState>(() => ({
     report: demoMode ? buildDemoReport(defaultReportRange.from, defaultReportRange.to, "GBP") : null,
     ...defaultReportRange,
@@ -328,6 +369,7 @@ export function IronCoreApp() {
   const engagementSequence = useRef(0);
   const coachingSequence = useRef(0);
   const reportSequence = useRef(0);
+  const memberSelfSequence = useRef(0);
 
   const loadSession = useCallback(async () => {
     if (!api) return;
@@ -525,6 +567,31 @@ export function IronCoreApp() {
   }, [api, coachingRefresh, selectedGym]);
 
   useEffect(() => {
+    if (!api || !selectedGym || selectedGym.role !== "member") return;
+    const sequence = ++memberSelfSequence.current;
+    const timer = window.setTimeout(() => {
+      setMemberSelf((current) => ({ ...current, loading: true, error: null }));
+      // These endpoints resolve the authenticated user-to-member link on the
+      // server. The browser never supplies a member identifier or tenant data.
+      void Promise.all([
+        api.memberSelfProfile(selectedGym.id),
+        api.memberSelfMembership(selectedGym.id),
+        api.memberSelfInvoices(selectedGym.id),
+        api.memberSelfPayments(selectedGym.id),
+        api.memberSelfAttendance(selectedGym.id),
+        api.memberSelfCredential(selectedGym.id),
+      ]).then(([profile, membership, invoices, payments, attendance, credential]) => {
+        if (sequence !== memberSelfSequence.current) return;
+        setMemberSelf({ profile, membership, invoices: invoices.data, payments: payments.data, attendance, credential, loading: false, error: null });
+      }).catch((error) => {
+        if (sequence !== memberSelfSequence.current) return;
+        setMemberSelf((current) => ({ ...current, loading: false, error: apiMessage(error, "Your member space could not be loaded.") }));
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [api, memberSelfRefresh, selectedGym]);
+
+  useEffect(() => {
     if (!api || !selectedGym || !["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role)) return;
     const sequence = ++reportSequence.current;
     const timer = window.setTimeout(() => {
@@ -553,7 +620,8 @@ export function IronCoreApp() {
   async function logout() {
     if (api) await api.logout().catch(() => undefined);
     reportSequence.current += 1;
-    setUser(null); setGyms([]); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", loading: false, error: null }); setPhase("anonymous");
+    memberSelfSequence.current += 1;
+    setUser(null); setGyms([]); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", loading: false, error: null }); setPhase("anonymous");
   }
 
   function selectGym(gym: GymAccess | null) {
@@ -566,6 +634,8 @@ export function IronCoreApp() {
     setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null });
     setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null });
     setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null });
+    memberSelfSequence.current += 1;
+    setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null });
     reportSequence.current += 1;
     setReports((current) => ({ ...current, report: null, currency: gym?.base_currency ?? "GBP", loading: false, error: null }));
     setSelectedGym(gym);
@@ -660,6 +730,20 @@ export function IronCoreApp() {
   async function attendBooking(bookingId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.attendClassBooking(selectedGym.id, bookingId); setEngagementRefresh((value) => value + 1); }
   async function issueCredential(memberId: string): Promise<string> { if (!api || !selectedGym) throw new Error("Select a gym first."); const result = await api.issueMemberAccessCredential(selectedGym.id, memberId); if (!result.credential) throw new Error("The one-time QR credential was not returned."); return result.credential; }
 
+  async function updateMemberSelfProfile(input: UpdateMemberSelf): Promise<void> {
+    if (!api || !selectedGym || selectedGym.role !== "member") throw new Error("Select your member workspace first.");
+    const profile = await api.updateMemberSelfProfile(selectedGym.id, input);
+    setMemberSelf((current) => ({ ...current, profile }));
+  }
+
+  async function rotateMemberSelfCredential(): Promise<MemberSelfCredentialRecord> {
+    if (!api || !selectedGym || selectedGym.role !== "member") throw new Error("Select your member workspace first.");
+    const result = await api.rotateMemberSelfCredential(selectedGym.id);
+    const safeMetadata: MemberSelfCredentialRecord = { credential_hint: result.credential_hint, status: result.status, expires_at: result.expires_at, last_used_at: result.last_used_at, created_at: result.created_at };
+    setMemberSelf((current) => ({ ...current, credential: safeMetadata }));
+    return result;
+  }
+
   async function assignTrainer(input: NewTrainerAssignment): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     await api.createTrainerAssignment(selectedGym.id, input);
@@ -721,6 +805,19 @@ export function IronCoreApp() {
 
   if (demoMode) {
     const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
+    if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
+      onReload: () => undefined,
+      onLogout: () => setDemoPortal("platform"),
+      onPortalSwitch: () => setDemoPortal("platform"),
+      portalSwitchLabel: "Back to Super Admin",
+      onUpdateProfile: async () => undefined,
+      onRotateCredential: async () => demoCredential(),
+      onBookClass: async () => undefined,
+      onCancelBooking: async () => undefined,
+      onLogWorkout: async () => undefined,
+      onRecordProgress: async () => undefined,
+      onUpdatePreferences: async () => undefined,
+    }} />;
     if (demoPortal === "gym") return <IronCoreDashboard key="gym-preview"
       {...sharedPreview}
       portalMode="gym"
@@ -730,8 +827,8 @@ export function IronCoreApp() {
       liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined }}
       liveSaasBilling={{ ...demoSaasBilling, actorRole: "gym_owner" }}
       tenantViews={["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", "coaching", "payments", "billing", "reports", "staff"]}
-      onPortalSwitch={() => setDemoPortal("platform")}
-      portalSwitchLabel="Back to Super Admin"
+      onPortalSwitch={() => setDemoPortal("member")}
+      portalSwitchLabel="Preview member portal"
     />;
     return <IronCoreDashboard key="platform-preview"
       {...sharedPreview}
@@ -744,6 +841,31 @@ export function IronCoreApp() {
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
   if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} busy={authBusy} error={authError} />;
   if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} />;
+  if (selectedGym.role === "member") {
+    const memberPortalData: MemberPortalData = {
+      gym: selectedGym,
+      ...memberSelf,
+      classes: engagement.sessions,
+      bookings: engagement.bookings,
+      workoutPlans: coaching.plans,
+      workoutSessions: coaching.sessions,
+      measurements: coaching.measurements,
+      preference: coaching.preference,
+      loading: memberSelf.loading || engagement.loading || coaching.loading,
+      error: memberSelf.error ?? engagement.error ?? coaching.error,
+    };
+    return <MemberPortal data={memberPortalData} actions={{
+      onReload: () => { setMemberSelfRefresh((value) => value + 1); setEngagementRefresh((value) => value + 1); setCoachingRefresh((value) => value + 1); },
+      onLogout: logout,
+      onUpdateProfile: updateMemberSelfProfile,
+      onRotateCredential: rotateMemberSelfCredential,
+      onBookClass: async (sessionId) => { await bookClass(sessionId); },
+      onCancelBooking: cancelBooking,
+      onLogWorkout: logWorkoutSession,
+      onRecordProgress: recordProgress,
+      onUpdatePreferences: updateNotificationPreference,
+    }} />;
+  }
 
   const setupRoles: IronCoreRole[] = ["super_admin", "gym_owner", "gym_manager"];
   const membershipRoles: IronCoreRole[] = [...setupRoles, "receptionist"];

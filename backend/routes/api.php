@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\MemberController;
 use App\Http\Controllers\Api\V1\MemberImportController;
+use App\Http\Controllers\Api\V1\MemberSelfServiceController;
 use App\Http\Controllers\Api\V1\MembershipController;
 use App\Http\Controllers\Api\V1\MembershipPlanController;
 use App\Http\Controllers\Api\V1\NotificationController;
@@ -69,6 +70,17 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('role:super_admin,gym_owner,gym_manager');
 
             Route::prefix('/gyms/{gym}')->group(function (): void {
+                // Member self-service never accepts a member UUID. Every
+                // action resolves the profile linked to the authenticated user.
+                Route::get('/member/me', [MemberSelfServiceController::class, 'show'])->middleware('role:member');
+                Route::patch('/member/me', [MemberSelfServiceController::class, 'update'])->middleware('role:member');
+                Route::get('/member/membership', [MemberSelfServiceController::class, 'membership'])->middleware('role:member');
+                Route::get('/member/invoices', [MemberSelfServiceController::class, 'invoices'])->middleware('role:member');
+                Route::get('/member/payments', [MemberSelfServiceController::class, 'payments'])->middleware('role:member');
+                Route::get('/member/attendance', [MemberSelfServiceController::class, 'attendance'])->middleware('role:member');
+                Route::get('/member/access-credential', [MemberSelfServiceController::class, 'credential'])->middleware('role:member');
+                Route::post('/member/access-credential', [MemberSelfServiceController::class, 'rotateCredential'])->middleware('role:member');
+
                 Route::get('/branches', [BranchController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer,member');
                 Route::post('/branches', [BranchController::class, 'store'])

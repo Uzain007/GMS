@@ -29,6 +29,15 @@ class MembershipResource extends JsonResource
             'cancelled_at' => $this->cancelled_at?->toIso8601String(),
             'cancellation_reason' => $this->cancellation_reason,
             'terms_snapshot' => $this->terms_snapshot,
+            'plan' => $this->whenLoaded('plan', fn () => [
+                'id' => $this->plan->id,
+                'name' => $this->plan->name,
+                'code' => $this->plan->code,
+            ]),
+            'branch' => $this->whenLoaded('branch', fn () => [
+                'id' => $this->branch->id,
+                'name' => $this->branch->name,
+            ]),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
