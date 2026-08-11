@@ -26,6 +26,8 @@ The roles are `super_admin`, `gym_owner`, `gym_manager`, `receptionist`, `traine
 
 Password recovery is non-enumerating and queued before account lookup. Reset values are broker-hashed at rest and delivered only through a frontend URL fragment that the browser removes immediately. Password resets and authenticated changes advance a row-locked `users.auth_version`; stateful sessions must match that generation before tenant identity is bound, while Sanctum bearer credentials are revoked explicitly.
 
+Optional MFA belongs to the platform user rather than a gym. TOTP secrets use Laravel's encrypted cast, accepted 30-second counters advance under a user row lock, and recovery codes are retained only as application-keyed digests. Correct primary credentials for an enrolled user create a short-lived, attempt-bounded Redis challenge; login, password recovery and member activation cannot create a session until the second factor succeeds.
+
 ## Currency rules
 
 Supported currencies are GBP, USD, PKR, AED and SAR. Each gym has one base currency. A user may change their display currency, but every financial record stores its original amount, ISO currency, provider amount, fees and settlement currency. Historical transactions are never silently recalculated when exchange rates change.
@@ -38,7 +40,7 @@ Member payments and IronCore SaaS subscriptions are separate ledgers. Webhooks a
 
 The initial target is 100 gyms and up to 1,000,000 member records. IronCore begins as a modular monolith so core transactions remain simple and reliable. Stateless web/API instances scale horizontally, while queues absorb imports, notifications, reports and provider callbacks.
 
-The current backend includes account recovery and credential revocation, branch/member/staff operations, role-safe invitations, immutable membership contracts, queued imports, separate member-payment and SaaS-billing ledgers, attendance/classes, assignment-bound coaching, append-only workout/progress history and tenant-bound notification jobs. Milestone 6 adds reporting, measured load/security hardening and production deployment operations.
+The current backend includes account recovery, credential revocation, optional MFA, branch/member/staff operations, role-safe invitations, immutable membership contracts, queued imports, separate member-payment and SaaS-billing ledgers, attendance/classes, assignment-bound coaching, append-only workout/progress history and tenant-bound notification jobs. Milestone 6 adds reporting, measured load/security hardening and production deployment operations.
 
 ## Reporting and operational readiness
 

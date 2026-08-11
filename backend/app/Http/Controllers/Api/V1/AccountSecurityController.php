@@ -8,6 +8,7 @@ use App\Http\Requests\ForgotPasswordRequest;
 use App\Http\Requests\ResetPasswordRequest;
 use App\Jobs\SendPasswordResetLink;
 use App\Models\User;
+use App\Services\MfaChallengeService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,7 +32,7 @@ class AccountSecurityController extends Controller
         ], 202);
     }
 
-    public function resetPassword(ResetPasswordRequest $request): JsonResponse
+    public function resetPassword(ResetPasswordRequest $request, MfaChallengeService $mfaChallenges): JsonResponse
     {
         if (! $request->hasSession()) {
             return response()->json([
@@ -39,9 +40,10 @@ class AccountSecurityController extends Controller
             ], 400);
         }
 
+        $resetUser = null;
         $status = Password::reset(
             $request->safe()->only(['email', 'password', 'password_confirmation', 'token']),
-            function (User $user, string $password) use ($request): void {
+            function (User $user, string $password) use (&$resetUser): void {
                 $resetUser = DB::transaction(function () use ($user, $password): User {
                     $resetTokenTable = (string) config('auth.passwords.users.table', 'password_reset_tokens');
                     $resetToken = DB::table($resetTokenTable)
@@ -73,9 +75,6 @@ class AccountSecurityController extends Controller
                 });
 
                 event(new PasswordReset($resetUser));
-                Auth::guard('web')->login($resetUser);
-                $request->session()->regenerate();
-                $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $resetUser->auth_version);
             },
         );
 
@@ -84,6 +83,25 @@ class AccountSecurityController extends Controller
                 'token' => ['This password reset link is invalid or has expired.'],
             ]);
         }
+
+        if (! $resetUser instanceof User) {
+            throw ValidationException::withMessages([
+                'token' => ['This password reset link is invalid or has expired.'],
+            ]);
+        }
+
+        if ($resetUser->mfaEnabled()) {
+            // Email recovery replaces the password but never downgrades an
+            // enrolled second factor or silently creates a full session.
+            return response()->json([
+                'data' => $mfaChallenges->create($resetUser),
+                'message' => 'Your password was reset. Enter your authentication code to continue.',
+            ], 202)->withHeaders(['Cache-Control' => 'no-store', 'Pragma' => 'no-cache']);
+        }
+
+        Auth::guard('web')->login($resetUser);
+        $request->session()->regenerate();
+        $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $resetUser->auth_version);
 
         return response()->json([
             'data' => ['authentication' => 'session'],

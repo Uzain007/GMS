@@ -9,6 +9,7 @@ use App\Models\Gym;
 use App\Models\User;
 use App\Models\MemberAccountInvitation;
 use App\Services\MemberAccountInvitationService;
+use App\Services\MfaChallengeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -53,6 +54,7 @@ class MemberAccountInvitationController extends Controller
         Request $request,
         Gym $gym,
         MemberAccountInvitationService $service,
+        MfaChallengeService $mfaChallenges,
     ): JsonResponse {
         $data = $request->validate(['token' => ['required', 'string', 'size:64']]);
 
@@ -75,6 +77,15 @@ class MemberAccountInvitationController extends Controller
             'password' => ['nullable', 'string', 'min:12', 'max:255', 'confirmed'],
         ]);
         $user = $service->accept($gym, $data['token'], $data['password'] ?? null, $request);
+
+        if ($user->mfaEnabled()) {
+            // The one-time member invitation may link an existing account, but
+            // it never bypasses that identity's already-confirmed second factor.
+            return response()->json([
+                'data' => $mfaChallenges->create($user),
+                'message' => 'The member account was linked. Enter your authentication code to continue.',
+            ], 202)->withHeaders(['Cache-Control' => 'no-store', 'Pragma' => 'no-cache']);
+        }
 
         Auth::guard('web')->login($user);
         $request->session()->regenerate();

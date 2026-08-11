@@ -85,3 +85,14 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Monotonic session-generation checks across Redis/database sessions and explicit Sanctum token revocation
 - Fragment-only reset handoff with immediate browser-address cleanup and no credential persistence
 - Row-locked credential changes, 50 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass
+
+## Milestone 10 — Multi-factor authentication
+
+**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+- Optional RFC 6238 authenticator MFA for every platform, tenant-staff and member identity
+- Encrypted 160-bit secrets, row-locked non-replayed TOTP counters and eight one-time recovery codes
+- Application-keyed recovery-code digests with one-time plaintext enrollment/regeneration responses
+- Five-minute, five-attempt Redis login challenges that bind the user's current authentication generation
+- MFA enforcement across password login, password-reset completion and existing-member activation
+- Account-security management for enrollment QR, recovery-code replacement and protected disablement
+- 54 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA

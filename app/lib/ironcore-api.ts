@@ -14,6 +14,23 @@ export type AuthenticatedUser = {
   gyms: Array<{ id: string; name: string; role: IronCoreRole }>;
 };
 
+export type MfaChallenge = {
+  authentication: "mfa_challenge";
+  mfa_required: true;
+  challenge_token: string;
+  expires_in: number;
+};
+
+export type SessionAuthentication = {
+  authentication: "session";
+  user: AuthenticatedUser;
+};
+
+export type AuthenticationResult = SessionAuthentication | MfaChallenge;
+export type MfaStatus = { enabled: boolean; setup_pending: boolean; confirmed_at: string | null; recovery_codes_remaining: number };
+export type MfaSetup = { secret: string; otpauth_uri: string; issuer: string; account: string };
+export type MfaRecoveryCodes = { recovery_codes: string[]; recovery_codes_remaining: number };
+
 export type GymSummary = {
   id: string;
   name: string;
@@ -210,16 +227,27 @@ export class IronCoreApi {
     await this.request<void>("/sanctum/csrf-cookie");
   }
 
-  async login(email: string, password: string): Promise<AuthenticatedUser> {
+  async login(email: string, password: string): Promise<AuthenticationResult> {
     await this.csrf();
-    const response = await this.request<ApiEnvelope<{ user: AuthenticatedUser }>>(
+    const response = await this.request<ApiEnvelope<AuthenticationResult>>(
       "/api/v1/auth/login",
       {
         method: "POST",
         body: JSON.stringify({ email, password, use_bearer_token: false }),
       },
     );
-    return response.data.user;
+    return response.data;
+  }
+
+  async verifyMfaChallenge(challengeToken: string, value: string, recovery = false): Promise<SessionAuthentication> {
+    await this.csrf();
+    const response = await this.request<ApiEnvelope<SessionAuthentication>>("/api/v1/auth/mfa/challenge", {
+      method: "POST",
+      body: JSON.stringify(recovery
+        ? { challenge_token: challengeToken, recovery_code: value }
+        : { challenge_token: challengeToken, code: value }),
+    });
+    return response.data;
   }
 
   async requestPasswordReset(email: string): Promise<void> {
@@ -230,12 +258,12 @@ export class IronCoreApi {
     });
   }
 
-  async resetPassword(email: string, token: string, password: string): Promise<void> {
+  async resetPassword(email: string, token: string, password: string): Promise<AuthenticationResult> {
     await this.csrf();
-    await this.request<ApiEnvelope<{ authentication: "session" }>>("/api/v1/auth/reset-password", {
+    return (await this.request<ApiEnvelope<AuthenticationResult>>("/api/v1/auth/reset-password", {
       method: "POST",
       body: JSON.stringify({ email, token, password, password_confirmation: password }),
-    });
+    })).data;
   }
 
   async changePassword(currentPassword: string, password: string): Promise<void> {
@@ -243,6 +271,44 @@ export class IronCoreApi {
     await this.request<{ message: string }>("/api/v1/auth/password", {
       method: "PATCH",
       body: JSON.stringify({ current_password: currentPassword, password, password_confirmation: password }),
+    });
+  }
+
+  async mfaStatus(): Promise<MfaStatus> {
+    return (await this.request<ApiEnvelope<MfaStatus>>("/api/v1/auth/mfa")).data;
+  }
+
+  async beginMfaSetup(currentPassword: string): Promise<MfaSetup> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MfaSetup>>("/api/v1/auth/mfa/setup", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword }),
+    })).data;
+  }
+
+  async confirmMfaSetup(code: string): Promise<MfaRecoveryCodes & { enabled: true }> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MfaRecoveryCodes & { enabled: true }>>("/api/v1/auth/mfa/confirm", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    })).data;
+  }
+
+  async regenerateMfaRecoveryCodes(currentPassword: string, code: string): Promise<MfaRecoveryCodes> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MfaRecoveryCodes>>("/api/v1/auth/mfa/recovery-codes", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, code }),
+    })).data;
+  }
+
+  async disableMfa(currentPassword: string, value: string, recovery = false): Promise<void> {
+    await this.csrf();
+    await this.request<{ message: string }>("/api/v1/auth/mfa", {
+      method: "DELETE",
+      body: JSON.stringify(recovery
+        ? { current_password: currentPassword, recovery_code: value }
+        : { current_password: currentPassword, code: value }),
     });
   }
 
@@ -296,13 +362,13 @@ export class IronCoreApi {
     )).data;
   }
 
-  async acceptMemberAccountActivation(gymId: string, token: string, password?: string): Promise<AuthenticatedUser> {
+  async acceptMemberAccountActivation(gymId: string, token: string, password?: string): Promise<AuthenticationResult> {
     await this.csrf();
     const payload = password ? { token, password, password_confirmation: password } : { token };
-    return (await this.request<ApiEnvelope<{ user: AuthenticatedUser }>>(
+    return (await this.request<ApiEnvelope<AuthenticationResult>>(
       `/api/v1/gyms/${encodeURIComponent(gymId)}/member-account-invitations/accept`,
       { method: "POST", body: JSON.stringify(payload) },
-    )).data.user;
+    )).data;
   }
 
   private tenantCollection<T>(gymId: string, resource: string): Promise<Paginated<T>> {

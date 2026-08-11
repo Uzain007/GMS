@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\MemberImportController;
 use App\Http\Controllers\Api\V1\MemberSelfServiceController;
 use App\Http\Controllers\Api\V1\MembershipController;
 use App\Http\Controllers\Api\V1\MembershipPlanController;
+use App\Http\Controllers\Api\V1\MfaController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentGatewayController;
@@ -44,12 +45,18 @@ Route::prefix('v1')->group(function (): void {
 
     Route::prefix('auth')->group(function (): void {
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+        Route::post('/mfa/challenge', [MfaController::class, 'challenge'])->middleware('throttle:mfa-challenge');
         Route::post('/forgot-password', [AccountSecurityController::class, 'forgotPassword'])->middleware('throttle:recovery');
         Route::post('/reset-password', [AccountSecurityController::class, 'resetPassword'])->middleware('throttle:recovery');
         Route::middleware(['auth:sanctum', 'auth.version', 'database.identity'])->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::patch('/password', [AccountSecurityController::class, 'changePassword']);
+            Route::get('/mfa', [MfaController::class, 'status'])->middleware('throttle:mfa-management');
+            Route::post('/mfa/setup', [MfaController::class, 'setup'])->middleware('throttle:mfa-management');
+            Route::post('/mfa/confirm', [MfaController::class, 'confirm'])->middleware('throttle:mfa-management');
+            Route::post('/mfa/recovery-codes', [MfaController::class, 'regenerateRecoveryCodes'])->middleware('throttle:mfa-management');
+            Route::delete('/mfa', [MfaController::class, 'destroy'])->middleware('throttle:mfa-management');
         });
     });
 

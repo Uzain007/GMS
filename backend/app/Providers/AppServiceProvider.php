@@ -26,6 +26,15 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(5)->by(mb_strtolower((string) $request->input('email')).'|'.$request->ip()),
         ]);
 
+        RateLimiter::for('mfa-challenge', fn (Request $request) => [
+            // The opaque challenge never appears in limiter storage or logs.
+            Limit::perMinute(10)->by(hash('sha256', (string) $request->input('challenge_token')).'|'.$request->ip()),
+        ]);
+
+        RateLimiter::for('mfa-management', fn (Request $request) => [
+            Limit::perMinute(10)->by((string) $request->user()?->getAuthIdentifier().'|'.$request->ip()),
+        ]);
+
         ResetPassword::createUrlUsing(function (object $notifiable, string $token): string {
             $frontend = rtrim((string) config('app.frontend_url'), '/');
             $email = rawurlencode((string) $notifiable->getEmailForPasswordReset());

@@ -35,6 +35,8 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Safe account creation or existing-account linking, role-collision guards and regenerated member sessions
 - Non-enumerating queued password recovery with broker-hashed, fragment-only reset values
 - Strong password changes, row-locked credential rotation and cross-driver stale-session revocation
+- Optional authenticator MFA with encrypted secrets, non-replayed TOTP steps and one-time HMAC-only recovery codes
+- Five-minute Redis MFA challenges across login, password reset and existing-member activation
 - Generic PostgreSQL/Redis readiness, a synthetic k6 report probe and committed secret scan
 - Production deployment runbook, security launch checklist and recovery/monitoring gates
 - Product architecture, phased delivery plan and environment template
@@ -76,7 +78,7 @@ npm test
 - `docs/DEPLOYMENT_RUNBOOK.md` — production release, rollback, recovery and monitoring procedure
 - `docs/SECURITY_LAUNCH_CHECKLIST.md` — evidence-based production security gates
 - `docs/MEMBER_ACCOUNT_ACTIVATION.md` — invitation operations, threat boundaries and runtime gate
-- `docs/ACCOUNT_SECURITY.md` — password recovery, change and session-revocation contract
+- `docs/ACCOUNT_SECURITY.md` — password recovery, session revocation, authenticator MFA and recovery-code contract
 - `.env.example` — non-secret environment template
 - `backend/` — Laravel API, PostgreSQL migrations, authentication and tenancy
 - `docker-compose.yml` — local PostgreSQL, Redis and API services

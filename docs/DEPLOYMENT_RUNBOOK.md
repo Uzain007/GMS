@@ -21,7 +21,7 @@ This runbook targets a production topology with a separately deployed web app, L
 6. Deploy the API, queue workers and scheduler from the same release. Run `php artisan config:cache`, `route:cache` and `view:cache` during image/release preparation.
 7. Restart queue workers with `php artisan queue:restart`, then shift traffic only after `/up` and `/api/v1/health/readiness` pass.
 8. Deploy the frontend with the exact production API origin. Verify Sanctum stateful domains, CORS, secure cookies and the shared HTTPS parent domain.
-9. Exercise login, password recovery through the default Redis queue and mail sandbox, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
+9. Exercise login, password recovery through the default Redis queue and mail sandbox, MFA enrollment/challenge/recovery on the shared Redis cache, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
 10. Watch error rate, queue age, failed jobs, database saturation and webhook failures through the rollback window.
 
 ## Required production environment

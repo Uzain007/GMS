@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Models\User;
+use App\Services\MfaChallengeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,7 +14,7 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function login(LoginRequest $request): JsonResponse
+    public function login(LoginRequest $request, MfaChallengeService $mfaChallenges): JsonResponse
     {
         $usesBearerToken = $request->boolean('use_bearer_token');
         if (! $usesBearerToken && ! $request->hasSession()) {
@@ -32,8 +33,17 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
         }
 
+        $deviceName = (string) $request->string('device_name', 'native-client');
+        if ($user->mfaEnabled()) {
+            // Correct primary credentials do not establish authentication for
+            // an MFA-enabled identity. Only the short-lived opaque challenge is
+            // returned, with no user/tenant data to persist in the browser.
+            return response()->json([
+                'data' => $mfaChallenges->create($user, $usesBearerToken, $deviceName),
+            ], 202)->withHeaders(['Cache-Control' => 'no-store', 'Pragma' => 'no-cache']);
+        }
+
         if ($usesBearerToken) {
-            $deviceName = (string) $request->string('device_name', 'native-client');
             $user->tokens()->where('name', $deviceName)->delete();
             $token = $user->createToken($deviceName, ['app:use'])->plainTextToken;
 

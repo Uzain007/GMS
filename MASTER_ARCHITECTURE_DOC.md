@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.14.0 — Milestone 9 account security and recovery |
+| MAD version | 0.15.0 — Milestone 10 multi-factor authentication |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-9-account-security` |
-| Active milestone | Milestone 9 — feature-complete; Laravel/PostgreSQL/Redis/mail runtime gate pending |
+| Active branch | `feature/milestone-10-mfa` |
+| Active milestone | Milestone 10 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -82,6 +82,9 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | `email_verified_at` | timestamp | yes | — |
 | `password` | varchar | no | hashed cast |
 | `auth_version` | unsigned integer | no | default 1; monotonic server-side session revocation generation |
+| `mfa_secret` | encrypted text | yes | 160-bit Base32 TOTP secret; present during pending setup and never returned after confirmation |
+| `mfa_confirmed_at` | timestamp | yes | non-null only after a valid authenticator code confirms enrollment |
+| `mfa_last_used_step` | unsigned bigint | yes | highest accepted 30-second TOTP counter; prevents same-code replay under a row lock |
 | `platform_role` | varchar(40) | yes | index; only `super_admin` is currently valid |
 | `remember_token` | varchar(100) | yes | — |
 | `created_at`, `updated_at` | timestamp | yes | Laravel timestamps |
@@ -146,6 +149,18 @@ Indexes: primary `(gym_id, user_id)`, `(gym_id, role, status)`, `(user_id, statu
 | `last_used_at` | timestamp | yes | — |
 | `expires_at` | timestamp | yes | index |
 | `created_at`, `updated_at` | timestamp | yes | — |
+
+### `user_mfa_recovery_codes` — platform authentication recovery
+
+| Column | Type | Null | Constraints / index |
+| --- | --- | --- | --- |
+| `id` | uuid | no | primary key |
+| `user_id` | uuid | no | FK `users.id` cascade delete; index `(user_id, used_at)` |
+| `code_hash` | char(64) | no | application-keyed HMAC-SHA-256; unique `(user_id, code_hash)` |
+| `used_at` | timestamp | yes | set once under a row lock when the recovery code authenticates |
+| `created_at`, `updated_at` | timestamp | yes | — |
+
+Recovery-code plaintext is returned only in the enrollment/regeneration response, is never logged or persisted by the browser, and cannot be recovered from the database. The table is platform-owned and therefore has no `gym_id`.
 
 ### `audit_logs` — immutable security and change evidence
 
@@ -650,10 +665,18 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `failed_jobs` uses Laravel's UUID, connection, queue, payload, exception and failure timestamp schema.
 - Active jobs remain in Redis. Queue payloads contain immutable `gym_id` and record IDs; jobs establish and clear tenant context themselves.
 
+### MFA login challenge cache
+
+- A correct password for an MFA-enabled account creates a 256-bit opaque challenge returned only in the JSON response and held only in browser component memory.
+- Redis stores the challenge for at most five minutes under `ironcore:auth:mfa:challenge:{sha256(challenge)}` with user ID, current `auth_version`, requested authentication mode, bounded device name, expiry and failed-attempt count.
+- The plaintext challenge is never a cache key or database value. Verification is serialized with a cache lock, limited to five failed codes and deleted before a session or bearer token is issued.
+- Password reset, MFA enablement/disablement and any other authentication-generation change invalidate older challenges because the cached generation must equal the locked user row.
+
 ## Active relationships
 
 - `Gym belongsToMany User` through `gym_user` with `role`, `status`, `joined_at` and timestamps.
 - `User belongsToMany Gym` through `gym_user`.
+- `User hasMany UserMfaRecoveryCode`; recovery rows are platform-owned one-time authentication evidence and never tenant data.
 - `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan` and `MemberImport`.
 - `GymBranch belongsTo Gym` and has many home members and branch-specific membership plans.
 - `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships.
@@ -692,10 +715,16 @@ All successful JSON payloads are versioned under `/api/v1`.
 | Method | Endpoint | Middleware / permission | Purpose |
 | --- | --- | --- | --- |
 | POST | `/auth/login` | login throttle + stateful Sanctum middleware for browser origins | Start an encrypted server-side web session by default; issue a scoped bearer token only when a native client explicitly sends `use_bearer_token: true` |
+| POST | `/auth/mfa/challenge` | public MFA-challenge throttle; opaque five-minute challenge | Complete a pending login with one non-replayed TOTP value or consume one recovery code before any session/token is issued |
 | POST | `/auth/forgot-password` | recovery throttle; public | Always acknowledge a syntactically valid normalized email identically, while Laravel conditionally sends a one-time reset fragment |
 | POST | `/auth/reset-password` | recovery throttle + stateful browser origin | Consume a valid one-time reset token, replace the password, advance `auth_version`, revoke all bearer tokens and start one regenerated web session |
 | GET | `/auth/me` | `auth:sanctum`, authentication-version gate, database identity | Return authenticated identity and active gym roles |
 | PATCH | `/auth/password` | `auth:sanctum`, authentication-version gate, database identity | Verify the current password, replace it, advance `auth_version`, revoke other credentials and retain only the current authenticated context |
+| GET | `/auth/mfa` | `auth:sanctum`, authentication-version gate, database identity | Return only MFA enabled/pending state, confirmation time and remaining recovery-code count |
+| POST | `/auth/mfa/setup` | authenticated + MFA-management throttle + current password | Replace a pending unconfirmed secret and return its Base32/otpauth values once; an enabled factor must be disabled before replacement |
+| POST | `/auth/mfa/confirm` | authenticated + MFA-management throttle | Confirm the pending secret with a non-replayed TOTP value, issue recovery codes once and revoke every other credential |
+| POST | `/auth/mfa/recovery-codes` | authenticated + MFA-management throttle + current password and TOTP | Replace all unused recovery codes and return the new plaintext set once |
+| DELETE | `/auth/mfa` | authenticated + MFA-management throttle + current password and TOTP/recovery code | Remove the factor and recovery codes, advance `auth_version`, and revoke every other credential |
 | POST | `/auth/logout` | `auth:sanctum`, authentication-version gate, database identity | Invalidate the current web session or revoke the current bearer token |
 | GET | `/health/readiness` | public, generic response, `health` throttle | Verify Laravel can reach PostgreSQL and Redis without exposing configuration or tenant data |
 | GET | `/gyms` | authentication, database identity, `GymPolicy::viewAny` | List all gyms for super admin or active assigned gyms for a tenant user |
@@ -814,6 +843,11 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Password recovery returns the same accepted response for existing and unknown normalized emails. Reset tokens are one-time, broker-hashed at rest, expiry-bound and placed only in a frontend URL fragment; they never enter query strings, logs, analytics or browser persistence.
 - Stateful login records the user's current `auth_version`. Every authenticated route compares that session value with the database value before tenant identity is bound; password reset or change advances the version so every stale Redis/database session fails closed on its next request.
 - Password reset revokes all Sanctum tokens before creating the replacement session. Authenticated password change retains only the current context: it updates the current session generation or, for a bearer request, revokes every other personal access token.
+- MFA is optional per platform identity and applies uniformly across super-admin, tenant staff and member roles. It never belongs to a gym and a tenant role cannot enable, disable or inspect another user's factor.
+- TOTP uses RFC 6238 SHA-1 with a 160-bit secret, six digits, 30-second steps and a bounded ±1-step clock window. The user row is locked and `mfa_last_used_step` must advance, so concurrent requests cannot accept the same authenticator value twice.
+- MFA setup requires the current password and does not become active until a valid code confirms the pending encrypted secret. Confirmation and disablement advance `auth_version`, revoke other browser sessions and bearer tokens, and retain only the current authenticated context.
+- Recovery codes contain 80 random bits, are returned only once, stored as application-keyed HMAC digests and consumed under a row lock. Regeneration requires both the current password and a fresh TOTP code; disablement requires the password plus either a fresh TOTP or one recovery code.
+- Correct primary credentials, password reset and existing-member activation never bypass an enabled factor. They return an opaque five-minute MFA challenge and establish no authenticated session until the second factor succeeds.
 - Trainers may view rosters and mark attendance only for class sessions assigned to their tenant staff profile; they cannot create classes or book other members.
 - Member booking reads and writes resolve the `members.user_id` link server-side. A client-supplied `member_id` never expands member self-service access.
 - Check-in requires an active, in-date membership and branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values.
@@ -830,6 +864,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
 - The Laravel session identifier is regenerated after login and invalidated on logout. The session cookie remains encrypted and HttpOnly; bearer tokens are never written to `localStorage` or `sessionStorage`.
 - Login, member activation and successful password reset copy the current server-side `auth_version` into the encrypted session. No client-provided version is trusted, and a stale or missing version is logged out before any tenant route runs.
+- For an MFA-enabled identity, primary credential or recovery verification returns an opaque five-minute challenge instead of a user/session payload. The browser keeps it only in component memory, sends one authenticator/recovery value in the request body and clears the challenge on success, cancellation, navigation or reload.
+- Authenticator enrollment returns a Base32 secret and `otpauth://` URI once for local QR rendering. The browser does not persist the secret or recovery codes; closing the setup result requires starting setup again with the current password.
 - Recovery accepts only a normalized email and always renders generic acknowledgement. A reset fragment is copied into volatile component state and immediately removed from the address; passwords and tokens are never stored in local storage, session storage or URL query parameters.
 - Bearer tokens remain available only as an explicit `use_bearer_token: true` path for future native clients and are scoped/revocable per device name.
 - Authenticated users load `/auth/me` and the authorised `/gyms` collection. Super administrators always make an explicit gym selection before accessing tenant records; a non-platform user may be auto-selected only when exactly one active gym is available.
@@ -934,6 +970,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 8 — secure member account activation | Feature-complete; runtime gate pending | Controlled owner/manager/receptionist invitation workflow; 46 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 | Account recovery, password change and credential revocation | Implemented; runtime gate pending | Non-enumerating queued recovery, fragment-only reset secrets, strong replacement passwords, row-locked credential rotation and monotonic session invalidation |
 | Milestone 9 — account security and recovery | Feature-complete; runtime gate pending | 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass; Laravel/PostgreSQL/Redis/mail execution remains gated |
+| Optional TOTP MFA and one-time recovery codes | Implemented; runtime gate pending | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
+| Milestone 10 — multi-factor authentication | Feature-complete; runtime gate pending | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 
 ## Change control
 

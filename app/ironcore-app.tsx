@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { IronCoreDashboard, type DashboardMember, type NewDashboardMember, type View } from "./ironcore-dashboard";
 import { MemberPortal, type MemberPortalData } from "./member-portal";
 import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
-import { AccountSecurityDialog } from "./account-security";
+import { AccountSecurityDialog, type MfaActions } from "./account-security";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
 import type { SaasBillingData } from "./saas-billing-management";
 import type { EngagementData } from "./engagement-management";
@@ -53,6 +53,7 @@ import {
   type MemberSelfCredentialRecord,
   type UpdateMemberSelf,
   type MemberAccountActivationPreview,
+  type MfaChallenge,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -116,6 +117,18 @@ const demoMembers: DashboardMember[] = [
   { id: "demo-2", name: "Hassan Malik", gym: "Forge Fitness", membership: "MBR-1187", joined: "03 Aug 2026", status: "Active", email: "hassan@example.com", accountLinked: true },
   { id: "demo-3", name: "Omar Al-Farsi", gym: "Forge Fitness", membership: "MBR-1216", joined: "02 Aug 2026", status: "Paused", email: null, accountLinked: false },
 ];
+const demoMfaActions: MfaActions = {
+  status: async () => ({ enabled: false, setup_pending: false, confirmed_at: null, recovery_codes_remaining: 0 }),
+  beginSetup: async () => ({
+    secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+    otpauth_uri: "otpauth://totp/IronCore%3Apreview%40ironcore.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=IronCore&algorithm=SHA1&digits=6&period=30",
+    issuer: "IronCore",
+    account: "preview@ironcore.example",
+  }),
+  confirmSetup: async () => ({ enabled: true, recovery_codes: ["ABCD-EFGH-IJKL-MNPQ", "BCDE-FGHI-JKLM-NPQR", "CDEF-GHIJ-KLMN-PQRS", "DEFG-HIJK-LMNP-QRST", "EFGH-IJKL-MNPQ-RSTU", "FGHI-JKLM-NPQR-STUV", "GHIJ-KLMN-PQRS-TUVW", "HIJK-LMNP-QRST-UVWX"], recovery_codes_remaining: 8 }),
+  regenerateRecoveryCodes: async () => ({ recovery_codes: ["JKLM-NPQR-STUV-WXYZ", "KLMN-PQRS-TUVW-XYZA", "LMNP-QRST-UVWX-YZAB", "MNPQ-RSTU-VWXY-ZABC", "NPQR-STUV-WXYZ-ABCD", "PQRS-TUVW-XYZA-BCDE", "QRST-UVWX-YZAB-CDEF", "RSTU-VWXY-ZABC-DEFG"], recovery_codes_remaining: 8 }),
+  disable: async () => undefined,
+};
 const demoStaff: StaffData = {
   rows: [
     { id: "demo-staff-1", name: "Aisha Khan", email: "aisha@forge.example", role: "gym_manager", branchId: "demo-branch-1", employeeNumber: "MGR-001", jobTitle: "General Manager", status: "active", hiredAt: "2025-04-12" },
@@ -315,25 +328,33 @@ function Brand() {
   return <div className="auth-brand"><span><i /><strong>IC</strong></span><b>IRONCORE</b></div>;
 }
 
-function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, busy, error }: {
+function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error }: {
   onLogin: (email: string, password: string) => Promise<void>;
   onRequestReset: (email: string) => Promise<void>;
   onReset: (secret: PasswordResetSecret, password: string) => Promise<void>;
   resetSecret?: PasswordResetSecret | null;
   onCancelReset?: () => void;
+  challenge?: MfaChallenge | null;
+  onVerifyMfa?: (challenge: MfaChallenge, value: string, recovery: boolean) => Promise<void>;
+  onCancelMfa?: () => void;
   busy: boolean;
   error: string | null;
 }) {
-  const [mode, setMode] = useState<"login" | "forgot" | "reset">(resetSecret ? "reset" : "login");
+  const [mode, setMode] = useState<"login" | "forgot" | "reset" | "mfa">(challenge ? "mfa" : resetSecret ? "reset" : "login");
   const [localBusy, setLocalBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [useRecovery, setUseRecovery] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     if (mode === "login") {
       await onLogin(String(data.get("email")), String(data.get("password")));
+      return;
+    }
+    if (mode === "mfa" && challenge && onVerifyMfa) {
+      await onVerifyMfa(challenge, String(data.get("verification")), useRecovery);
       return;
     }
 
@@ -356,8 +377,8 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
   }
 
   const working = busy || localBusy;
-  const title = mode === "login" ? "Sign in to IronCore" : mode === "forgot" ? "Reset your password" : "Choose a new password";
-  const description = mode === "login" ? "Use the account assigned to your platform or gym." : mode === "forgot" ? "Enter your email. The response stays private even if no account matches." : `Reset access for ${resetSecret?.email ?? "your IronCore account"}.`;
+  const title = mode === "login" ? "Sign in to IronCore" : mode === "forgot" ? "Reset your password" : mode === "reset" ? "Choose a new password" : "Verify it’s you";
+  const description = mode === "login" ? "Use the account assigned to your platform or gym." : mode === "forgot" ? "Enter your email. The response stays private even if no account matches." : mode === "reset" ? `Reset access for ${resetSecret?.email ?? "your IronCore account"}.` : "Enter a fresh code from your authenticator app before IronCore opens a session.";
 
   return <main className="auth-page">
     <section className="auth-story">
@@ -368,27 +389,35 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
     <section className="auth-form-side">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-mobile-brand"><Brand /></div>
-        <p className="eyebrow">{mode === "login" ? "Welcome back" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
-        {(mode === "login" ? error : localError) && <div className="form-error" role="alert">{mode === "login" ? error : localError}</div>}
+        <p className="eyebrow">{mode === "login" ? "Welcome back" : mode === "mfa" ? "Multi-factor authentication" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
+        {(mode === "login" || mode === "mfa" ? error : localError) && <div className="form-error" role="alert">{mode === "login" || mode === "mfa" ? error : localError}</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}
-        {mode !== "reset" && <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
+        {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
         {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="current-password" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
         {mode === "reset" && <div className="recovery-fields"><label>New password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={255} autoFocus /></label><label>Confirm new password<input name="password_confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><small>Use 12+ characters with upper and lower case letters, a number and a symbol.</small></div>}
-        <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : "Reset password securely"} <ArrowRight size={17} /></>}</button>
-        {mode !== "login" && <button className="auth-back" type="button" onClick={() => { if (mode === "reset") onCancelReset?.(); setMode("login"); setNotice(null); setLocalError(null); }}>Back to sign in</button>}
-        <small>{mode === "reset" ? "This one-time reset value was removed from the address and is held only in memory." : "IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser."}</small>
+        {mode === "mfa" && <div className="mfa-login-fields"><label>{useRecovery ? "Recovery code" : "6-digit code"}<input name="verification" inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" pattern={useRecovery ? undefined : "[0-9]{6}"} minLength={useRecovery ? 16 : 6} maxLength={useRecovery ? 64 : 6} required autoFocus /></label><button className="auth-forgot" type="button" onClick={() => setUseRecovery((current) => !current)}>Use {useRecovery ? "authenticator code" : "a recovery code"}</button></div>}
+        <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : mode === "reset" ? "Reset password securely" : "Verify and continue"} <ArrowRight size={17} /></>}</button>
+        {mode !== "login" && <button className="auth-back" type="button" onClick={() => { if (mode === "reset") onCancelReset?.(); if (mode === "mfa") onCancelMfa?.(); setMode("login"); setNotice(null); setLocalError(null); }}>Back to sign in</button>}
+        <small>{mode === "reset" ? "This one-time reset value was removed from the address and is held only in memory." : mode === "mfa" ? "This five-minute challenge is held only in memory and disappears if you leave or reload." : "IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser."}</small>
       </form>
     </section>
   </main>;
 }
 
-function TenantPicker({ user, gyms, notice, onSelect, onLogout, onChangePassword }: { user: AuthenticatedUser; gyms: GymAccess[]; notice: string | null; onSelect: (gym: GymAccess) => void; onLogout: () => void; onChangePassword: (currentPassword: string, password: string) => Promise<void> }) {
+function TenantPicker({ user, gyms, notice, onSelect, onLogout, onChangePassword, mfa }: { user: AuthenticatedUser; gyms: GymAccess[]; notice: string | null; onSelect: (gym: GymAccess) => void; onLogout: () => void; onChangePassword: (currentPassword: string, password: string) => Promise<void>; mfa?: MfaActions }) {
   const [securityOpen, setSecurityOpen] = useState(false);
-  return <main className="tenant-page"><header><Brand /><div className="tenant-account-actions"><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Change password</button><button className="secondary-button" onClick={onLogout}>Sign out</button></div></header><section className="tenant-card"><p className="eyebrow">Authorised workspaces</p><h1>Choose a gym</h1><p>Hello {user.name}. Select the tenant you want to work in. IronCore applies this context to every operational request.</p>{notice && <div className="form-error" role="alert">{notice}</div>}<div className="tenant-list">{gyms.map((gym) => <button key={gym.id} onClick={() => onSelect(gym)}><span className="tenant-avatar">{gym.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span><span><strong>{gym.name}</strong><small>{roleLabel(gym.role)} · {gym.status}</small></span><ArrowRight size={18} /></button>)}</div>{gyms.length === 0 && <div className="tenant-empty"><Building2 size={24} /><strong>No active gym access</strong><span>Ask a platform administrator or gym owner to assign your account.</span></div>}</section>{securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={onChangePassword} />}</main>;
+  return <main className="tenant-page"><header><Brand /><div className="tenant-account-actions"><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Account security</button><button className="secondary-button" onClick={onLogout}>Sign out</button></div></header><section className="tenant-card"><p className="eyebrow">Authorised workspaces</p><h1>Choose a gym</h1><p>Hello {user.name}. Select the tenant you want to work in. IronCore applies this context to every operational request.</p>{notice && <div className="form-error" role="alert">{notice}</div>}<div className="tenant-list">{gyms.map((gym) => <button key={gym.id} onClick={() => onSelect(gym)}><span className="tenant-avatar">{gym.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span><span><strong>{gym.name}</strong><small>{roleLabel(gym.role)} · {gym.status}</small></span><ArrowRight size={18} /></button>)}</div>{gyms.length === 0 && <div className="tenant-empty"><Building2 size={24} /><strong>No active gym access</strong><span>Ask a platform administrator or gym owner to assign your account.</span></div>}</section>{securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={onChangePassword} mfa={mfa} />}</main>;
 }
 
 export function IronCoreApp() {
   const api = useMemo(() => demoMode ? null : new IronCoreApi(apiOrigin), []);
+  const mfaActions = useMemo<MfaActions | undefined>(() => api ? ({
+    status: () => api.mfaStatus(),
+    beginSetup: (currentPassword) => api.beginMfaSetup(currentPassword),
+    confirmSetup: (code) => api.confirmMfaSetup(code),
+    regenerateRecoveryCodes: (currentPassword, code) => api.regenerateMfaRecoveryCodes(currentPassword, code),
+    disable: (currentPassword, value, recovery) => api.disableMfa(currentPassword, value, recovery),
+  }) : undefined, [api]);
   const defaultReportRange = useMemo(() => initialReportRange(), []);
   const [demoPortal, setDemoPortal] = useState<"platform" | "gym" | "member">("platform");
   const [phase, setPhase] = useState<"booting" | "anonymous" | "authenticated">(demoMode ? "authenticated" : "booting");
@@ -425,6 +454,7 @@ export function IronCoreApp() {
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [memberActivation, setMemberActivation] = useState<MemberActivationSecret | null>(null);
   const [passwordReset, setPasswordReset] = useState<PasswordResetSecret | null>(null);
+  const [mfaChallenge, setMfaChallenge] = useState<MfaChallenge | null>(null);
   const [activationChecked, setActivationChecked] = useState(false);
   const requestSequence = useRef(0);
   const operationsSequence = useRef(0);
@@ -503,10 +533,10 @@ export function IronCoreApp() {
   }, [api]);
 
   useEffect(() => {
-    if (!activationChecked || memberActivation || passwordReset) return;
+    if (!activationChecked || memberActivation || passwordReset || mfaChallenge) return;
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
-  }, [activationChecked, loadSession, memberActivation, passwordReset]);
+  }, [activationChecked, loadSession, memberActivation, mfaChallenge, passwordReset]);
 
   const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
     if (!api) return { gym_name: "Forge Fitness", member_first_name: "Amelia", masked_email: "a*****@example.com", existing_account: false };
@@ -519,7 +549,8 @@ export function IronCoreApp() {
       setDemoPortal("member");
       return;
     }
-    await api.acceptMemberAccountActivation(gymId, token, password);
+    const result = await api.acceptMemberAccountActivation(gymId, token, password);
+    if (result.authentication === "mfa_challenge") setMfaChallenge(result);
     setMemberActivation(null);
   }, [api]);
 
@@ -718,9 +749,28 @@ export function IronCoreApp() {
   async function login(email: string, password: string) {
     if (!api) return;
     setAuthBusy(true); setAuthError(null);
-    try { await api.login(email, password); await loadSession(); }
+    try {
+      const result = await api.login(email, password);
+      if (result.authentication === "mfa_challenge") {
+        setMfaChallenge(result);
+        return;
+      }
+      await loadSession();
+    }
     catch (error) { setAuthError(apiMessage(error, "Sign-in failed.")); }
     finally { setAuthBusy(false); }
+  }
+
+  async function verifyMfa(challenge: MfaChallenge, value: string, recovery: boolean): Promise<void> {
+    if (!api) return;
+    setAuthBusy(true); setAuthError(null);
+    try {
+      await api.verifyMfaChallenge(challenge.challenge_token, value, recovery);
+      setMfaChallenge(null);
+      await loadSession();
+    } catch (error) {
+      setAuthError(apiMessage(error, "The authentication code could not be verified."));
+    } finally { setAuthBusy(false); }
   }
 
   async function requestPasswordReset(email: string): Promise<void> {
@@ -734,10 +784,15 @@ export function IronCoreApp() {
       setDemoPortal("member");
       return;
     }
-    await api.resetPassword(secret.email, secret.token, password);
+    const result = await api.resetPassword(secret.email, secret.token, password);
     setUser(null);
     setSelectedGym(null);
-    setPhase("booting");
+    if (result.authentication === "mfa_challenge") {
+      setMfaChallenge(result);
+      setPhase("anonymous");
+    } else {
+      setPhase("booting");
+    }
     setPasswordReset(null);
   }
 
@@ -750,6 +805,7 @@ export function IronCoreApp() {
     if (api) await api.logout().catch(() => undefined);
     reportSequence.current += 1;
     memberSelfSequence.current += 1;
+    setMfaChallenge(null);
     setUser(null); setGyms([]); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", loading: false, error: null }); setPhase("anonymous");
   }
 
@@ -939,12 +995,14 @@ export function IronCoreApp() {
 
   if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => { setMemberActivation(null); if (demoMode) setDemoPortal("platform"); }} />;
   if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
+  if (mfaChallenge) return <LoginScreen key={mfaChallenge.challenge_token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} challenge={mfaChallenge} onVerifyMfa={verifyMfa} onCancelMfa={() => { setMfaChallenge(null); setAuthError(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
   if (demoMode) {
     const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
     if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
       onReload: () => undefined,
       onLogout: () => setDemoPortal("platform"),
       onChangePassword: async () => undefined,
+      mfa: demoMfaActions,
       onPortalSwitch: () => setDemoPortal("platform"),
       portalSwitchLabel: "Back to Super Admin",
       onUpdateProfile: async () => undefined,
@@ -967,6 +1025,7 @@ export function IronCoreApp() {
       onPortalSwitch={() => setDemoPortal("member")}
       portalSwitchLabel="Preview member portal"
       onChangePassword={async () => undefined}
+      mfa={demoMfaActions}
     />;
     return <IronCoreDashboard key="platform-preview"
       {...sharedPreview}
@@ -975,11 +1034,12 @@ export function IronCoreApp() {
       onPortalSwitch={() => setDemoPortal("gym")}
       portalSwitchLabel="Preview gym portal"
       onChangePassword={async () => undefined}
+      mfa={demoMfaActions}
     />;
   }
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
   if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} />;
-  if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} onChangePassword={changePassword} />;
+  if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} onChangePassword={changePassword} mfa={mfaActions} />;
   if (selectedGym.role === "member") {
     const memberPortalData: MemberPortalData = {
       gym: selectedGym,
@@ -997,6 +1057,7 @@ export function IronCoreApp() {
       onReload: () => { setMemberSelfRefresh((value) => value + 1); setEngagementRefresh((value) => value + 1); setCoachingRefresh((value) => value + 1); },
       onLogout: logout,
       onChangePassword: changePassword,
+      mfa: mfaActions,
       onUpdateProfile: updateMemberSelfProfile,
       onRotateCredential: rotateMemberSelfCredential,
       onBookClass: async (sessionId) => { await bookClass(sessionId); },
@@ -1122,6 +1183,7 @@ export function IronCoreApp() {
     onGymChange={(gymId) => selectGym(gyms.find((gym) => gym.id === gymId) ?? null)}
     onLogout={logout}
     onChangePassword={changePassword}
+    mfa={mfaActions}
     liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onInvitePortal: inviteMemberPortal } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}
