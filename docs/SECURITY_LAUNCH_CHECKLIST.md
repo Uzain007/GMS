@@ -15,4 +15,6 @@ The release owner must record evidence for every item before production traffic.
 - [ ] CI passes PHP/Laravel tests, RLS tests, frontend contracts, secret scan, dependency audit and an application security scan.
 - [ ] Synthetic report load meets thresholds without tenant leakage; production tests never use real member data.
 - [ ] Central logs, error tracking, uptime, queue, scheduler, webhook and provider alerts reach the on-call owner.
-- [ ] Data retention, export/deletion workflow, privacy notice, processor agreements and incident-response contacts are approved for launch countries.
+- [ ] Member export workflow passes PostgreSQL/Redis/S3 runtime validation; erasure/retention rules, privacy notice, processor agreements and incident-response contacts are approved for launch countries.
+
+Milestone 11 commits the read-only web and Laravel/PostgreSQL/Redis quality workflow. Keep the CI item unchecked until its first hosted run succeeds, both checks are required by `main` branch protection, and a separate application-security scan is selected and evidenced.

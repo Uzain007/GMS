@@ -50,6 +50,12 @@ test("uses deterministic compact currency labels for server hydration", async ()
 
 test("cleans environment-sensitive build caches before compiling", async () => {
   const buildScript = await readFile(new URL("../scripts/build-verified.sh", import.meta.url), "utf8");
+  const installScript = await readFile(new URL("../scripts/install-ci.sh", import.meta.url), "utf8");
+  const artifactScript = await readFile(new URL("../scripts/validate-artifact.sh", import.meta.url), "utf8");
   assert.match(buildScript, /rm -rf -- "\$\{SITES_PROJECT_ROOT\}\/dist" "\$\{SITES_PROJECT_ROOT\}\/\.vinext"/);
   assert.match(buildScript, /NEXT_PUBLIC values/);
+  for (const script of [buildScript, installScript, artifactScript]) {
+    assert.match(script, /exec bash "\$\{script_dir\}\/sites-env\.sh"/);
+  }
+  assert.match(buildScript, /bash "\$\{script_dir\}\/validate-artifact\.sh"/);
 });

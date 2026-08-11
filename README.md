@@ -39,7 +39,9 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Five-minute Redis MFA challenges across login, password reset and existing-member activation
 - Generic PostgreSQL/Redis readiness, a synthetic k6 report probe and committed secret scan
 - Production deployment runbook, security launch checklist and recovery/monitoring gates
+- Tenant-isolated, queued member data exports with private seven-day object retention
 - Product architecture, phased delivery plan and environment template
+- Read-only GitHub quality gate for the web build plus live Laravel/PostgreSQL RLS/Redis execution
 - Automated build, rendered-output and product-contract tests
 
 The signed-out preview uses representative in-browser data; authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. Live Laravel/PostgreSQL and Stripe-provider execution remains a deployment/CI gate because this build workspace does not provide those runtimes or credentials.
@@ -62,6 +64,8 @@ npm test
 
 `npm test` performs the production build, TypeScript type-check and all frontend/backend architecture contract tests. Laravel feature and live PostgreSQL RLS tests run in a PHP/Docker-capable CI or deployment environment.
 
+GitHub pull requests and `main` pushes also run `.github/workflows/quality.yml`. Its backend lane uses an ephemeral non-superuser PostgreSQL role and fails on skipped runtime assertions; see `docs/CI_RUNTIME_GATE.md` for the evidence and branch-protection handoff.
+
 ## Important files
 
 - `app/ironcore-dashboard.tsx` — product interface and interactions
@@ -77,6 +81,7 @@ npm test
 - `docs/MILESTONES.md` — full delivery sequence
 - `docs/DEPLOYMENT_RUNBOOK.md` — production release, rollback, recovery and monitoring procedure
 - `docs/SECURITY_LAUNCH_CHECKLIST.md` — evidence-based production security gates
+- `docs/CI_RUNTIME_GATE.md` — GitHub quality checks, runtime identity assertions and protected-branch setup
 - `docs/MEMBER_ACCOUNT_ACTIVATION.md` — invitation operations, threat boundaries and runtime gate
 - `docs/ACCOUNT_SECURITY.md` — password recovery, session revocation, authenticator MFA and recovery-code contract
 - `.env.example` — non-secret environment template

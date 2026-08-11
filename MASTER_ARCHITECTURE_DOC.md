@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.15.0 — Milestone 10 multi-factor authentication |
+| MAD version | 0.17.0 — Milestone 12 member data export lifecycle |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-10-mfa` |
-| Active milestone | Milestone 10 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
+| Active branch | `feature/milestone-12-member-data-export` |
+| Active milestone | Milestone 12 — implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -333,6 +333,22 @@ Partial unique index `(gym_id, member_id)` permits only one `pending` or `active
 | `errors` | jsonb | yes | first 100 bounded validation errors |
 | `started_at`, `completed_at` | timestamp | yes | — |
 | `created_at`, `updated_at` | timestamp | yes | indexes `(gym_id, status, created_at)`, `(gym_id, requested_by, created_at)` |
+
+### `member_data_exports` — time-limited privacy export evidence
+
+| Column | Type | Null | Constraints / index |
+| --- | --- | --- | --- |
+| `id`, `gym_id` | uuid | no | tenant identity, gym FK and unique `(gym_id, id)` |
+| `member_id` | uuid | no | composite tenant FK to `members`; index `(gym_id, member_id, created_at)` |
+| `requested_by` | uuid | no | authenticated actor FK to `users` restrict delete |
+| `status` | varchar(30) | no | `queued`, `processing`, `completed`, `failed`, `expired` |
+| `storage_disk`, `storage_path` | varchar | yes | hidden private tenant-prefixed object location |
+| `content_sha256`, `size_bytes` | char(64)/unsigned bigint | yes | integrity and bounded operational evidence |
+| `failure_reason` | text | yes | bounded internal failure detail; never exposed by the API |
+| `started_at`, `completed_at`, `expires_at` | timestamp | yes | queue, completion and seven-day retrieval lifecycle |
+| `created_at`, `updated_at` | timestamp | yes | index `(gym_id, status, expires_at)` |
+
+Export bytes are JSON on private S3-compatible storage under `gyms/{gym_id}/exports/members/`. Redis jobs carry immutable gym/export IDs, establish their own tenant context and retain explicit `gym_id` predicates while forced RLS remains active. Downloads require a currently authorised tenant request and use `private, no-store`. A delayed tenant job deletes bytes after seven days and retains request/audit metadata.
 
 ### `payment_gateway_accounts` — tenant payment-provider connection
 
@@ -677,15 +693,16 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `Gym belongsToMany User` through `gym_user` with `role`, `status`, `joined_at` and timestamps.
 - `User belongsToMany Gym` through `gym_user`.
 - `User hasMany UserMfaRecoveryCode`; recovery rows are platform-owned one-time authentication evidence and never tenant data.
-- `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan` and `MemberImport`.
+- `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan`, `MemberImport` and `MemberDataExport`.
 - `GymBranch belongsTo Gym` and has many home members and branch-specific membership plans.
-- `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships.
+- `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships and time-limited data exports.
 - `StaffProfile belongsTo User` and optionally a home branch; it belongs to many branches through tenant-owned `staff_profile_branch`.
 - `StaffInvitation belongsTo invitedBy User` and optionally a home branch. Acceptance creates/updates `gym_user` and `staff_profiles` atomically.
 - `MemberAccountInvitation belongsTo Member`, its inviting User and optional accepted User. Acceptance creates/updates the member-role `gym_user` row and links `members.user_id` atomically inside the invitation's tenant context.
 - `MembershipPlan optionally belongsTo GymBranch` and has many memberships.
 - `Membership belongsTo Member`, `MembershipPlan`, optional branch and creating user; every operational relationship is protected by a composite tenant FK.
 - `MemberImport belongsTo requestedBy User`; its queued job carries gym/import IDs and resets tenant context after processing.
+- `MemberDataExport belongsTo Member and requestedBy User`; generation and expiry jobs carry gym/export IDs and reset tenant context after processing.
 - `PaymentGatewayAccount belongsTo Gym`; only a verified provider signature may use its opaque lookup policy before the service binds normal tenant context.
 - `Invoice belongsTo Member`, optional Membership and Branch, and has many tenant-scoped InvoiceItems and Payments.
 - `Payment belongsTo Member`, optional Membership, Invoice and Branch, and has many immutable PaymentRefund records.
@@ -736,6 +753,8 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/POST | `/gyms/{gym}/members` | tenant; owner/manager/receptionist | List/search or create member profiles |
 | GET/PATCH | `/gyms/{gym}/members/{member}` | tenant; owner/manager/receptionist | Read or update a tenant-resolved member |
 | GET/POST | `/gyms/{gym}/members/{member}/account-invitations` | tenant; owner/manager/receptionist | Read bounded activation history or revoke/reissue a one-time member account invitation |
+| GET/POST | `/gyms/{gym}/members/{member}/data-exports` | tenant; owner/manager/super admin | List or queue a private seven-day member-data export |
+| GET | `/gyms/{gym}/members/{member}/data-exports/{export}[/download]` | tenant; owner/manager/super admin | Read safe export state or stream the authorised private JSON document |
 | POST | `/gyms/{gym}/member-account-invitations/preview` | public activation throttle; route gym + opaque fragment token in request body | Return only gym name, member first name, masked email and whether an existing account will be linked |
 | POST | `/gyms/{gym}/member-account-invitations/accept` | public activation throttle; route gym + opaque fragment token | Atomically create or link the invited email's platform user, add member tenant access, consume the token and start a regenerated web session |
 | GET/POST | `/gyms/{gym}/member-imports` | tenant; owner/manager/receptionist | List imports or queue a private CSV upload |
@@ -774,6 +793,8 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/member/payments` | tenant; linked member self | List only the linked member's bounded payment history and safe refund evidence |
 | GET | `/gyms/{gym}/member/attendance` | tenant; linked member self | Cursor-list at most 90 days of the linked member's own attendance history |
 | GET/POST | `/gyms/{gym}/member/access-credential` | tenant; linked member self | Read safe pass metadata or rotate a one-time opaque QR value while retaining only its tenant-scoped SHA-256 digest |
+| GET/POST | `/gyms/{gym}/member/data-exports` | tenant; linked member self | List or queue an export for the server-resolved linked member; no member UUID is accepted |
+| GET | `/gyms/{gym}/member/data-exports/{export}[/download]` | tenant; linked member self | Read or download only the linked member's unexpired export |
 | GET | `/gyms/{gym}/attendance` | tenant; owner/manager/receptionist/trainer/super admin | Cursor-list a bounded, time-filtered branch attendance history |
 | POST | `/gyms/{gym}/attendance/check-ins` | tenant; owner/manager/receptionist/super admin | Admit an eligible member by QR credential, member code or selected member ID |
 | POST | `/gyms/{gym}/attendance/{attendance}/check-out` | tenant; owner/manager/receptionist/super admin | Close the selected tenant attendance row once |
@@ -800,17 +821,17 @@ These arrays define the maximum product permissions. Controllers and policies ma
 
 ```text
 super_admin = [platform.gyms.manage, platform.billing.manage, platform.audit.read,
-               tenant.select, tenant.read, tenant.manage]
+               tenant.select, tenant.read, tenant.manage, member_exports.manage]
 gym_owner   = [gym.read, gym.update, branches.manage, members.manage, members.import,
                member_accounts.manage, memberships.manage, plans.manage, staff.manage, payments.manage,
                saas_billing.read, saas_billing.manage, attendance.manage,
                classes.manage, bookings.manage, training.manage,
-               progress.manage, notifications.read, reports.read, audit.read]
+               progress.manage, notifications.read, reports.read, member_exports.manage, audit.read]
 gym_manager = [gym.read, gym.update, branches.manage, members.manage, members.import,
                member_accounts.manage, memberships.manage, plans.manage, staff.manage, payments.record,
                saas_billing.read, attendance.manage, classes.manage,
                bookings.manage, training.manage, progress.manage,
-               notifications.read, reports.read, audit.read]
+               notifications.read, reports.read, member_exports.manage, audit.read]
 receptionist = [gym.read, branches.read, members.read, members.create,
                 members.update, members.import, member_accounts.manage,
                 memberships.read, memberships.create,
@@ -821,7 +842,7 @@ trainer     = [gym.read, branches.read, members.assigned.read,
 member      = [self.read, self.update_limited, membership.self.read,
                payment.self.read, attendance.self.read, classes.read,
                booking.self.manage, training.self.read, training.self.log,
-               progress.self.manage, notifications.self.manage]
+               progress.self.manage, notifications.self.manage, member_exports.self.manage]
 ```
 
 ### Permission invariants
@@ -912,7 +933,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Member uniqueness is tenant-local, for example `(gym_id, member_number)`.
 - Foreign-key lookup paths must also have tenant-compatible composite indexes.
 - Search endpoints must cap page size and avoid unbounded wildcard scans.
-- Imports, notifications, scheduled/large reports and exports run through Redis queues. The bounded interactive report overview may execute synchronously behind role checks, a 366-day cap, rate limiting and a tenant-keyed Redis cache.
+- Imports, notifications, scheduled/large reports and exports run through Redis queues. Member export generation and expiry jobs carry immutable gym/export IDs, and export objects use tenant-prefixed private paths. The bounded interactive report overview may execute synchronously behind role checks, a 366-day cap, rate limiting and a tenant-keyed Redis cache.
 - Cache keys follow `ironcore:gym:{gym_id}:{domain}:{key}` and never mix tenant data.
 - Partitioning is introduced only from measured volume, initially by time for append-only payments, attendance and audit data.
 - Attendance defaults to a bounded date window and cursor pagination. Branch/time and member/time indexes support reception dashboards without scanning a gym's complete history.
@@ -927,6 +948,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
 - Backups, point-in-time recovery, restore drills, provider webhook monitoring, failed-job alerts, centralised logs and error tracking are production launch gates.
 - Load validation targets report cache behaviour, bounded query latency, authentication throttles and tenant isolation. Load scripts use synthetic tenant IDs/tokens supplied only through environment variables and never contain committed credentials.
+- Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, production-dependency audit, all portable contracts, the production build and artifact validation.
+- The backend job uses PHP 8.3 with PostgreSQL 17 and Redis 8 service containers. It creates an ephemeral `ironcore_app` login with `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT` and `NOBYPASSRLS`, owns only the disposable test database, and fails rather than skipping when PostgreSQL RLS or Redis runtime requirements are absent.
+- CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 
 ## Active feature status
 
@@ -972,6 +996,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 9 — account security and recovery | Feature-complete; runtime gate pending | 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass; Laravel/PostgreSQL/Redis/mail execution remains gated |
 | Optional TOTP MFA and one-time recovery codes | Implemented; runtime gate pending | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
 | Milestone 10 — multi-factor authentication | Feature-complete; runtime gate pending | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Milestone 11 — production CI runtime gate | Implementation complete; first hosted run pending | Read-only web and Laravel jobs target locked Node dependencies, PHP 8.3, PostgreSQL 17, Redis 8, non-superuser RLS execution, dependency audits and fail-on-skip runtime assertions; 56 portable contracts pass locally |
+| Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
+| Milestone 12 — member data export lifecycle | Implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending | Portable contracts pass locally; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
 
 ## Change control
 

@@ -1,0 +1,158 @@
+name: IronCore quality gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ironcore-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web build and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up locked Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install locked web dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Scan committed source for secrets
+        run: npm run security:scan
+
+      - name: Run portable architecture and product contracts
+        run: node --test tests/*.test.mjs
+
+      - name: Audit production web dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build and validate the deployable web artifact
+        run: npm run build
+
+  backend:
+    name: Laravel, PostgreSQL RLS and Redis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      IRONCORE_RUNTIME_GATE: "true"
+      APP_NAME: IronCore API
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8000
+      FRONTEND_URL: http://localhost:3000
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_DATABASE: ironcore_test
+      DB_USERNAME: ironcore_app
+      DB_PASSWORD: ironcore-ci-app-only
+      CI_POSTGRES_HOST: 127.0.0.1
+      CI_POSTGRES_PORT: "5432"
+      CI_POSTGRES_ADMIN_DATABASE: postgres
+      CI_POSTGRES_SUPERUSER: postgres
+      CI_POSTGRES_SUPERUSER_PASSWORD: ironcore-ci-owner-only
+      CI_POSTGRES_DATABASE: ironcore_test
+      CI_POSTGRES_APP_ROLE: ironcore_app
+      CI_POSTGRES_APP_PASSWORD: ironcore-ci-app-only
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      MAIL_MAILER: array
+      FILESYSTEM_DISK: local
+      LOG_CHANNEL: stderr
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ironcore-ci-owner-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP and required extensions
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: "8.3"
+          extensions: bcmath, intl, mbstring, pcntl, pdo_pgsql, redis, zip
+          coverage: none
+          tools: composer:v2
+          fail-fast: true
+
+      - name: Generate an ephemeral application key
+        shell: bash
+        run: echo "APP_KEY=base64:$(php -r 'echo base64_encode(random_bytes(32));')" >> "$GITHUB_ENV"
+
+      - name: Prepare the non-superuser RLS database
+        run: php scripts/ci/prepare-postgres.php
+
+      - name: Validate Composer metadata
+        working-directory: backend
+        run: composer validate --strict --no-check-publish
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Audit backend dependencies
+        working-directory: backend
+        run: composer audit --no-interaction
+
+      - name: Run Laravel, PostgreSQL RLS and Redis tests
+        working-directory: backend
+        run: php artisan test --fail-on-skipped --fail-on-risky
+
+      - name: Validate production Laravel caches
+        working-directory: backend
+        run: |
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          php artisan optimize:clear

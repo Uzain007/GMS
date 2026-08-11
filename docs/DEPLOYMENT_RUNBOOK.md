@@ -38,3 +38,7 @@ Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, PostgreSQL/R
 ## Monitoring gates
 
 Alert on readiness failures, HTTP 5xx/error rate, p95 latency, PostgreSQL connections/locks/storage, Redis memory/evictions, queue depth/oldest age/failed jobs, scheduler heartbeat, Stripe webhook retries, notification-provider failures and backup/PITR status.
+
+## Repository quality gate
+
+Before a release commit is eligible for deployment, GitHub must report both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` as successful. Configure `main` branch protection to require these checks and a pull request; never allow a deployment credential or production provider secret into the quality workflow. The backend check is intentionally fail-on-skip so SQLite or a privileged PostgreSQL connection cannot masquerade as RLS evidence.

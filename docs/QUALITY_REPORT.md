@@ -176,3 +176,30 @@ The Laravel feature suite includes selected-tenant count isolation, mismatched-h
 ### Current automated result
 
 40 tests pass with no failures, skips or cancellations. TypeScript and ESLint complete with zero errors; the production build, deployable artifact validation and secret scan pass.
+
+## Milestone 11 production CI runtime-gate checkpoint
+
+### Passed in this workspace
+
+- Read-only GitHub Actions workflow syntax and least-privilege checkout contract
+- Separate web and backend jobs with explicit time limits and stale-run cancellation
+- Locked Node 22.13 install, lint, type-check, secret scan, production dependency audit, portable contracts and deployable artifact build
+- PHP 8.3 Laravel job backed by PostgreSQL 17 and Redis 8 service containers
+- Disposable non-superuser `ironcore_app` bootstrap with no role/database creation, inheritance or RLS-bypass privilege
+- Fail-on-skip runtime test that discovers every public `gym_id` table and requires both RLS and FORCE RLS
+- Redis-backed cache, session and queue configuration assertion
+- Composer audit, Laravel production-cache validation and weekly Dependabot review across npm, Composer and GitHub Actions
+- YAML parsing, PHP parser validation, TypeScript, ESLint, secret scan and all 56 portable contracts
+
+### Hosted runtime gate still required
+
+This workspace cannot execute PHP, PostgreSQL or Redis. The first GitHub-hosted run must complete both named jobs before the generic runtime gate can be marked passed. Any backend failure is a product defect to diagnose; do not replace PostgreSQL with SQLite, grant `BYPASSRLS`, or remove fail-on-skip enforcement.
+
+## Milestone 12 member-data export checkpoint
+
+- Queued export generation and delayed expiry are bound to immutable gym/export identifiers and re-establish tenant context in long-lived Redis workers.
+- `member_data_exports` has a non-null `gym_id`, composite member foreign key, tenant-leading indexes, fail-closed model scope and forced PostgreSQL RLS.
+- Large histories stream through database cursors into a spill-to-disk JSON stream instead of accumulating an unbounded payload in PHP memory.
+- Private tenant-prefixed storage, SHA-256 evidence, authenticated `private, no-store` downloads and seven-day byte deletion are covered by portable contracts.
+- Production Vinext build/artifact validation, TypeScript, ESLint, secret scan, production npm audit and all 59 portable contracts pass locally.
+- Laravel/PostgreSQL/Redis/S3 execution, queue retry/expiry observation and object-storage lifecycle verification remain target-environment gates.

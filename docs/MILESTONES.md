@@ -14,7 +14,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 ## Milestone 2 — Laravel API and identity
 **Status: complete; tenancy hardening completed in Milestone 3**
 - Laravel modular API and PostgreSQL tenant migrations
-- Sanctum authentication and platform identity; password recovery is completed in Milestone 9 and optional MFA remains a future hardening layer
+- Sanctum authentication and platform identity; password recovery is completed in Milestone 9 and optional MFA in Milestone 10
 - Super-admin and gym role policies
 - Tenant-isolation and audit-log tests
 
@@ -96,3 +96,22 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - MFA enforcement across password login, password-reset completion and existing-member activation
 - Account-security management for enrollment QR, recovery-code replacement and protected disablement
 - 54 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA
+
+## Milestone 11 — Production CI runtime gate
+
+**Status: implementation complete; first GitHub-hosted runtime result pending**
+- Read-only GitHub Actions checks for pull requests, `main` pushes and manual dispatches
+- Locked Node 22.13 web install, lint, type-check, secret scan, production dependency audit, portable contracts and deployable artifact validation
+- PHP 8.3 Laravel execution against PostgreSQL 17 and Redis 8 service containers
+- Disposable `ironcore_app` database role with explicit no-superuser, no-role/database-creation, no-inherit and no-RLS-bypass constraints
+- Fail-on-skip runtime assertions for PostgreSQL, every `gym_id` table's forced RLS state and Redis-backed cache/session/queue configuration
+- Composer dependency audit, production Laravel cache validation and weekly npm/Composer/GitHub Actions dependency review
+
+## Milestone 12 — Member data export lifecycle
+
+**Status: implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending**
+- Owner/manager/super-admin and linked-member request paths behind normal tenant authorization
+- Redis-queued JSON generation with explicit tenant predicates and forced PostgreSQL RLS
+- Private tenant-prefixed object storage, SHA-256 integrity evidence, authenticated no-store downloads and seven-day expiry
+- Tenant-bound delayed byte deletion with request/audit metadata retained
+- Erasure remains a launch-country policy decision because immutable financial and security evidence may require retention

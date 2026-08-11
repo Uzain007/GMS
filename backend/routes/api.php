@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\GymController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\MemberController;
+use App\Http\Controllers\Api\V1\MemberDataExportController;
 use App\Http\Controllers\Api\V1\MemberAccountInvitationController;
 use App\Http\Controllers\Api\V1\MemberImportController;
 use App\Http\Controllers\Api\V1\MemberSelfServiceController;
@@ -99,6 +100,10 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/member/attendance', [MemberSelfServiceController::class, 'attendance'])->middleware('role:member');
                 Route::get('/member/access-credential', [MemberSelfServiceController::class, 'credential'])->middleware('role:member');
                 Route::post('/member/access-credential', [MemberSelfServiceController::class, 'rotateCredential'])->middleware('role:member');
+                Route::get('/member/data-exports', [MemberDataExportController::class, 'selfIndex'])->middleware('role:member');
+                Route::post('/member/data-exports', [MemberDataExportController::class, 'selfStore'])->middleware('role:member');
+                Route::get('/member/data-exports/{export}', [MemberDataExportController::class, 'selfShow'])->middleware('role:member');
+                Route::get('/member/data-exports/{export}/download', [MemberDataExportController::class, 'selfDownload'])->middleware('role:member');
 
                 Route::get('/branches', [BranchController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer,member');
@@ -123,6 +128,14 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::post('/members/{member}/account-invitations', [MemberAccountInvitationController::class, 'store'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/members/{member}/data-exports', [MemberDataExportController::class, 'index'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/members/{member}/data-exports', [MemberDataExportController::class, 'store'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/members/{member}/data-exports/{export}', [MemberDataExportController::class, 'show'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/members/{member}/data-exports/{export}/download', [MemberDataExportController::class, 'download'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/member-imports', [MemberImportController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
