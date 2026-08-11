@@ -222,6 +222,30 @@ export class IronCoreApi {
     return response.data.user;
   }
 
+  async requestPasswordReset(email: string): Promise<void> {
+    await this.csrf();
+    await this.request<{ message: string }>("/api/v1/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(email: string, token: string, password: string): Promise<void> {
+    await this.csrf();
+    await this.request<ApiEnvelope<{ authentication: "session" }>>("/api/v1/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ email, token, password, password_confirmation: password }),
+    });
+  }
+
+  async changePassword(currentPassword: string, password: string): Promise<void> {
+    await this.csrf();
+    await this.request<{ message: string }>("/api/v1/auth/password", {
+      method: "PATCH",
+      body: JSON.stringify({ current_password: currentPassword, password, password_confirmation: password }),
+    });
+  }
+
   async me(): Promise<AuthenticatedUser> {
     return (await this.request<ApiEnvelope<AuthenticatedUser>>("/api/v1/auth/me")).data;
   }

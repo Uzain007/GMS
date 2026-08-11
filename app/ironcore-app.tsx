@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { IronCoreDashboard, type DashboardMember, type NewDashboardMember, type View } from "./ironcore-dashboard";
 import { MemberPortal, type MemberPortalData } from "./member-portal";
 import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
+import { AccountSecurityDialog } from "./account-security";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
 import type { SaasBillingData } from "./saas-billing-management";
 import type { EngagementData } from "./engagement-management";
@@ -301,16 +302,62 @@ function pendingInvitation(): { gymId: string; token: string } | null {
   return gymId && token ? { gymId, token } : null;
 }
 
+type PasswordResetSecret = { email: string; token: string };
+
+function pendingPasswordReset(): PasswordResetSecret | null {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#reset_")) return null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const email = params.get("reset_email"); const token = params.get("reset_token");
+  return email && token ? { email, token } : null;
+}
+
 function Brand() {
   return <div className="auth-brand"><span><i /><strong>IC</strong></span><b>IRONCORE</b></div>;
 }
 
-function LoginScreen({ onLogin, busy, error }: { onLogin: (email: string, password: string) => Promise<void>; busy: boolean; error: string | null }) {
+function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, busy, error }: {
+  onLogin: (email: string, password: string) => Promise<void>;
+  onRequestReset: (email: string) => Promise<void>;
+  onReset: (secret: PasswordResetSecret, password: string) => Promise<void>;
+  resetSecret?: PasswordResetSecret | null;
+  onCancelReset?: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [mode, setMode] = useState<"login" | "forgot" | "reset">(resetSecret ? "reset" : "login");
+  const [localBusy, setLocalBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    await onLogin(String(data.get("email")), String(data.get("password")));
+    if (mode === "login") {
+      await onLogin(String(data.get("email")), String(data.get("password")));
+      return;
+    }
+
+    setLocalBusy(true);
+    setLocalError(null);
+    try {
+      if (mode === "forgot") {
+        await onRequestReset(String(data.get("email")));
+        setNotice("If an account matches that email, password reset instructions will be sent.");
+      } else if (resetSecret) {
+        const password = String(data.get("password"));
+        if (password !== String(data.get("password_confirmation"))) throw new Error("The password confirmation does not match.");
+        await onReset(resetSecret, password);
+      }
+    } catch (reason) {
+      setLocalError(apiMessage(reason, "The account security request could not be completed."));
+    } finally {
+      setLocalBusy(false);
+    }
   }
+
+  const working = busy || localBusy;
+  const title = mode === "login" ? "Sign in to IronCore" : mode === "forgot" ? "Reset your password" : "Choose a new password";
+  const description = mode === "login" ? "Use the account assigned to your platform or gym." : mode === "forgot" ? "Enter your email. The response stays private even if no account matches." : `Reset access for ${resetSecret?.email ?? "your IronCore account"}.`;
 
   return <main className="auth-page">
     <section className="auth-story">
@@ -321,19 +368,23 @@ function LoginScreen({ onLogin, busy, error }: { onLogin: (email: string, passwo
     <section className="auth-form-side">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-mobile-brand"><Brand /></div>
-        <p className="eyebrow">Welcome back</p><h2>Sign in to IronCore</h2><p>Use the account assigned to your platform or gym.</p>
-        {error && <div className="form-error" role="alert">{error}</div>}
-        <label>Email address<input name="email" type="email" autoComplete="email" required placeholder="you@yourgym.com" autoFocus /></label>
-        <label>Password<input name="password" type="password" autoComplete="current-password" required minLength={8} placeholder="Enter your password" /></label>
-        <button className="primary-button auth-submit" disabled={busy} type="submit">{busy ? <><LoaderCircle className="spin" size={17} /> Signing in</> : <>Sign in securely <ArrowRight size={17} /></>}</button>
-        <small>IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser.</small>
+        <p className="eyebrow">{mode === "login" ? "Welcome back" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
+        {(mode === "login" ? error : localError) && <div className="form-error" role="alert">{mode === "login" ? error : localError}</div>}
+        {notice && <div className="form-notice" role="status">{notice}</div>}
+        {mode !== "reset" && <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
+        {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="current-password" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
+        {mode === "reset" && <div className="recovery-fields"><label>New password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={255} autoFocus /></label><label>Confirm new password<input name="password_confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><small>Use 12+ characters with upper and lower case letters, a number and a symbol.</small></div>}
+        <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : "Reset password securely"} <ArrowRight size={17} /></>}</button>
+        {mode !== "login" && <button className="auth-back" type="button" onClick={() => { if (mode === "reset") onCancelReset?.(); setMode("login"); setNotice(null); setLocalError(null); }}>Back to sign in</button>}
+        <small>{mode === "reset" ? "This one-time reset value was removed from the address and is held only in memory." : "IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser."}</small>
       </form>
     </section>
   </main>;
 }
 
-function TenantPicker({ user, gyms, notice, onSelect, onLogout }: { user: AuthenticatedUser; gyms: GymAccess[]; notice: string | null; onSelect: (gym: GymAccess) => void; onLogout: () => void }) {
-  return <main className="tenant-page"><header><Brand /><button className="secondary-button" onClick={onLogout}>Sign out</button></header><section className="tenant-card"><p className="eyebrow">Authorised workspaces</p><h1>Choose a gym</h1><p>Hello {user.name}. Select the tenant you want to work in. IronCore applies this context to every operational request.</p>{notice && <div className="form-error" role="alert">{notice}</div>}<div className="tenant-list">{gyms.map((gym) => <button key={gym.id} onClick={() => onSelect(gym)}><span className="tenant-avatar">{gym.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span><span><strong>{gym.name}</strong><small>{roleLabel(gym.role)} · {gym.status}</small></span><ArrowRight size={18} /></button>)}</div>{gyms.length === 0 && <div className="tenant-empty"><Building2 size={24} /><strong>No active gym access</strong><span>Ask a platform administrator or gym owner to assign your account.</span></div>}</section></main>;
+function TenantPicker({ user, gyms, notice, onSelect, onLogout, onChangePassword }: { user: AuthenticatedUser; gyms: GymAccess[]; notice: string | null; onSelect: (gym: GymAccess) => void; onLogout: () => void; onChangePassword: (currentPassword: string, password: string) => Promise<void> }) {
+  const [securityOpen, setSecurityOpen] = useState(false);
+  return <main className="tenant-page"><header><Brand /><div className="tenant-account-actions"><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Change password</button><button className="secondary-button" onClick={onLogout}>Sign out</button></div></header><section className="tenant-card"><p className="eyebrow">Authorised workspaces</p><h1>Choose a gym</h1><p>Hello {user.name}. Select the tenant you want to work in. IronCore applies this context to every operational request.</p>{notice && <div className="form-error" role="alert">{notice}</div>}<div className="tenant-list">{gyms.map((gym) => <button key={gym.id} onClick={() => onSelect(gym)}><span className="tenant-avatar">{gym.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span><span><strong>{gym.name}</strong><small>{roleLabel(gym.role)} · {gym.status}</small></span><ArrowRight size={18} /></button>)}</div>{gyms.length === 0 && <div className="tenant-empty"><Building2 size={24} /><strong>No active gym access</strong><span>Ask a platform administrator or gym owner to assign your account.</span></div>}</section>{securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={onChangePassword} />}</main>;
 }
 
 export function IronCoreApp() {
@@ -373,6 +424,7 @@ export function IronCoreApp() {
   const [reportRefresh, setReportRefresh] = useState(0);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [memberActivation, setMemberActivation] = useState<MemberActivationSecret | null>(null);
+  const [passwordReset, setPasswordReset] = useState<PasswordResetSecret | null>(null);
   const [activationChecked, setActivationChecked] = useState(false);
   const requestSequence = useRef(0);
   const operationsSequence = useRef(0);
@@ -386,9 +438,10 @@ export function IronCoreApp() {
 
   useEffect(() => {
     let timer: number | undefined;
-    const receiveActivation = () => {
+    const receiveSecuritySecret = () => {
       const invitation = pendingMemberActivation();
-      if (invitation) {
+      const reset = pendingPasswordReset();
+      if (invitation || reset) {
         // Copy the one-time value into volatile component state, then remove it
         // before preview requests, navigation, analytics or referrers can use it.
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
@@ -396,13 +449,14 @@ export function IronCoreApp() {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         setMemberActivation(invitation);
+        setPasswordReset(reset);
         setActivationChecked(true);
       }, 0);
     };
-    receiveActivation();
-    window.addEventListener("hashchange", receiveActivation);
+    receiveSecuritySecret();
+    window.addEventListener("hashchange", receiveSecuritySecret);
     return () => {
-      window.removeEventListener("hashchange", receiveActivation);
+      window.removeEventListener("hashchange", receiveSecuritySecret);
       if (timer) window.clearTimeout(timer);
     };
   }, []);
@@ -449,10 +503,10 @@ export function IronCoreApp() {
   }, [api]);
 
   useEffect(() => {
-    if (!activationChecked || memberActivation) return;
+    if (!activationChecked || memberActivation || passwordReset) return;
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
-  }, [activationChecked, loadSession, memberActivation]);
+  }, [activationChecked, loadSession, memberActivation, passwordReset]);
 
   const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
     if (!api) return { gym_name: "Forge Fitness", member_first_name: "Amelia", masked_email: "a*****@example.com", existing_account: false };
@@ -669,6 +723,29 @@ export function IronCoreApp() {
     finally { setAuthBusy(false); }
   }
 
+  async function requestPasswordReset(email: string): Promise<void> {
+    if (!api) return;
+    await api.requestPasswordReset(email);
+  }
+
+  async function resetAccountPassword(secret: PasswordResetSecret, password: string): Promise<void> {
+    if (!api) {
+      setPasswordReset(null);
+      setDemoPortal("member");
+      return;
+    }
+    await api.resetPassword(secret.email, secret.token, password);
+    setUser(null);
+    setSelectedGym(null);
+    setPhase("booting");
+    setPasswordReset(null);
+  }
+
+  async function changePassword(currentPassword: string, password: string): Promise<void> {
+    if (!api) return;
+    await api.changePassword(currentPassword, password);
+  }
+
   async function logout() {
     if (api) await api.logout().catch(() => undefined);
     reportSequence.current += 1;
@@ -861,11 +938,13 @@ export function IronCoreApp() {
   const reportData: ReportData = { ...reports, onApply: applyReportFilters, onReload: reloadReport };
 
   if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => { setMemberActivation(null); if (demoMode) setDemoPortal("platform"); }} />;
+  if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
   if (demoMode) {
     const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
     if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
       onReload: () => undefined,
       onLogout: () => setDemoPortal("platform"),
+      onChangePassword: async () => undefined,
       onPortalSwitch: () => setDemoPortal("platform"),
       portalSwitchLabel: "Back to Super Admin",
       onUpdateProfile: async () => undefined,
@@ -887,6 +966,7 @@ export function IronCoreApp() {
       tenantViews={["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", "coaching", "payments", "billing", "reports", "staff"]}
       onPortalSwitch={() => setDemoPortal("member")}
       portalSwitchLabel="Preview member portal"
+      onChangePassword={async () => undefined}
     />;
     return <IronCoreDashboard key="platform-preview"
       {...sharedPreview}
@@ -894,11 +974,12 @@ export function IronCoreApp() {
       liveSaasBilling={demoSaasBilling}
       onPortalSwitch={() => setDemoPortal("gym")}
       portalSwitchLabel="Preview gym portal"
+      onChangePassword={async () => undefined}
     />;
   }
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
-  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} busy={authBusy} error={authError} />;
-  if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} />;
+  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} />;
+  if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} onChangePassword={changePassword} />;
   if (selectedGym.role === "member") {
     const memberPortalData: MemberPortalData = {
       gym: selectedGym,
@@ -915,6 +996,7 @@ export function IronCoreApp() {
     return <MemberPortal data={memberPortalData} actions={{
       onReload: () => { setMemberSelfRefresh((value) => value + 1); setEngagementRefresh((value) => value + 1); setCoachingRefresh((value) => value + 1); },
       onLogout: logout,
+      onChangePassword: changePassword,
       onUpdateProfile: updateMemberSelfProfile,
       onRotateCredential: rotateMemberSelfCredential,
       onBookClass: async (sessionId) => { await bookClass(sessionId); },
@@ -1039,6 +1121,7 @@ export function IronCoreApp() {
     gymOptions={gyms.map((gym) => ({ id: gym.id, name: gym.name }))}
     onGymChange={(gymId) => selectGym(gyms.find((gym) => gym.id === gymId) ?? null)}
     onLogout={logout}
+    onChangePassword={changePassword}
     liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onInvitePortal: inviteMemberPortal } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -51,6 +52,7 @@ class AuthController extends Controller
         // the browser receives only encrypted/HttpOnly cookie state.
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
+        $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $user->auth_version);
 
         return response()->json([
             'data' => [

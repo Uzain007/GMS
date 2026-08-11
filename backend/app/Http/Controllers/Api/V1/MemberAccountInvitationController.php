@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMemberAccountInvitationRequest;
 use App\Http\Resources\MemberAccountInvitationResource;
 use App\Models\Gym;
+use App\Models\User;
 use App\Models\MemberAccountInvitation;
 use App\Services\MemberAccountInvitationService;
 use Illuminate\Http\JsonResponse;
@@ -77,6 +78,7 @@ class MemberAccountInvitationController extends Controller
 
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
+        $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $user->auth_version);
 
         return response()->json([
             'data' => [

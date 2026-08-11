@@ -5,6 +5,7 @@ return [
     'env' => env('APP_ENV', 'production'),
     'debug' => (bool) env('APP_DEBUG', false),
     'url' => env('APP_URL', 'http://localhost'),
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
     'timezone' => 'UTC',
     'locale' => env('APP_LOCALE', 'en'),
     'fallback_locale' => 'en',

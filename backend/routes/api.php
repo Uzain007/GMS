@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\AccountSecurityController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\BranchController;
 use App\Http\Controllers\Api\V1\ClassBookingController;
@@ -43,9 +44,12 @@ Route::prefix('v1')->group(function (): void {
 
     Route::prefix('auth')->group(function (): void {
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
-        Route::middleware(['auth:sanctum', 'database.identity'])->group(function (): void {
+        Route::post('/forgot-password', [AccountSecurityController::class, 'forgotPassword'])->middleware('throttle:recovery');
+        Route::post('/reset-password', [AccountSecurityController::class, 'resetPassword'])->middleware('throttle:recovery');
+        Route::middleware(['auth:sanctum', 'auth.version', 'database.identity'])->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
+            Route::patch('/password', [AccountSecurityController::class, 'changePassword']);
         });
     });
 
@@ -56,7 +60,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/gyms/{gym}/member-account-invitations/accept', [MemberAccountInvitationController::class, 'accept'])
         ->middleware('throttle:member-activation');
 
-    Route::middleware(['auth:sanctum', 'database.identity'])->group(function (): void {
+    Route::middleware(['auth:sanctum', 'auth.version', 'database.identity'])->group(function (): void {
         Route::get('/gyms', [GymController::class, 'index']);
         Route::post('/gyms', [GymController::class, 'store'])->middleware('role:super_admin');
 

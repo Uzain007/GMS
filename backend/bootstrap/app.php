@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\BindDatabaseIdentity;
+use App\Http\Middleware\EnsureAuthenticationVersion;
 use App\Http\Middleware\RequireRole;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Foundation\Application;
@@ -18,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->alias([
             'database.identity' => BindDatabaseIdentity::class,
+            'auth.version' => EnsureAuthenticationVersion::class,
             'tenant' => ResolveTenant::class,
             'role' => RequireRole::class,
         ]);

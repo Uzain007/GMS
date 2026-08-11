@@ -1,6 +1,6 @@
 # IronCore
 
-IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams and members. The repository contains a responsive role-aware web application and a Laravel API foundation covering identity, tenancy, gym operations, members, staff, memberships, payments, attendance, class bookings, trainer coaching, workout history, progress, notifications and operational reporting.
+IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams and members. The repository contains a responsive role-aware web application and a Laravel API foundation covering identity and account recovery, tenancy, gym operations, members, staff, memberships, payments, attendance, class bookings, trainer coaching, workout history, progress, notifications and operational reporting.
 
 ## Included in this milestone
 
@@ -33,6 +33,8 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Tenant-keyed 60-second report caching, management-only access and per-user/gym throttling
 - Owner/manager/receptionist member-portal invitations with tenant-bound hash-only activation values
 - Safe account creation or existing-account linking, role-collision guards and regenerated member sessions
+- Non-enumerating queued password recovery with broker-hashed, fragment-only reset values
+- Strong password changes, row-locked credential rotation and cross-driver stale-session revocation
 - Generic PostgreSQL/Redis readiness, a synthetic k6 report probe and committed secret scan
 - Production deployment runbook, security launch checklist and recovery/monitoring gates
 - Product architecture, phased delivery plan and environment template
@@ -74,6 +76,7 @@ npm test
 - `docs/DEPLOYMENT_RUNBOOK.md` — production release, rollback, recovery and monitoring procedure
 - `docs/SECURITY_LAUNCH_CHECKLIST.md` — evidence-based production security gates
 - `docs/MEMBER_ACCOUNT_ACTIVATION.md` — invitation operations, threat boundaries and runtime gate
+- `docs/ACCOUNT_SECURITY.md` — password recovery, change and session-revocation contract
 - `.env.example` — non-secret environment template
 - `backend/` — Laravel API, PostgreSQL migrations, authentication and tenancy
 - `docker-compose.yml` — local PostgreSQL, Redis and API services

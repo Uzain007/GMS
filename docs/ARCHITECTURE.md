@@ -24,6 +24,8 @@ High-volume tables such as payments, attendance events and audit logs use compos
 
 The roles are `super_admin`, `gym_owner`, `gym_manager`, `receptionist`, `trainer` and `member`. Authorisation is enforced in Laravel policies and tested at both request and domain-service level.
 
+Password recovery is non-enumerating and queued before account lookup. Reset values are broker-hashed at rest and delivered only through a frontend URL fragment that the browser removes immediately. Password resets and authenticated changes advance a row-locked `users.auth_version`; stateful sessions must match that generation before tenant identity is bound, while Sanctum bearer credentials are revoked explicitly.
+
 ## Currency rules
 
 Supported currencies are GBP, USD, PKR, AED and SAR. Each gym has one base currency. A user may change their display currency, but every financial record stores its original amount, ISO currency, provider amount, fees and settlement currency. Historical transactions are never silently recalculated when exchange rates change.
@@ -36,7 +38,7 @@ Member payments and IronCore SaaS subscriptions are separate ledgers. Webhooks a
 
 The initial target is 100 gyms and up to 1,000,000 member records. IronCore begins as a modular monolith so core transactions remain simple and reliable. Stateless web/API instances scale horizontally, while queues absorb imports, notifications, reports and provider callbacks.
 
-The current backend includes branch/member/staff operations, role-safe invitations, immutable membership contracts, queued imports, separate member-payment and SaaS-billing ledgers, attendance/classes, assignment-bound coaching, append-only workout/progress history and tenant-bound notification jobs. Milestone 6 adds reporting, measured load/security hardening and production deployment operations.
+The current backend includes account recovery and credential revocation, branch/member/staff operations, role-safe invitations, immutable membership contracts, queued imports, separate member-payment and SaaS-billing ledgers, attendance/classes, assignment-bound coaching, append-only workout/progress history and tenant-bound notification jobs. Milestone 6 adds reporting, measured load/security hardening and production deployment operations.
 
 ## Reporting and operational readiness
 

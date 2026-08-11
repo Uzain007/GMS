@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.13.0 — Milestone 8 secure member account activation |
+| MAD version | 0.14.0 — Milestone 9 account security and recovery |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-8-member-account-activation` |
-| Active milestone | Milestone 8 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
+| Active branch | `feature/milestone-9-account-security` |
+| Active milestone | Milestone 9 — feature-complete; Laravel/PostgreSQL/Redis/mail runtime gate pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -81,6 +81,7 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | `email` | varchar(254) | no | unique |
 | `email_verified_at` | timestamp | yes | — |
 | `password` | varchar | no | hashed cast |
+| `auth_version` | unsigned integer | no | default 1; monotonic server-side session revocation generation |
 | `platform_role` | varchar(40) | yes | index; only `super_admin` is currently valid |
 | `remember_token` | varchar(100) | yes | — |
 | `created_at`, `updated_at` | timestamp | yes | Laravel timestamps |
@@ -90,7 +91,7 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | Column | Type | Null | Constraints / index |
 | --- | --- | --- | --- |
 | `email` | varchar(254) | no | primary key |
-| `token` | varchar | no | stored securely by Laravel reset workflow |
+| `token` | varchar | no | one-way hashed by Laravel's reset broker; plaintext exists only in the email fragment |
 | `created_at` | timestamp | yes | — |
 
 ### `sessions` — platform authentication session
@@ -691,8 +692,11 @@ All successful JSON payloads are versioned under `/api/v1`.
 | Method | Endpoint | Middleware / permission | Purpose |
 | --- | --- | --- | --- |
 | POST | `/auth/login` | login throttle + stateful Sanctum middleware for browser origins | Start an encrypted server-side web session by default; issue a scoped bearer token only when a native client explicitly sends `use_bearer_token: true` |
-| GET | `/auth/me` | `auth:sanctum`, database identity | Return authenticated identity and active gym roles |
-| POST | `/auth/logout` | `auth:sanctum`, database identity | Invalidate the current web session or revoke the current bearer token |
+| POST | `/auth/forgot-password` | recovery throttle; public | Always acknowledge a syntactically valid normalized email identically, while Laravel conditionally sends a one-time reset fragment |
+| POST | `/auth/reset-password` | recovery throttle + stateful browser origin | Consume a valid one-time reset token, replace the password, advance `auth_version`, revoke all bearer tokens and start one regenerated web session |
+| GET | `/auth/me` | `auth:sanctum`, authentication-version gate, database identity | Return authenticated identity and active gym roles |
+| PATCH | `/auth/password` | `auth:sanctum`, authentication-version gate, database identity | Verify the current password, replace it, advance `auth_version`, revoke other credentials and retain only the current authenticated context |
+| POST | `/auth/logout` | `auth:sanctum`, authentication-version gate, database identity | Invalidate the current web session or revoke the current bearer token |
 | GET | `/health/readiness` | public, generic response, `health` throttle | Verify Laravel can reach PostgreSQL and Redis without exposing configuration or tenant data |
 | GET | `/gyms` | authentication, database identity, `GymPolicy::viewAny` | List all gyms for super admin or active assigned gyms for a tenant user |
 | POST | `/gyms` | `auth:sanctum`, `super_admin`, `GymPolicy::create` | Create a trial gym and owner membership |
@@ -807,6 +811,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Members may access only the member profile explicitly linked to their authenticated `user_id`.
 - Member account invitations can be created only for an unlinked tenant member with a normalized email. Reissuing revokes the previous pending token; acceptance requires a matching unexpired digest and unchanged member email, then consumes the row under a database lock.
 - A new activation creates a platform user only when no user owns the invited email. An existing account is linked without changing its password. Both paths create/update only the `member` role for the invitation gym and regenerate the authenticated web session.
+- Password recovery returns the same accepted response for existing and unknown normalized emails. Reset tokens are one-time, broker-hashed at rest, expiry-bound and placed only in a frontend URL fragment; they never enter query strings, logs, analytics or browser persistence.
+- Stateful login records the user's current `auth_version`. Every authenticated route compares that session value with the database value before tenant identity is bound; password reset or change advances the version so every stale Redis/database session fails closed on its next request.
+- Password reset revokes all Sanctum tokens before creating the replacement session. Authenticated password change retains only the current context: it updates the current session generation or, for a bearer request, revokes every other personal access token.
 - Trainers may view rosters and mark attendance only for class sessions assigned to their tenant staff profile; they cannot create classes or book other members.
 - Member booking reads and writes resolve the `members.user_id` link server-side. A client-supplied `member_id` never expands member self-service access.
 - Check-in requires an active, in-date membership and branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values.
@@ -822,6 +829,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The Next.js web/PWA uses Sanctum's stateful cookie flow: it first requests `/sanctum/csrf-cookie`, sends `X-XSRF-TOKEN` on mutations and includes credentials on API requests.
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
 - The Laravel session identifier is regenerated after login and invalidated on logout. The session cookie remains encrypted and HttpOnly; bearer tokens are never written to `localStorage` or `sessionStorage`.
+- Login, member activation and successful password reset copy the current server-side `auth_version` into the encrypted session. No client-provided version is trusted, and a stale or missing version is logged out before any tenant route runs.
+- Recovery accepts only a normalized email and always renders generic acknowledgement. A reset fragment is copied into volatile component state and immediately removed from the address; passwords and tokens are never stored in local storage, session storage or URL query parameters.
 - Bearer tokens remain available only as an explicit `use_bearer_token: true` path for future native clients and are scoped/revocable per device name.
 - Authenticated users load `/auth/me` and the authorised `/gyms` collection. Super administrators always make an explicit gym selection before accessing tenant records; a non-platform user may be auto-selected only when exactly one active gym is available.
 - Every operational web request carries the selected gym in both `/gyms/{gym}` and `X-Gym-ID`. Laravel independently verifies the authenticated role/membership and binds PostgreSQL RLS; matching client identifiers do not grant authority.
@@ -923,6 +932,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 7 — linked-member self-service portal | Feature-complete; runtime gate pending | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 | Secure member account invitation and activation | Implemented; runtime gate pending | Tenant-scoped invitation history, hash-only one-time tokens, atomic user/member linking and immediate member-session entry |
 | Milestone 8 — secure member account activation | Feature-complete; runtime gate pending | Controlled owner/manager/receptionist invitation workflow; 46 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Account recovery, password change and credential revocation | Implemented; runtime gate pending | Non-enumerating queued recovery, fragment-only reset secrets, strong replacement passwords, row-locked credential rotation and monotonic session invalidation |
+| Milestone 9 — account security and recovery | Feature-complete; runtime gate pending | 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass; Laravel/PostgreSQL/Redis/mail execution remains gated |
 
 ## Change control
 

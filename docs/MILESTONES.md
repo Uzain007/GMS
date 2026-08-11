@@ -14,7 +14,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 ## Milestone 2 — Laravel API and identity
 **Status: complete; tenancy hardening completed in Milestone 3**
 - Laravel modular API and PostgreSQL tenant migrations
-- Authentication, password recovery and optional MFA
+- Sanctum authentication and platform identity; password recovery is completed in Milestone 9 and optional MFA remains a future hardening layer
 - Super-admin and gym role policies
 - Tenant-isolation and audit-log tests
 
@@ -76,3 +76,12 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Activation fragments are removed immediately and never enter referrers, analytics or browser persistence
 - Existing accounts keep their password; staff and platform-admin role collisions are rejected rather than downgraded
 - 46 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass
+
+## Milestone 9 — Account security and recovery
+
+**Status: feature-complete; Laravel/PostgreSQL/Redis/mail runtime gate pending**
+- Non-enumerating password recovery with one-time, expiry-bound reset tokens
+- Strong authenticated password change for every platform and tenant role
+- Monotonic session-generation checks across Redis/database sessions and explicit Sanctum token revocation
+- Fragment-only reset handoff with immediate browser-address cleanup and no credential persistence
+- Row-locked credential changes, 50 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass

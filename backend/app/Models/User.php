@@ -14,6 +14,8 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, HasUuids, Notifiable;
 
+    public const SESSION_AUTH_VERSION_KEY = 'ironcore_auth_version';
+
     protected $fillable = ['name', 'email', 'password', 'platform_role', 'email_verified_at'];
     protected $hidden = ['password', 'remember_token'];
 
@@ -22,6 +24,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'auth_version' => 'integer',
             'platform_role' => UserRole::class,
         ];
     }
