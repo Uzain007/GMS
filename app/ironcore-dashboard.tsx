@@ -20,9 +20,9 @@ import { GymClientOverview, type GymOverviewData } from "./gym-client-overview";
 export type View = "overview" | "gym-dashboard" | "gyms" | "members" | "branches" | "plans" | "memberships" | "attendance" | "coaching" | "payments" | "billing" | "reports" | "staff" | "settings";
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 type Gym = { name: string; location: string; initials: string; members: number; plan: string; revenueGbp: number; status: "Healthy" | "Attention" | "Trial"; accent: string };
-export type DashboardMember = { id: string; name: string; gym: string; membership: string; joined: string; status: string };
+export type DashboardMember = { id: string; name: string; gym: string; membership: string; joined: string; status: string; email?: string | null; accountLinked?: boolean };
 export type NewDashboardMember = { first_name: string; last_name: string; email?: string; phone?: string; status?: "lead" | "active" };
-type LiveMembers = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null; onSearch: (query: string) => void; onReload: () => void };
+type LiveMembers = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null; onSearch: (query: string) => void; onReload: () => void; onInvitePortal?: (memberId: string) => Promise<string> };
 type DashboardProps = {
   portalMode?: "platform" | "gym";
   operator?: { name: string; role: string };
@@ -211,10 +211,24 @@ function GymsView({ gyms, currency, query, onAdd }: { gyms: Gym[]; currency: Cur
 function MembersView({ query, live, onAdd }: { query: string; live?: LiveMembers; onAdd: () => void }) {
   const filtered = live ? live.rows : members.filter((m) => `${m.name} ${m.gym}`.toLowerCase().includes(query.toLowerCase()));
   const total = live?.total ?? 128432;
+  const [activationLink, setActivationLink] = useState<string | null>(null);
+  const [inviteBusy, setInviteBusy] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  async function invite(member: DashboardMember) {
+    if (!live?.onInvitePortal) return;
+    setInviteBusy(member.id); setInviteError(null); setActivationLink(null);
+    try { setActivationLink(await live.onInvitePortal(member.id)); }
+    catch (reason) { setInviteError(reason instanceof Error ? reason.message : "The invitation could not be created."); }
+    finally { setInviteBusy(null); }
+  }
+
   return <ModuleShell eyebrow="Member operations" title="Members" description={live ? "Tenant-scoped member records loaded securely from the IronCore API." : "A network-wide view of membership status, plans and recent joins."} action={<button className="primary-button" onClick={onAdd}><Plus size={18} /> Add member</button>}>
     {live && <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Live tenant data</strong><small>Searches and writes are checked against the selected gym by middleware, policy and PostgreSQL RLS.</small></span></div>}
+    {inviteError && <div className="form-error member-invite-error" role="alert">{inviteError}</div>}
+    {activationLink && <div className="member-activation-link" role="status"><ShieldCheck size={19} /><span><strong>One-time activation link ready</strong><small>Send this link to the member now. Creating another invitation revokes it.</small><input aria-label="Member activation link" readOnly value={activationLink} onFocus={(event) => event.currentTarget.select()} /></span><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(activationLink)}>Copy link</button><button className="icon-button" aria-label="Dismiss activation link" onClick={() => setActivationLink(null)}><X size={17} /></button></div>}
     <section className="mini-metrics"><MiniMetric label="Total members" value={total.toLocaleString()} detail={live ? "In selected gym" : "Across gym network"} /><MiniMetric label={live ? "Loaded securely" : "New this month"} value={live ? String(filtered.length) : "2,438"} detail={live ? "Capped page size: 25" : "12.4% increase"} /><MiniMetric label={live ? "Tenant boundary" : "At risk"} value={live ? "Enforced" : "1,284"} detail={live ? "Route + header verified" : "Action recommended"} /></section>
-    <section className="panel table-scroll">{live?.loading && <div className="table-state"><RefreshCw className="spin" size={20} /><span>Loading tenant members…</span></div>}{live?.error && <div className="table-state error" role="alert"><strong>Members could not be loaded</strong><span>{live.error}</span><button className="secondary-button" onClick={live.onReload}>Try again</button></div>}{!live?.loading && !live?.error && <><table className="data-table"><thead><tr><th>Member</th><th>Gym</th><th>{live ? "Member no." : "Membership"}</th><th>Joined</th><th>Status</th></tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td><div className="person-cell"><span>{m.name.split(" ").map((p) => p[0]).join("")}</span><strong>{m.name}</strong></div></td><td>{m.gym}</td><td><span className="plan-pill">{m.membership}</span></td><td>{m.joined}</td><td><span className={`status ${m.status.toLowerCase()}`}><i />{m.status}</span></td></tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><Search size={24} /><strong>No members found</strong><span>{query ? "Try a different prefix or email address." : "Add the first member to this gym."}</span></div>}</>}</section>
+    <section className="panel table-scroll">{live?.loading && <div className="table-state"><RefreshCw className="spin" size={20} /><span>Loading tenant members…</span></div>}{live?.error && <div className="table-state error" role="alert"><strong>Members could not be loaded</strong><span>{live.error}</span><button className="secondary-button" onClick={live.onReload}>Try again</button></div>}{!live?.loading && !live?.error && <><table className="data-table"><thead><tr><th>Member</th><th>Gym</th><th>{live ? "Member no." : "Membership"}</th><th>Joined</th><th>Status</th>{live && <th>Portal account</th>}</tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td><div className="person-cell"><span>{m.name.split(" ").map((p) => p[0]).join("")}</span><strong>{m.name}</strong></div></td><td>{m.gym}</td><td><span className="plan-pill">{m.membership}</span></td><td>{m.joined}</td><td><span className={`status ${m.status.toLowerCase()}`}><i />{m.status}</span></td>{live && <td>{m.accountLinked ? <span className="status active"><i />Linked</span> : m.email ? <button className="secondary-button member-invite-button" disabled={inviteBusy === m.id} onClick={() => void invite(m)}>{inviteBusy === m.id ? "Creating…" : "Invite portal"}</button> : <small className="member-email-needed">Email required</small>}</td>}</tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><Search size={24} /><strong>No members found</strong><span>{query ? "Try a different prefix or email address." : "Add the first member to this gym."}</span></div>}</>}</section>
   </ModuleShell>;
 }
 

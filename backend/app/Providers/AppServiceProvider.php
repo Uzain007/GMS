@@ -33,5 +33,16 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('health', fn (Request $request) => [
             Limit::perMinute(60)->by($request->ip()),
         ]);
+
+        RateLimiter::for('member-activation', function (Request $request): array {
+            $routeGym = $request->route('gym');
+            $gymId = $routeGym instanceof \App\Models\Gym
+                ? (string) $routeGym->getKey()
+                : (string) $routeGym;
+
+            // Public activation is bounded by both the claimed tenant and IP;
+            // invalid secrets receive the same response as expired ones.
+            return [Limit::perMinute(10)->by(mb_strtolower($gymId).'|'.$request->ip())];
+        });
     }
 }

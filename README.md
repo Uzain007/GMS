@@ -31,6 +31,8 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Tenant-bound Redis delivery jobs with email, SMS and push provider adapters
 - Bounded, currency-specific tenant reports for member growth, revenue, attendance and class utilisation
 - Tenant-keyed 60-second report caching, management-only access and per-user/gym throttling
+- Owner/manager/receptionist member-portal invitations with tenant-bound hash-only activation values
+- Safe account creation or existing-account linking, role-collision guards and regenerated member sessions
 - Generic PostgreSQL/Redis readiness, a synthetic k6 report probe and committed secret scan
 - Production deployment runbook, security launch checklist and recovery/monitoring gates
 - Product architecture, phased delivery plan and environment template
@@ -71,6 +73,7 @@ npm test
 - `docs/MILESTONES.md` — full delivery sequence
 - `docs/DEPLOYMENT_RUNBOOK.md` — production release, rollback, recovery and monitoring procedure
 - `docs/SECURITY_LAUNCH_CHECKLIST.md` — evidence-based production security gates
+- `docs/MEMBER_ACCOUNT_ACTIVATION.md` — invitation operations, threat boundaries and runtime gate
 - `.env.example` — non-secret environment template
 - `backend/` — Laravel API, PostgreSQL migrations, authentication and tenancy
 - `docker-compose.yml` — local PostgreSQL, Redis and API services

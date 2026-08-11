@@ -73,4 +73,5 @@ class Member extends Model
     public function progressMeasurements(): HasMany { return $this->hasMany(MemberProgressMeasurement::class); }
     public function notificationPreference(): HasOne { return $this->hasOne(NotificationPreference::class); }
     public function notificationDeliveries(): HasMany { return $this->hasMany(NotificationDelivery::class); }
+    public function accountInvitations(): HasMany { return $this->hasMany(MemberAccountInvitation::class); }
 }

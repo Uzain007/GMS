@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.12.0 — Milestone 7 linked-member self-service portal |
+| MAD version | 0.13.0 — Milestone 8 secure member account activation |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-7-member-portal-recovery` |
-| Active milestone | Milestone 7 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
+| Active branch | `feature/milestone-8-member-account-activation` |
+| Active milestone | Milestone 8 — feature-complete; Laravel/PostgreSQL/Redis runtime gate pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -241,6 +241,23 @@ Indexes: `(gym_id, created_at)`, `(gym_id, event, created_at)`, `(auditable_type
 | `expires_at`, `accepted_at` | timestamp | no/yes | index `(gym_id, status, expires_at)` |
 | `metadata` | jsonb | yes | invitation-specific metadata |
 | `created_at`, `updated_at` | timestamp | yes | index `(gym_id, email, status)` |
+
+### `member_account_invitations` — secure member login activation
+
+| Column | Type | Null | Constraints / index |
+| --- | --- | --- | --- |
+| `id` | uuid | no | primary key; unique `(gym_id, id)` |
+| `gym_id` | uuid | no | FK `gyms.id` cascade delete |
+| `member_id` | uuid | no | composite tenant FK to `members` cascade delete |
+| `invited_by` | uuid | no | authorised staff user FK; restrict delete |
+| `accepted_user_id` | uuid | yes | platform user linked after acceptance; null on delete |
+| `email` | varchar(254) | no | normalized invitation snapshot; must still match the member at acceptance |
+| `token_hash` | char(64) | no | SHA-256 only; unique `(gym_id, token_hash)` |
+| `status` | varchar(30) | no | `pending`, `accepted`, `revoked`, `expired` |
+| `expires_at`, `accepted_at`, `revoked_at` | timestamp | mixed | bounded activation lifecycle |
+| `created_at`, `updated_at` | timestamp | yes | tenant-leading member/status and status/expiry indexes |
+
+Only one pending invitation may exist per `(gym_id, member_id)`. Reissuing revokes the prior row under a lock and returns a new opaque token once. Acceptance uses the route gym plus token digest to bind the normal tenant context before any invitation/member lookup; no global unscoped token lookup is permitted. The token plaintext never enters the database, audit values, logs, query string or browser persistence.
 
 ### `membership_plans` — sellable tenant plan definition
 
@@ -641,6 +658,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships.
 - `StaffProfile belongsTo User` and optionally a home branch; it belongs to many branches through tenant-owned `staff_profile_branch`.
 - `StaffInvitation belongsTo invitedBy User` and optionally a home branch. Acceptance creates/updates `gym_user` and `staff_profiles` atomically.
+- `MemberAccountInvitation belongsTo Member`, its inviting User and optional accepted User. Acceptance creates/updates the member-role `gym_user` row and links `members.user_id` atomically inside the invitation's tenant context.
 - `MembershipPlan optionally belongsTo GymBranch` and has many memberships.
 - `Membership belongsTo Member`, `MembershipPlan`, optional branch and creating user; every operational relationship is protected by a composite tenant FK.
 - `MemberImport belongsTo requestedBy User`; its queued job carries gym/import IDs and resets tenant context after processing.
@@ -684,6 +702,9 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/PATCH | `/gyms/{gym}/branches/{branch}` | tenant; reads all tenant roles, writes owner/manager | Read or update a tenant-resolved branch |
 | GET/POST | `/gyms/{gym}/members` | tenant; owner/manager/receptionist | List/search or create member profiles |
 | GET/PATCH | `/gyms/{gym}/members/{member}` | tenant; owner/manager/receptionist | Read or update a tenant-resolved member |
+| GET/POST | `/gyms/{gym}/members/{member}/account-invitations` | tenant; owner/manager/receptionist | Read bounded activation history or revoke/reissue a one-time member account invitation |
+| POST | `/gyms/{gym}/member-account-invitations/preview` | public activation throttle; route gym + opaque fragment token in request body | Return only gym name, member first name, masked email and whether an existing account will be linked |
+| POST | `/gyms/{gym}/member-account-invitations/accept` | public activation throttle; route gym + opaque fragment token | Atomically create or link the invited email's platform user, add member tenant access, consume the token and start a regenerated web session |
 | GET/POST | `/gyms/{gym}/member-imports` | tenant; owner/manager/receptionist | List imports or queue a private CSV upload |
 | GET | `/gyms/{gym}/member-imports/{import}` | tenant; owner/manager/receptionist | Poll import counters and bounded errors |
 | GET | `/gyms/{gym}/staff` | tenant; owner/manager | List staff with role using a tenant-keyed join |
@@ -748,17 +769,18 @@ These arrays define the maximum product permissions. Controllers and policies ma
 super_admin = [platform.gyms.manage, platform.billing.manage, platform.audit.read,
                tenant.select, tenant.read, tenant.manage]
 gym_owner   = [gym.read, gym.update, branches.manage, members.manage, members.import,
-               memberships.manage, plans.manage, staff.manage, payments.manage,
+               member_accounts.manage, memberships.manage, plans.manage, staff.manage, payments.manage,
                saas_billing.read, saas_billing.manage, attendance.manage,
                classes.manage, bookings.manage, training.manage,
                progress.manage, notifications.read, reports.read, audit.read]
 gym_manager = [gym.read, gym.update, branches.manage, members.manage, members.import,
-               memberships.manage, plans.manage, staff.manage, payments.record,
+               member_accounts.manage, memberships.manage, plans.manage, staff.manage, payments.record,
                saas_billing.read, attendance.manage, classes.manage,
                bookings.manage, training.manage, progress.manage,
                notifications.read, reports.read, audit.read]
 receptionist = [gym.read, branches.read, members.read, members.create,
-                members.update, members.import, memberships.read, memberships.create,
+                members.update, members.import, member_accounts.manage,
+                memberships.read, memberships.create,
                 attendance.manage, classes.read, bookings.manage, payments.record]
 trainer     = [gym.read, branches.read, members.assigned.read,
                training.manage, attendance.read, classes.assigned.read,
@@ -783,6 +805,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Gym managers may grant only receptionist/trainer roles; owner/manager grants require a gym owner or super admin.
 - Gym managers cannot update, suspend, demote or otherwise mutate an owner or another manager, including updates that omit the `role` field.
 - Members may access only the member profile explicitly linked to their authenticated `user_id`.
+- Member account invitations can be created only for an unlinked tenant member with a normalized email. Reissuing revokes the previous pending token; acceptance requires a matching unexpired digest and unchanged member email, then consumes the row under a database lock.
+- A new activation creates a platform user only when no user owns the invited email. An existing account is linked without changing its password. Both paths create/update only the `member` role for the invitation gym and regenerate the authenticated web session.
 - Trainers may view rosters and mark attendance only for class sessions assigned to their tenant staff profile; they cannot create classes or book other members.
 - Member booking reads and writes resolve the `members.user_id` link server-side. A client-supplied `member_id` never expands member self-service access.
 - Check-in requires an active, in-date membership and branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values.
@@ -820,6 +844,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Platform and gym-client portals use distinct landing views and role-aware navigation. The gym dashboard composes only collections already returned for the explicitly selected gym; its cards and navigation are presentational and never grant access or expand the server-authoritative permission scope.
 - Linked members receive a dedicated mobile-first shell for their profile, current membership, billing history, own attendance, classes, training, progress, preferences and access pass. The server resolves every member identifier from the authenticated `user_id`; the client cannot choose or override that link.
 - A newly rotated QR credential exists in component memory only, is returned once, and is cleared on navigation away from the pass, reload, logout or tenant change. No offline cache contains the credential plaintext.
+- Member activation tokens arrive in the URL fragment, are copied into component memory and removed from the address immediately. Preview and acceptance send the opaque value only in stateful request bodies; no referrer, analytics event or browser persistence receives it.
 - The install manifest provides standalone PWA presentation metadata only. IronCore deliberately defines no offline data cache until a separately reviewed encrypted/offline threat model exists.
 - Representative preview mode may switch between the platform, gym-client and member shells for product review. The switch is labelled as a preview, does not persist tenant data, and is unavailable as an authorization mechanism in configured API mode.
 
@@ -896,6 +921,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 6B — dedicated gym-client portal | Feature-complete; runtime gate pending | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
 | Linked member self-service API and least-privilege resources | Implemented; runtime gate pending | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
 | Milestone 7 — linked-member self-service portal | Feature-complete; runtime gate pending | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Secure member account invitation and activation | Implemented; runtime gate pending | Tenant-scoped invitation history, hash-only one-time tokens, atomic user/member linking and immediate member-session entry |
+| Milestone 8 — secure member account activation | Feature-complete; runtime gate pending | Controlled owner/manager/receptionist invitation workflow; 46 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 
 ## Change control
 

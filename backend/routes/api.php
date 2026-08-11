@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\GymController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\MemberController;
+use App\Http\Controllers\Api\V1\MemberAccountInvitationController;
 use App\Http\Controllers\Api\V1\MemberImportController;
 use App\Http\Controllers\Api\V1\MemberSelfServiceController;
 use App\Http\Controllers\Api\V1\MembershipController;
@@ -47,6 +48,13 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/logout', [AuthController::class, 'logout']);
         });
     });
+
+    // Account activation is public because the invited member does not have a
+    // tenant assignment yet. The service binds the route gym before token lookup.
+    Route::post('/gyms/{gym}/member-account-invitations/preview', [MemberAccountInvitationController::class, 'preview'])
+        ->middleware('throttle:member-activation');
+    Route::post('/gyms/{gym}/member-account-invitations/accept', [MemberAccountInvitationController::class, 'accept'])
+        ->middleware('throttle:member-activation');
 
     Route::middleware(['auth:sanctum', 'database.identity'])->group(function (): void {
         Route::get('/gyms', [GymController::class, 'index']);
@@ -99,6 +107,10 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/members/{member}', [MemberController::class, 'update'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::post('/members/{member}/access-credential', [AttendanceController::class, 'issueCredential'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/members/{member}/account-invitations', [MemberAccountInvitationController::class, 'index'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::post('/members/{member}/account-invitations', [MemberAccountInvitationController::class, 'store'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
 
                 Route::get('/member-imports', [MemberImportController::class, 'index'])

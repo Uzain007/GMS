@@ -66,6 +66,9 @@ export type StaffInvitationRecord = { id: string; gym_id: string; home_branch_id
 export type NewStaffInvitation = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days?: number };
 export type UpdateStaff = { role?: StaffRole; employee_number?: string; job_title?: string | null; home_branch_id?: string | null; status?: StaffRecord["status"]; hired_at?: string | null; terminated_at?: string | null; reason: string };
 export type CreatedStaffInvitation = { invitation: StaffInvitationRecord; acceptance_token: string };
+export type MemberAccountInvitationRecord = { id: string; gym_id: string; member_id: string; email: string; status: "pending" | "accepted" | "revoked" | "expired"; expires_at: string; accepted_at: string | null; revoked_at: string | null; created_at: string | null };
+export type CreatedMemberAccountInvitation = { invitation: MemberAccountInvitationRecord; activation_token: string };
+export type MemberAccountActivationPreview = { gym_name: string; member_first_name: string; masked_email: string; existing_account: boolean };
 export type InvoiceItemRecord = { id: string; invoice_id: string; description: string; quantity: number; unit_amount_minor: number; subtotal_amount_minor: number; tax_amount_minor: number; total_amount_minor: number };
 export type InvoiceRecord = { id: string; gym_id: string; member_id: string; membership_id: string | null; branch_id: string | null; number: string; status: "draft" | "open" | "paid" | "void" | "uncollectible"; currency: GymSummary["base_currency"]; subtotal_amount_minor: number; tax_amount_minor: number; total_amount_minor: number; paid_amount_minor: number; due_amount_minor: number; issued_at: string; due_at: string | null; paid_at: string | null; notes: string | null; items: InvoiceItemRecord[]; created_at: string | null };
 export type PaymentRefundRecord = { id: string; payment_id: string; status: "pending" | "succeeded" | "failed"; amount_minor: number; currency: GymSummary["base_currency"]; reason: string; refunded_at: string | null; created_at: string | null };
@@ -249,6 +252,33 @@ export class IronCoreApi {
       { method: "POST", body: JSON.stringify(member) },
       gymId,
     )).data;
+  }
+
+  async createMemberAccountInvitation(gymId: string, memberId: string): Promise<CreatedMemberAccountInvitation> {
+    await this.csrf();
+    const response = await this.request<{ data: MemberAccountInvitationRecord; meta: { activation_token: string } }>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/members/${encodeURIComponent(memberId)}/account-invitations`,
+      { method: "POST", body: JSON.stringify({ expires_in_hours: 48 }) },
+      gymId,
+    );
+    return { invitation: response.data, activation_token: response.meta.activation_token };
+  }
+
+  async previewMemberAccountActivation(gymId: string, token: string): Promise<MemberAccountActivationPreview> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MemberAccountActivationPreview>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/member-account-invitations/preview`,
+      { method: "POST", body: JSON.stringify({ token }) },
+    )).data;
+  }
+
+  async acceptMemberAccountActivation(gymId: string, token: string, password?: string): Promise<AuthenticatedUser> {
+    await this.csrf();
+    const payload = password ? { token, password, password_confirmation: password } : { token };
+    return (await this.request<ApiEnvelope<{ user: AuthenticatedUser }>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/member-account-invitations/accept`,
+      { method: "POST", body: JSON.stringify(payload) },
+    )).data.user;
   }
 
   private tenantCollection<T>(gymId: string, resource: string): Promise<Paginated<T>> {

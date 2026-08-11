@@ -11,6 +11,7 @@ return [
     ],
     UserRole::GymOwner->value => [
         'gym.read', 'gym.update', 'branches.manage', 'members.manage', 'members.import',
+        'member_accounts.manage',
         'memberships.manage', 'plans.manage', 'staff.manage', 'payments.manage',
         'saas_billing.read', 'saas_billing.manage', 'attendance.manage',
         'classes.manage', 'bookings.manage', 'training.manage', 'progress.manage',
@@ -18,6 +19,7 @@ return [
     ],
     UserRole::GymManager->value => [
         'gym.read', 'gym.update', 'branches.manage', 'members.manage', 'members.import',
+        'member_accounts.manage',
         'memberships.manage', 'plans.manage', 'staff.manage', 'payments.record',
         'saas_billing.read', 'attendance.manage', 'classes.manage',
         'bookings.manage', 'training.manage', 'progress.manage',
@@ -25,7 +27,7 @@ return [
     ],
     UserRole::Receptionist->value => [
         'gym.read', 'branches.read', 'members.read', 'members.create',
-        'members.update', 'members.import', 'memberships.read', 'memberships.create',
+        'members.update', 'members.import', 'member_accounts.manage', 'memberships.read', 'memberships.create',
         'attendance.manage', 'classes.read', 'bookings.manage', 'payments.record',
     ],
     UserRole::Trainer->value => [

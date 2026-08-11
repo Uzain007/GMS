@@ -4,6 +4,7 @@ import { ArrowRight, Building2, LoaderCircle, LockKeyhole, ShieldCheck } from "l
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IronCoreDashboard, type DashboardMember, type NewDashboardMember, type View } from "./ironcore-dashboard";
 import { MemberPortal, type MemberPortalData } from "./member-portal";
+import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
 import type { SaasBillingData } from "./saas-billing-management";
 import type { EngagementData } from "./engagement-management";
@@ -50,6 +51,7 @@ import {
   type MemberSelfRecord,
   type MemberSelfCredentialRecord,
   type UpdateMemberSelf,
+  type MemberAccountActivationPreview,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -109,9 +111,9 @@ const demoOperations: OperationData = {
   onCreateMembership: async () => undefined,
 };
 const demoMembers: DashboardMember[] = [
-  { id: "demo-1", name: "Amelia Hart", gym: "Forge Fitness", membership: "MBR-1042", joined: "04 Aug 2026", status: "Active" },
-  { id: "demo-2", name: "Hassan Malik", gym: "Forge Fitness", membership: "MBR-1187", joined: "03 Aug 2026", status: "Active" },
-  { id: "demo-3", name: "Omar Al-Farsi", gym: "Forge Fitness", membership: "MBR-1216", joined: "02 Aug 2026", status: "Paused" },
+  { id: "demo-1", name: "Amelia Hart", gym: "Forge Fitness", membership: "MBR-1042", joined: "04 Aug 2026", status: "Active", email: "amelia@example.com", accountLinked: false },
+  { id: "demo-2", name: "Hassan Malik", gym: "Forge Fitness", membership: "MBR-1187", joined: "03 Aug 2026", status: "Active", email: "hassan@example.com", accountLinked: true },
+  { id: "demo-3", name: "Omar Al-Farsi", gym: "Forge Fitness", membership: "MBR-1216", joined: "02 Aug 2026", status: "Paused", email: null, accountLinked: false },
 ];
 const demoStaff: StaffData = {
   rows: [
@@ -280,7 +282,16 @@ function dashboardMember(member: MemberRecord, gymName: string): DashboardMember
       ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(member.joined_at))
       : "Not set",
     status: member.status[0].toUpperCase() + member.status.slice(1),
+    email: member.email,
+    accountLinked: member.user_id !== null,
   };
+}
+
+function pendingMemberActivation(): MemberActivationSecret | null {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#activate_")) return null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const gymId = params.get("activate_gym"); const token = params.get("activate_token");
+  return gymId && token ? { gymId, token } : null;
 }
 
 function pendingInvitation(): { gymId: string; token: string } | null {
@@ -361,6 +372,8 @@ export function IronCoreApp() {
   }));
   const [reportRefresh, setReportRefresh] = useState(0);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [memberActivation, setMemberActivation] = useState<MemberActivationSecret | null>(null);
+  const [activationChecked, setActivationChecked] = useState(false);
   const requestSequence = useRef(0);
   const operationsSequence = useRef(0);
   const staffSequence = useRef(0);
@@ -370,6 +383,29 @@ export function IronCoreApp() {
   const coachingSequence = useRef(0);
   const reportSequence = useRef(0);
   const memberSelfSequence = useRef(0);
+
+  useEffect(() => {
+    let timer: number | undefined;
+    const receiveActivation = () => {
+      const invitation = pendingMemberActivation();
+      if (invitation) {
+        // Copy the one-time value into volatile component state, then remove it
+        // before preview requests, navigation, analytics or referrers can use it.
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      }
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setMemberActivation(invitation);
+        setActivationChecked(true);
+      }, 0);
+    };
+    receiveActivation();
+    window.addEventListener("hashchange", receiveActivation);
+    return () => {
+      window.removeEventListener("hashchange", receiveActivation);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
 
   const loadSession = useCallback(async () => {
     if (!api) return;
@@ -413,9 +449,25 @@ export function IronCoreApp() {
   }, [api]);
 
   useEffect(() => {
+    if (!activationChecked || memberActivation) return;
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
-  }, [loadSession]);
+  }, [activationChecked, loadSession, memberActivation]);
+
+  const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
+    if (!api) return { gym_name: "Forge Fitness", member_first_name: "Amelia", masked_email: "a*****@example.com", existing_account: false };
+    return api.previewMemberAccountActivation(gymId, token);
+  }, [api]);
+
+  const acceptMemberActivation = useCallback(async (gymId: string, token: string, password?: string): Promise<void> => {
+    if (!api) {
+      setMemberActivation(null);
+      setDemoPortal("member");
+      return;
+    }
+    await api.acceptMemberAccountActivation(gymId, token, password);
+    setMemberActivation(null);
+  }, [api]);
 
   useEffect(() => {
     if (!api || !selectedGym) return;
@@ -647,6 +699,11 @@ export function IronCoreApp() {
     const refreshed = await api.members(selectedGym.id, memberSearch);
     setMembers({ rows: refreshed.data.map((member) => dashboardMember(member, selectedGym.name)), total: refreshed.meta.total, loading: false, error: null });
   }
+  async function inviteMemberPortal(memberId: string): Promise<string> {
+    if (!api || !selectedGym) throw new Error("Select a gym before creating a member invitation.");
+    const created = await api.createMemberAccountInvitation(selectedGym.id, memberId);
+    return `${window.location.origin}${window.location.pathname}#activate_gym=${encodeURIComponent(selectedGym.id)}&activate_token=${encodeURIComponent(created.activation_token)}`;
+  }
 
   async function createBranch(input: NewOperationBranch) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createBranch(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
   async function createPlan(input: NewOperationPlan) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createMembershipPlan(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
@@ -803,6 +860,7 @@ export function IronCoreApp() {
 
   const reportData: ReportData = { ...reports, onApply: applyReportFilters, onReload: reloadReport };
 
+  if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => { setMemberActivation(null); if (demoMode) setDemoPortal("platform"); }} />;
   if (demoMode) {
     const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
     if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
@@ -824,7 +882,7 @@ export function IronCoreApp() {
       operator={{ name: "Aisha Khan", role: "Gym Owner" }}
       activeGym={{ id: "demo-gym", name: "Forge Fitness" }}
       gymOptions={[{ id: "demo-gym", name: "Forge Fitness" }]}
-      liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined }}
+      liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined, onInvitePortal: async () => `${window.location.origin}${window.location.pathname}#activate_gym=demo-gym&activate_token=${"demo".padEnd(64, "x")}` }}
       liveSaasBilling={{ ...demoSaasBilling, actorRole: "gym_owner" }}
       tenantViews={["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", "coaching", "payments", "billing", "reports", "staff"]}
       onPortalSwitch={() => setDemoPortal("member")}
@@ -981,7 +1039,7 @@ export function IronCoreApp() {
     gymOptions={gyms.map((gym) => ({ id: gym.id, name: gym.name }))}
     onGymChange={(gymId) => selectGym(gyms.find((gym) => gym.id === gymId) ?? null)}
     onLogout={logout}
-    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1) } : undefined}
+    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onInvitePortal: inviteMemberPortal } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}
     liveFinance={canManageMembers ? liveFinance : undefined}

@@ -58,3 +58,21 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Populated Branches, Membership Plans and Memberships preview navigation plus responsive attendance-table regression coverage
 - Deployment/rollback/recovery runbook and evidence-based security launch checklist
 - Remaining production gates: live Laravel/PostgreSQL RLS/Redis suite, measured k6 run, provider sandboxes, restore drill and monitored deployment
+
+## Milestone 7 — Linked-member portal
+
+**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+- Dedicated mobile-first member shell for profile, membership, payments, attendance, classes, training, progress and preferences
+- Server-resolved member identity from the authenticated user link
+- One-time QR pass rotation with hash-only persistence and navigation clearing
+- Standalone PWA manifest without an unreviewed offline data cache
+
+## Milestone 8 — Secure member account activation
+
+**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+- Tenant staff can invite an existing, unlinked member record to activate portal access
+- One-time opaque activation values are returned once and retained only as tenant-scoped SHA-256 digests
+- Acceptance atomically creates or links the platform user, adds the member tenant role and consumes the invitation
+- Activation fragments are removed immediately and never enter referrers, analytics or browser persistence
+- Existing accounts keep their password; staff and platform-admin role collisions are rejected rather than downgraded
+- 46 architecture/product contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass
