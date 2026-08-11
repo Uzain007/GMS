@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.17.0 — Milestone 12 member data export lifecycle |
+| MAD version | 0.18.0 — Milestone 13 hosted runtime-gate repair |
 | Last verified | 11 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-12-member-data-export` |
-| Active milestone | Milestone 12 — implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending |
+| Active branch | `feature/milestone-13-ci-runtime-repair` |
+| Active milestone | Milestone 13 — implementation complete; repaired GitHub-hosted rerun pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -948,7 +948,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
 - Backups, point-in-time recovery, restore drills, provider webhook monitoring, failed-job alerts, centralised logs and error tracking are production launch gates.
 - Load validation targets report cache behaviour, bounded query latency, authentication throttles and tenant isolation. Load scripts use synthetic tenant IDs/tokens supplied only through environment variables and never contain committed credentials.
-- Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, production-dependency audit, all portable contracts, the production build and artifact validation.
+- Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, the production build/artifact validation before rendered-output contracts, all portable contracts and the production-dependency audit.
 - The backend job uses PHP 8.3 with PostgreSQL 17 and Redis 8 service containers. It creates an ephemeral `ironcore_app` login with `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT` and `NOBYPASSRLS`, owns only the disposable test database, and fails rather than skipping when PostgreSQL RLS or Redis runtime requirements are absent.
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 
@@ -996,9 +996,10 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 9 — account security and recovery | Feature-complete; runtime gate pending | 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass; Laravel/PostgreSQL/Redis/mail execution remains gated |
 | Optional TOTP MFA and one-time recovery codes | Implemented; runtime gate pending | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
 | Milestone 10 — multi-factor authentication | Feature-complete; runtime gate pending | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
-| Milestone 11 — production CI runtime gate | Implementation complete; first hosted run pending | Read-only web and Laravel jobs target locked Node dependencies, PHP 8.3, PostgreSQL 17, Redis 8, non-superuser RLS execution, dependency audits and fail-on-skip runtime assertions; 56 portable contracts pass locally |
+| Milestone 11 — production CI runtime gate | First hosted run failed; repair implemented in M13 | Web rendered-output tests ran before the artifact existed; member-export RLS used a session-setting namespace inconsistent with `TenantContext` |
 | Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
 | Milestone 12 — member data export lifecycle | Implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending | Portable contracts pass locally; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
+| Milestone 13 — hosted runtime-gate repair | Implementation complete; hosted rerun pending | Web artifact now precedes rendered contracts, export RLS uses `ironcore.current_gym_id`, and the unsupported PHP-action input is removed; portable/build gates pass locally |
 
 ## Change control
 

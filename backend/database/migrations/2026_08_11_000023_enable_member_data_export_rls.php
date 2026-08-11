@@ -11,8 +11,8 @@ return new class extends Migration {
         DB::unprepared('ALTER TABLE member_data_exports FORCE ROW LEVEL SECURITY');
         DB::unprepared(<<<'SQL'
             CREATE POLICY member_data_exports_tenant_isolation ON member_data_exports
-            USING (gym_id = current_setting('app.current_gym_id', true)::uuid)
-            WITH CHECK (gym_id = current_setting('app.current_gym_id', true)::uuid)
+            USING (gym_id = nullif(current_setting('ironcore.current_gym_id', true), '')::uuid)
+            WITH CHECK (gym_id = nullif(current_setting('ironcore.current_gym_id', true), '')::uuid)
         SQL);
     }
 

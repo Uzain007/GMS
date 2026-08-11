@@ -203,3 +203,11 @@ This workspace cannot execute PHP, PostgreSQL or Redis. The first GitHub-hosted 
 - Private tenant-prefixed storage, SHA-256 evidence, authenticated `private, no-store` downloads and seven-day byte deletion are covered by portable contracts.
 - Production Vinext build/artifact validation, TypeScript, ESLint, secret scan, production npm audit and all 59 portable contracts pass locally.
 - Laravel/PostgreSQL/Redis/S3 execution, queue retry/expiry observation and object-storage lifecycle verification remain target-environment gates.
+
+## Milestone 13 hosted runtime-gate repair checkpoint
+
+- Public GitHub check evidence confirmed both first-run jobs failed at their actual test steps; the PHP setup warning was independently visible.
+- The web failure is prevented by creating and validating the deployable artifact before rendered-output contracts import it.
+- The backend failure is prevented by aligning member-export forced RLS with the shared `ironcore.current_gym_id` connection setting and fail-closed empty-string conversion.
+- Portable contracts now assert build-before-render ordering, reject the unsupported setup input and reject the incorrect export RLS namespace.
+- A new GitHub-hosted run remains the authoritative PHP/PostgreSQL/Redis result.

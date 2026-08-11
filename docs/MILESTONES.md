@@ -115,3 +115,10 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Private tenant-prefixed object storage, SHA-256 integrity evidence, authenticated no-store downloads and seven-day expiry
 - Tenant-bound delayed byte deletion with request/audit metadata retained
 - Erasure remains a launch-country policy decision because immutable financial and security evidence may require retention
+
+## Milestone 13 — Hosted runtime-gate repair
+
+**Status: implementation complete; GitHub-hosted rerun pending**
+- Build and artifact validation now run before contracts that import rendered worker output
+- Member-export forced RLS uses the shared `ironcore.current_gym_id` session setting with fail-closed empty handling
+- Unsupported PHP setup input removed and regression contracts added for workflow order and tenant-setting consistency

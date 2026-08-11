@@ -36,3 +36,7 @@ Weekly Dependabot checks cover npm, Composer and GitHub Actions metadata. Depend
 ## Evidence boundary
 
 A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate and provides forced-RLS evidence for the current migrations and feature suite. It does not replace Stripe/mail/SMS/push sandbox tests, measured k6 load testing, backup restoration, infrastructure monitoring, privacy approval or production user-acceptance testing.
+
+## First hosted-run repair
+
+The first `main` run after Milestone 12 exposed two ordering/namespace defects that local build-first validation could not reveal: rendered-output contracts executed before `dist/server/index.js` existed, and the member-export policy read `app.current_gym_id` while the shared tenant context writes `ironcore.current_gym_id`. Milestone 13 makes the verified build precede the portable contracts, aligns the export policy with the established fail-closed setting, removes an unsupported setup action input, and adds regression assertions for both contracts.

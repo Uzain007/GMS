@@ -25,6 +25,10 @@ test("CI is read-only and exercises locked web checks plus live PostgreSQL and R
   assert.match(workflow, /DB_USERNAME: ironcore_app/);
   assert.match(workflow, /php artisan test --fail-on-skipped --fail-on-risky/);
   assert.match(workflow, /composer audit --no-interaction/);
+  const buildPosition = workflow.indexOf("npm run build");
+  const contractsPosition = workflow.indexOf("node --test tests/*.test.mjs");
+  assert.ok(buildPosition !== -1 && buildPosition < contractsPosition);
+  assert.doesNotMatch(workflow, /fail-fast:/);
 });
 
 test("the hosted runtime gate fails closed on privileged PostgreSQL or missing FORCE RLS", () => {

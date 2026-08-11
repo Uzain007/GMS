@@ -43,14 +43,16 @@ jobs:
       - name: Scan committed source for secrets
         run: npm run security:scan
 
+      # Rendered-output contracts import the deployable worker, so the verified
+      # artifact must exist before the complete portable test collection runs.
+      - name: Build and validate the deployable web artifact
+        run: npm run build
+
       - name: Run portable architecture and product contracts
         run: node --test tests/*.test.mjs
 
       - name: Audit production web dependencies
         run: npm audit --omit=dev --audit-level=high
-
-      - name: Build and validate the deployable web artifact
-        run: npm run build
 
   backend:
     name: Laravel, PostgreSQL RLS and Redis
@@ -124,7 +126,6 @@ jobs:
           extensions: bcmath, intl, mbstring, pcntl, pdo_pgsql, redis, zip
           coverage: none
           tools: composer:v2
-          fail-fast: true
 
       - name: Generate an ephemeral application key
         shell: bash
