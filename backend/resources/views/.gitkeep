@@ -1,0 +1,2 @@
+# IronCore currently serves a JSON API; Laravel still requires this directory
+# to exist when the production view cache is compiled.

@@ -27,7 +27,7 @@ class AuthController extends Controller
 
         $email = mb_strtolower((string) $request->string('email'));
         $password = (string) $request->string('password');
-        $user = \App\Models\User::query()->where('email', $email)->first();
+        $user = User::query()->where('email', $email)->first();
 
         if (! $user || ! Hash::check($password, $user->password)) {
             throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
@@ -87,6 +87,12 @@ class AuthController extends Controller
             $request->session()->invalidate();
             $request->session()->regenerateToken();
         }
+
+        // The Sanctum request guard caches the resolved identity for the
+        // current application lifecycle. Clear it as well so logout is
+        // immediately observable by subsequent requests and long-lived workers.
+        Auth::guard('sanctum')->forgetUser();
+        Auth::shouldUse('web');
 
         return response()->json(status: 204);
     }

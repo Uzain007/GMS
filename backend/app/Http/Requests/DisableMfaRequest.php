@@ -15,8 +15,8 @@ class DisableMfaRequest extends FormRequest
     {
         return [
             'current_password' => ['required', 'string', 'max:1024'],
-            'code' => ['nullable', 'required_without:recovery_code', 'prohibited_with:recovery_code', 'string', 'digits:6'],
-            'recovery_code' => ['nullable', 'required_without:code', 'prohibited_with:code', 'string', 'max:64'],
+            'code' => ['nullable', 'required_without:recovery_code', 'prohibits:recovery_code', 'string', 'digits:6'],
+            'recovery_code' => ['nullable', 'required_without:code', 'prohibits:code', 'string', 'max:64'],
         ];
     }
 }

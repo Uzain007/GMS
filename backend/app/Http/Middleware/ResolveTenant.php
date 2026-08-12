@@ -49,6 +49,12 @@ class ResolveTenant
                 return new JsonResponse(['message' => 'You do not have access to this gym.'], 403);
             }
 
+            // The route tenant has now been validated and promoted into the
+            // trusted context. Remove the consumed parameter so Laravel's
+            // positional controller dispatch cannot shift every nested route
+            // parameter (member, staff, booking, export, and so on) by one.
+            $request->route()->forgetParameter('gym');
+
             return $next($request);
         } finally {
             $this->context->clear();

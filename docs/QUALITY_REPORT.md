@@ -191,9 +191,9 @@ The Laravel feature suite includes selected-tenant count isolation, mismatched-h
 - Composer audit, Laravel production-cache validation and weekly Dependabot review across npm, Composer and GitHub Actions
 - YAML parsing, PHP parser validation, TypeScript, ESLint, secret scan and all 56 portable contracts
 
-### Hosted runtime gate still required
+### Hosted runtime confirmation still required
 
-This workspace cannot execute PHP, PostgreSQL or Redis. The first GitHub-hosted run must complete both named jobs before the generic runtime gate can be marked passed. Any backend failure is a product defect to diagnose; do not replace PostgreSQL with SQLite, grant `BYPASSRLS`, or remove fail-on-skip enforcement.
+The repaired suite has now been executed locally against PostgreSQL 17 forced RLS and Redis 8 as the non-superuser `ironcore_app`: all 44 Laravel tests and 335 assertions pass without warnings. The next GitHub-hosted backend run remains authoritative for the committed archive. Do not replace PostgreSQL with SQLite, grant `BYPASSRLS`, or remove fail-on-skip enforcement.
 
 ## Milestone 12 member-data export checkpoint
 
@@ -213,3 +213,7 @@ This workspace cannot execute PHP, PostgreSQL or Redis. The first GitHub-hosted 
 - A new GitHub-hosted run remains the authoritative PHP/PostgreSQL/Redis result.
 - The second hosted run passed the complete web job and exposed a Sanctum runtime incompatibility in the backend: cookie-authenticated tests receive a non-persisted `TransientToken`, which has no Eloquent key. Credential rotation and logout now distinguish that session marker from stored bearer tokens, with a portable regression contract guarding every affected controller.
 - The subsequent backend run advanced past authentication and exposed tenant route models being bound before PostgreSQL identity, tenant and role middleware. The runtime priority now establishes those security boundaries before implicit binding, retains authorization-before-lookup semantics, and adds hosted regression coverage; the next GitHub run is authoritative.
+- The latest hosted failure was reproduced locally on PostgreSQL 17/Redis 8. The fourth repair consumes the validated `{gym}` parameter before positional controller dispatch, moves gym access to trusted `TenantContext`, groups report dates by alias, repairs session-generation guard refresh, replaces unsupported MFA validators, and adds a narrowly scoped own-security-audit SELECT policy.
+- Composer dependencies are now locked and `.env.testing` is present without secrets, preventing dependency drift and dotenv warning noise.
+- The tracked API views directory lets the GitHub production-cache stage complete `config:cache`, `route:cache`, `view:cache` and `optimize:clear` even though the backend currently serves JSON only.
+- Final local runtime result: **44 tests passed, 335 assertions, zero failures, skips, risky tests or warnings** under non-superuser forced RLS and Redis-backed cache/session/queue configuration. The GitHub-hosted rerun is the remaining confirmation.

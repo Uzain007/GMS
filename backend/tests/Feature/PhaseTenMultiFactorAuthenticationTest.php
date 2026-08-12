@@ -7,6 +7,7 @@ use App\Services\MfaService;
 use App\Services\TotpService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Tests\TestCase;
 
@@ -25,12 +26,14 @@ class PhaseTenMultiFactorAuthenticationTest extends TestCase
         Carbon::setTestNow('2026-08-11 12:00:00 UTC');
         $user = User::factory()->create();
         $user->createToken('phone');
-        $this->actingAs($user)->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
+        $this->withHeaders($this->browserHeaders())
+            ->actingAs($user)
+            ->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
 
-        $setup = $this->postJson('/api/v1/auth/mfa/setup', ['current_password' => 'password'])
-            ->assertOk()
-            ->assertHeader('Cache-Control', 'no-store')
-            ->json('data');
+        $setupResponse = $this->postJson('/api/v1/auth/mfa/setup', ['current_password' => 'password'])
+            ->assertOk();
+        $this->assertStringContainsString('no-store', (string) $setupResponse->headers->get('Cache-Control'));
+        $setup = $setupResponse->json('data');
         $this->assertStringStartsWith('otpauth://totp/', $setup['otpauth_uri']);
         $this->assertNotSame($setup['secret'], $user->fresh()->getRawOriginal('mfa_secret'));
 
@@ -50,7 +53,7 @@ class PhaseTenMultiFactorAuthenticationTest extends TestCase
         $this->assertDatabaseMissing('user_mfa_recovery_codes', [
             'code_hash' => str_replace('-', '', $plainRecoveryCodes[0]),
         ]);
-        $this->assertDatabaseHas('audit_logs', ['event' => 'account.mfa.enabled', 'actor_id' => $user->id]);
+        $this->assertOwnPlatformAudit($user, 'account.mfa.enabled');
     }
 
     public function test_password_login_returns_an_opaque_challenge_and_totp_is_one_time(): void
@@ -145,14 +148,16 @@ class PhaseTenMultiFactorAuthenticationTest extends TestCase
         $this->assertSame(3, session(User::SESSION_AUTH_VERSION_KEY));
         $this->assertDatabaseCount('user_mfa_recovery_codes', 0);
         $this->assertDatabaseCount('personal_access_tokens', 0);
-        $this->assertDatabaseHas('audit_logs', ['event' => 'account.mfa.disabled', 'actor_id' => $user->id]);
+        $this->assertOwnPlatformAudit($user, 'account.mfa.disabled');
     }
 
     /** @return array{User,string,list<string>} */
     private function enrollMfa(): array
     {
         $user = User::factory()->create();
-        $this->actingAs($user)->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
+        $this->withHeaders($this->browserHeaders())
+            ->actingAs($user)
+            ->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
         $setup = $this->postJson('/api/v1/auth/mfa/setup', ['current_password' => 'password'])
             ->assertOk()
             ->json('data');
@@ -166,5 +171,20 @@ class PhaseTenMultiFactorAuthenticationTest extends TestCase
     private function browserHeaders(): array
     {
         return ['Origin' => 'http://localhost:3000', 'Referer' => 'http://localhost:3000/'];
+    }
+
+    private function assertOwnPlatformAudit(User $user, string $event): void
+    {
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            DB::statement("select set_config('ironcore.current_user_id', ?, false)", [$user->id]);
+        }
+
+        try {
+            $this->assertDatabaseHas('audit_logs', ['event' => $event, 'actor_id' => $user->id]);
+        } finally {
+            if (DB::connection()->getDriverName() === 'pgsql') {
+                DB::statement("select set_config('ironcore.current_user_id', '', false)");
+            }
+        }
     }
 }

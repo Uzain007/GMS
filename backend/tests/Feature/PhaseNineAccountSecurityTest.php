@@ -91,7 +91,9 @@ class PhaseNineAccountSecurityTest extends TestCase
     {
         $user = User::factory()->create();
         $user->createToken('phone');
-        $this->actingAs($user)->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
+        $this->withHeaders($this->browserHeaders())
+            ->actingAs($user)
+            ->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
 
         $this->patchJson('/api/v1/auth/password', [
             'current_password' => 'password',
@@ -110,7 +112,9 @@ class PhaseNineAccountSecurityTest extends TestCase
     public function test_stale_session_generation_is_rejected_before_identity_binding(): void
     {
         $user = User::factory()->create();
-        $this->actingAs($user)->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
+        $this->withHeaders($this->browserHeaders())
+            ->actingAs($user)
+            ->withSession([User::SESSION_AUTH_VERSION_KEY => 1]);
         $user->forceFill(['auth_version' => 2])->save();
 
         $this->getJson('/api/v1/auth/me')

@@ -140,9 +140,11 @@ class AccountSecurityController extends Controller
             return $lockedUser;
         });
 
-        if ($currentTokenId === null) {
+        if ($currentTokenId === null && $request->hasSession()) {
             $request->session()->regenerate();
             $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $user->auth_version);
+            Auth::guard('web')->setUser($user);
+            Auth::guard('sanctum')->setUser($user);
         }
 
         event(new PasswordReset($user));

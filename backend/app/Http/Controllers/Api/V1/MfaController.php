@@ -233,9 +233,11 @@ class MfaController extends Controller
 
     private function refreshCurrentSessionGeneration(Request $request, User $user, ?int $currentTokenId): void
     {
-        if ($currentTokenId === null) {
+        if ($currentTokenId === null && $request->hasSession()) {
             $request->session()->regenerate();
             $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $user->auth_version);
+            Auth::guard('web')->setUser($user);
+            Auth::guard('sanctum')->setUser($user);
         }
     }
 

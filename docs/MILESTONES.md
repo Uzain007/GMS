@@ -99,7 +99,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 11 — Production CI runtime gate
 
-**Status: implementation complete; first GitHub-hosted runtime result pending**
+**Status: web hosted check passing; repaired backend suite passes locally; GitHub-hosted rerun pending**
 - Read-only GitHub Actions checks for pull requests, `main` pushes and manual dispatches
 - Locked Node 22.13 web install, lint, type-check, secret scan, production dependency audit, portable contracts and deployable artifact validation
 - PHP 8.3 Laravel execution against PostgreSQL 17 and Redis 8 service containers
@@ -118,10 +118,15 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 13 — Hosted runtime-gate repair
 
-**Status: third runtime repair complete; GitHub-hosted rerun pending**
+**Status: fourth runtime repair passes PostgreSQL 17/Redis 8 locally; GitHub-hosted rerun pending**
 - Build and artifact validation now run before contracts that import rendered worker output
 - Member-export forced RLS uses the shared `ironcore.current_gym_id` session setting with fail-closed empty handling
 - Unsupported PHP setup input removed and regression contracts added for workflow order and tenant-setting consistency
 - Cookie-authenticated Sanctum `TransientToken` instances no longer enter persisted bearer-token ID/deletion paths
 - Tenant identity, membership and role middleware now precede implicit route-model binding, preventing PostgreSQL RLS from turning valid or role-denied tenant record routes into premature `404` responses
 - Membership creation runtime coverage expects the API's intentional `201 Created` response
+- The selected `{gym}` parameter is consumed into trusted `TenantContext` before positional controller dispatch, so nested member, staff, booking, training and export IDs reach the correct controller arguments
+- PostgreSQL reporting groups by the selected local-date alias instead of duplicating timezone placeholders
+- Stateful Sanctum credential rotation refreshes both session and request guards, MFA request rules use supported Laravel 13 validators, and users can read only their own whitelisted platform security audits under FORCE RLS
+- A committed Composer lockfile and non-secret `.env.testing` marker make CI dependency resolution deterministic and eliminate dotenv warnings
+- The complete local production-shaped gate passes 44 Laravel tests and 335 assertions with PostgreSQL 17, Redis 8, non-superuser `ironcore_app`, forced RLS and no warnings

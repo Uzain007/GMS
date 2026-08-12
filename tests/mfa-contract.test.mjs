@@ -6,6 +6,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("MFA secrets and recovery codes are platform-owned protected credentials", async () => {
   const migration = await read("backend/database/migrations/2026_08_11_000021_add_multi_factor_authentication.php");
+  const auditPolicy = await read("backend/database/migrations/2026_08_12_000024_allow_users_to_read_own_security_audit.php");
   const user = await read("backend/app/Models/User.php");
   const mfa = await read("backend/app/Services/MfaService.php");
 
@@ -16,6 +17,10 @@ test("MFA secrets and recovery codes are platform-owned protected credentials", 
   assert.match(user, /mfa_last_used_step/);
   assert.match(mfa, /hash_hmac\('sha256'/);
   assert.match(mfa, /whereNull\('used_at'\).*lockForUpdate/s);
+  assert.match(auditPolicy, /actor_id = nullif\(current_setting\('ironcore.current_user_id'/);
+  assert.match(auditPolicy, /auditable_id = actor_id/);
+  assert.match(auditPolicy, /account\.mfa\.enabled/);
+  assert.match(auditPolicy, /FOR SELECT/);
 });
 
 test("short-lived MFA login challenges are hashed, locked, bounded and generation-bound", async () => {

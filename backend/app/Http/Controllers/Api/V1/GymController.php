@@ -37,8 +37,7 @@ class GymController extends Controller
         StoreGymRequest $request,
         AuditService $audit,
         TenantContext $context,
-    ): GymResource
-    {
+    ): GymResource {
         Gate::authorize('create', Gym::class);
         $gym = DB::transaction(function () use ($request, $audit, $context): Gym {
             $data = $request->validated();
@@ -71,20 +70,27 @@ class GymController extends Controller
         return new GymResource($gym);
     }
 
-    public function show(Gym $gym): GymResource
+    public function show(TenantContext $context): GymResource
     {
+        $gym = $context->gym();
         Gate::authorize('view', $gym);
+
         return new GymResource($gym);
     }
 
-    public function update(UpdateGymRequest $request, Gym $gym, AuditService $audit): GymResource
-    {
+    public function update(
+        UpdateGymRequest $request,
+        AuditService $audit,
+        TenantContext $context,
+    ): GymResource {
+        $gym = $context->gym();
         Gate::authorize('update', $gym);
         $before = $gym->toArray();
         $fresh = DB::transaction(function () use ($request, $gym, $audit, $before): Gym {
             $gym->update($request->safe()->except('reason'));
             $fresh = $gym->fresh();
             $audit->record('gym.updated', $fresh, $request->user(), $before, $fresh->toArray(), (string) $request->string('reason'), $request);
+
             return $fresh;
         });
 

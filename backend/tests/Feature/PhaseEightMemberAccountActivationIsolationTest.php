@@ -127,10 +127,10 @@ class PhaseEightMemberAccountActivationIsolationTest extends TestCase
             "/api/v1/gyms/{$staffGym->id}/member-account-invitations/accept",
             ['token' => $staffToken],
         )->assertUnprocessable()->assertJsonValidationErrors('token');
-        $this->assertDatabaseHas('gym_user', [
+        app(TenantContext::class)->run($staffGym, fn () => $this->assertDatabaseHas('gym_user', [
             'gym_id' => $staffGym->id, 'user_id' => $staff->id,
             'role' => UserRole::Receptionist->value,
-        ]);
+        ]));
     }
 
     /** @return array{User, Gym, Member} */
@@ -140,6 +140,7 @@ class PhaseEightMemberAccountActivationIsolationTest extends TestCase
         $gym = Gym::factory()->create();
         $member = app(TenantContext::class)->run($gym, function () use ($gym, $owner, $suffix): Member {
             $gym->users()->attach($owner, ['role' => UserRole::GymOwner->value, 'status' => 'active']);
+
             return Member::query()->create([
                 'member_number' => 'MBR-'.$suffix,
                 'first_name' => 'Member', 'last_name' => $suffix,

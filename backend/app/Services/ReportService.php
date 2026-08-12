@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\DB;
 class ReportService
 {
     private const CACHE_SECONDS = 60;
+
     private const REPORT_VERSION = 'v1';
 
     public function __construct(private readonly TenantContext $context) {}
@@ -264,7 +265,9 @@ class ReportService
         // SQLite's expression exists only so local feature tests stay portable.
         return $query->toBase()
             ->selectRaw("{$dateExpression} AS report_date, {$aggregate} AS aggregate_value", $bindings)
-            ->groupByRaw($dateExpression, $bindings)
+            // Group by the selected alias so PostgreSQL does not receive two
+            // different placeholders for the same timezone expression.
+            ->groupBy('report_date')
             ->pluck('aggregate_value', 'report_date')
             ->map(fn ($value): int => (int) $value)
             ->all();

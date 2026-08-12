@@ -4,8 +4,8 @@ namespace App\Models;
 
 use App\Enums\UserRole;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -18,7 +18,10 @@ class User extends Authenticatable
 
     public const SESSION_AUTH_VERSION_KEY = 'ironcore_auth_version';
 
+    protected $attributes = ['auth_version' => 1];
+
     protected $fillable = ['name', 'email', 'password', 'platform_role', 'email_verified_at'];
+
     protected $hidden = ['password', 'remember_token', 'mfa_secret', 'mfa_last_used_step'];
 
     protected function casts(): array
@@ -89,6 +92,7 @@ class User extends Authenticatable
             ->wherePivot('status', 'active')
             ->whereKey($gymId)
             ->first()?->pivot?->role;
+
         return $role ? UserRole::tryFrom($role) : null;
     }
 }

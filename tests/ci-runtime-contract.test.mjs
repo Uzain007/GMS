@@ -22,6 +22,19 @@ const mfaController = await readFile(
   "backend/app/Http/Controllers/Api/V1/MfaController.php",
   "utf8",
 );
+const tenantMiddleware = await readFile(
+  "backend/app/Http/Middleware/ResolveTenant.php",
+  "utf8",
+);
+const gymController = await readFile(
+  "backend/app/Http/Controllers/Api/V1/GymController.php",
+  "utf8",
+);
+const saasController = await readFile(
+  "backend/app/Http/Controllers/Api/V1/SaasSubscriptionController.php",
+  "utf8",
+);
+const reportService = await readFile("backend/app/Services/ReportService.php", "utf8");
 
 test("CI is read-only and exercises locked web checks plus live PostgreSQL and Redis", () => {
   assert.match(workflow, /permissions:\s*\n\s*contents: read/);
@@ -70,6 +83,19 @@ test("tenant authorization precedes implicit route binding in the PostgreSQL run
   }
   assert.match(runtimeTest, /test_tenant_security_middleware_precedes_implicit_route_binding/);
   assert.match(tenantIsolationTest, /postJson\("\/api\/v1\/gyms\/\{\$gym->id\}\/memberships"[\s\S]*?->assertCreated\(\)/);
+});
+
+test("validated tenant routes consume gym before nested controller dispatch", () => {
+  const accessCheck = tenantMiddleware.indexOf("if (! $user->isSuperAdmin() && ! $hasActiveAccess)");
+  const consumeGym = tenantMiddleware.indexOf("forgetParameter('gym')");
+  const dispatch = tenantMiddleware.indexOf("return $next($request)");
+  assert.ok(accessCheck !== -1 && accessCheck < consumeGym && consumeGym < dispatch);
+  assert.match(gymController, /function show\(TenantContext \$context\)/);
+  assert.match(gymController, /\$gym = \$context->gym\(\)/);
+  assert.doesNotMatch(saasController, /Gym \$gym/);
+  assert.match(saasController, /\$context->gym\(\)/);
+  assert.match(reportService, /groupBy\('report_date'\)/);
+  assert.doesNotMatch(reportService, /groupByRaw\(\$dateExpression, \$bindings\)/);
 });
 
 test("the hosted runtime gate fails closed on privileged PostgreSQL or missing FORCE RLS", () => {

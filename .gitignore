@@ -31,9 +31,11 @@ yarn-error.log*
 .env*
 !.env.example
 !backend/.env.example
+!backend/.env.testing
 
 # Laravel backend
 /backend/vendor/
+/backend/.phpunit.result.cache
 /backend/storage/*.key
 /backend/storage/framework/cache/data/*
 /backend/storage/framework/sessions/*
