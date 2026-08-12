@@ -2,7 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\BindDatabaseIdentity;
+use App\Http\Middleware\EnsureAuthenticationVersion;
+use App\Http\Middleware\RequireRole;
+use App\Http\Middleware\ResolveTenant;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -11,6 +17,30 @@ use Tests\TestCase;
 class ProductionRuntimeGateTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_tenant_security_middleware_precedes_implicit_route_binding(): void
+    {
+        $priority = app(HttpKernel::class)->getMiddlewarePriority();
+        $bindings = array_search(SubstituteBindings::class, $priority, true);
+
+        $this->assertIsInt($bindings);
+        foreach ([
+            EnsureAuthenticationVersion::class,
+            BindDatabaseIdentity::class,
+            ResolveTenant::class,
+            RequireRole::class,
+        ] as $middleware) {
+            $position = array_search($middleware, $priority, true);
+            $this->assertIsInt($position, "{$middleware} is missing from middleware priority.");
+            $this->assertLessThan($bindings, $position, "{$middleware} must run before route model binding.");
+        }
+
+        $identity = array_search(BindDatabaseIdentity::class, $priority, true);
+        $tenant = array_search(ResolveTenant::class, $priority, true);
+        $role = array_search(RequireRole::class, $priority, true);
+        $this->assertLessThan($tenant, $identity, 'Database identity must be bound before tenant membership is queried.');
+        $this->assertLessThan($role, $tenant, 'Tenant membership must be resolved before role authorization.');
+    }
 
     private function postgresBoolean(mixed $value): bool
     {

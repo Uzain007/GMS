@@ -8,6 +8,11 @@ const runtimeTest = await readFile(
   "backend/tests/Feature/ProductionRuntimeGateTest.php",
   "utf8",
 );
+const applicationBootstrap = await readFile("backend/bootstrap/app.php", "utf8");
+const tenantIsolationTest = await readFile(
+  "backend/tests/Feature/PhaseThreeTenantIsolationTest.php",
+  "utf8",
+);
 const userModel = await readFile("backend/app/Models/User.php", "utf8");
 const accountSecurityController = await readFile(
   "backend/app/Http/Controllers/Api/V1/AccountSecurityController.php",
@@ -46,6 +51,25 @@ test("cookie-authenticated Sanctum sessions never treat TransientToken as a stor
   assert.match(userModel, /deleteCurrentPersonalAccessToken\(\): bool/);
   assert.doesNotMatch(accountSecurityController, /currentAccessToken\(\)\?->getKey/);
   assert.doesNotMatch(mfaController, /currentAccessToken\(\)\?->getKey/);
+});
+
+test("tenant authorization precedes implicit route binding in the PostgreSQL runtime", () => {
+  const bindings = applicationBootstrap.indexOf(
+    "prependToPriorityList(SubstituteBindings::class",
+  );
+  assert.ok(bindings !== -1);
+  for (const middleware of [
+    "EnsureAuthenticationVersion::class",
+    "BindDatabaseIdentity::class",
+    "ResolveTenant::class",
+    "RequireRole::class",
+  ]) {
+    assert.match(applicationBootstrap, new RegExp(
+      `prependToPriorityList\\(SubstituteBindings::class, ${middleware.replaceAll("\\", "\\\\")}\\)`,
+    ));
+  }
+  assert.match(runtimeTest, /test_tenant_security_middleware_precedes_implicit_route_binding/);
+  assert.match(tenantIsolationTest, /postJson\("\/api\/v1\/gyms\/\{\$gym->id\}\/memberships"[\s\S]*?->assertCreated\(\)/);
 });
 
 test("the hosted runtime gate fails closed on privileged PostgreSQL or missing FORCE RLS", () => {

@@ -104,7 +104,7 @@ class PhaseThreeTenantIsolationTest extends TestCase
             'starts_at' => '2026-08-10',
             'auto_renew' => true,
         ], ['X-Gym-ID' => $gym->id])
-            ->assertOk()
+            ->assertCreated()
             ->assertJsonPath('data.price_amount_minor', 4999)
             ->assertJsonPath('data.currency', 'GBP')
             ->assertJsonPath('data.terms_snapshot.notice_days', 30);

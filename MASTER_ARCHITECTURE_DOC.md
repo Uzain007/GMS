@@ -950,6 +950,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Load validation targets report cache behaviour, bounded query latency, authentication throttles and tenant isolation. Load scripts use synthetic tenant IDs/tokens supplied only through environment variables and never contain committed credentials.
 - Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, the production build/artifact validation before rendered-output contracts, all portable contracts and the production-dependency audit.
 - The backend job uses PHP 8.3 with PostgreSQL 17 and Redis 8 service containers. It creates an ephemeral `ironcore_app` login with `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT` and `NOBYPASSRLS`, owns only the disposable test database, and fails rather than skipping when PostgreSQL RLS or Redis runtime requirements are absent.
+- Auth generation, database identity, tenant membership and role authorization execute before implicit route-model binding. This ordering lets PostgreSQL RLS resolve tenant-owned records only after the connection security context exists and returns role denial before record lookup.
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 
 ## Active feature status
@@ -999,7 +1000,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 11 — production CI runtime gate | First hosted run failed; repair implemented in M13 | Web rendered-output tests ran before the artifact existed; member-export RLS used a session-setting namespace inconsistent with `TenantContext` |
 | Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
 | Milestone 12 — member data export lifecycle | Implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending | Portable contracts pass locally; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
-| Milestone 13 — hosted runtime-gate repair | Second repair complete; hosted rerun pending | Web gate passes; export RLS uses `ironcore.current_gym_id`; cookie-authenticated Sanctum `TransientToken` is now distinguished from persisted bearer tokens during credential rotation |
+| Milestone 13 — hosted runtime-gate repair | Third repair complete; hosted rerun pending | Web gate passes; export RLS and Sanctum session-token defects are repaired; tenant security middleware now precedes implicit route binding under PostgreSQL RLS |
 
 ## Change control
 
