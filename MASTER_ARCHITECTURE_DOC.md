@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.19.0 — Milestone 13 hosted runtime contract repair |
+| MAD version | 0.20.0 — Milestone 14 application-security analysis |
 | Last verified | 12 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `fix/milestone-13-hosted-runtime-contracts` |
-| Active milestone | Milestone 13 — exact PostgreSQL 17/Redis 8 runtime suite passes locally; GitHub-hosted rerun pending |
+| Active branch | `feature/milestone-14-codeql-security-scan` |
+| Active milestone | Milestone 14 — CodeQL application/workflow analysis implemented; first hosted scan pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -66,7 +66,7 @@ Before any source code is written, modified or suggested in a new session:
 | Eloquent global tenant concern | Active and fail-closed | Missing context returns no rows; mismatched/moved tenant writes throw |
 | Tenant-leading indexes | Active | Every Phase 3 operational index begins with `gym_id` unless explicitly global |
 | PostgreSQL RLS | Implemented | Forced policies cover `gym_user`, audit, operational and import tables |
-| PostgreSQL isolation integration test | Passing locally; hosted rerun pending | 44 Laravel tests and 335 assertions pass as non-superuser `ironcore_app` against PostgreSQL 17 forced RLS and Redis 8 |
+| PostgreSQL isolation integration test | Passing locally and on GitHub | Commit `79ed6ae` passed 44 Laravel tests and 335 assertions as non-superuser `ironcore_app` against PostgreSQL 17 forced RLS and Redis 8 |
 
 ## Active database schema
 
@@ -956,6 +956,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - After `ResolveTenant` validates route/header agreement and promotes the gym into `TenantContext`, it consumes the `{gym}` route parameter before controller dispatch. Controllers needing the selected gym read the trusted context, preventing Laravel's positional dispatcher from shifting nested member, staff, booking or export parameters.
 - The committed Composer lockfile makes the Laravel 13 dependency graph deterministic; the non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
+- CodeQL advanced analysis scans both JavaScript/TypeScript application source and GitHub Actions workflows on pull requests, `main` pushes and a weekly schedule. It runs the `security-extended` query suite, checks out without persisted credentials and grants only the job-scoped `security-events: write` permission required to upload code-scanning results. PHP remains covered by parser validation, Laravel runtime tests, Composer audit and review because CodeQL does not support PHP.
 
 ## Active feature status
 
@@ -964,47 +965,48 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 1 — responsive super-admin interface | Complete | Representative browser data and automated UI contracts |
 | Milestone 2 — Laravel API, authentication and base tenancy | Complete with hardening carried into M3 | Sanctum, gym CRUD, roles, audit foundation |
 | MAD and repository enforcement | Active | Root `AGENTS.md` requires this document before source changes |
-| PostgreSQL RLS and fail-closed tenancy | Passing locally; hosted rerun pending | 44 Laravel tests / 335 assertions pass under PostgreSQL 17 forced RLS and non-superuser `ironcore_app` |
-| Branches, members, staff, invitations, plans and memberships API | Implemented; runtime gate pending | Tenant composite FKs, RLS, validation, audit and capped pagination are active |
-| Streaming member CSV imports | Implemented; runtime gate pending | Private tenant paths, Redis job, 500-row inserts, bounded errors and progress counters |
-| Secure web authentication and tenant selection | Implemented; Laravel runtime gate pending | Stateful Sanctum/CSRF flow, session rotation, explicit super-admin tenant selection and no browser bearer storage |
-| Members frontend/API integration | Implemented; runtime gate pending | Tenant route/header agreement, capped server search, loading/error/empty states and member creation; demo preview remains isolated |
-| Branch, plan and membership frontend/API integration | Implemented; runtime gate pending | Parallel bounded reads, role-aware writes, exact minor-unit prices and immutable snapshots; isolated preview navigation now renders representative rows instead of blank content |
-| Staff and invitation frontend/API integration | Implemented; runtime gate pending | Tenant directory, pending invitations, one-time acceptance links, hierarchy-safe edits and mandatory audit reasons |
-| Milestone 3 — gym, member and staff operations | Feature-complete; runtime gate pending | Browser/API contracts are complete; Laravel/PostgreSQL execution awaits a PHP/Docker-capable environment |
-| Tenant invoices and immutable payment/refund ledger | Implemented; Laravel/PostgreSQL runtime gate pending | Server totals, cash/terminal/bank records, hosted online checkout, partial/full refunds and currency-specific summaries |
-| Stripe Connect onboarding and signed webhooks | Implemented; provider/runtime gate pending | Direct charges, no card storage, HMAC verification, narrow account lookup and idempotent settlement |
-| Payments frontend/API integration | Implemented; provider/runtime gate pending | Responsive finance workspace, role-aware actions, exact minor-unit entry and hosted checkout redirect |
-| Platform SaaS plan catalogue and immutable prices | Implemented; provider/runtime gate pending | Platform-owned tiers, five supported currencies, monthly/yearly prices and Stripe product/price references |
-| Tenant-isolated gym subscriptions and SaaS invoices | Implemented; provider/runtime gate pending | Separate platform Stripe customer, one open Checkout, customer portal, snapshots, dunning and invoice history |
-| Stripe Billing signed webhook synchronization | Implemented; provider/runtime gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
-| Platform SaaS subscription frontend/API integration | Implemented; provider/runtime gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
-| Milestone 4 — payments and platform SaaS billing | Feature-complete; provider/runtime gate pending | Static contracts, production build and responsive browser QA pass; live Laravel/PostgreSQL/Stripe execution remains gated |
-| Member QR credentials and branch attendance | Implemented; runtime gate pending | One-time opaque issuance, hash-only storage, active-membership validation, one open presence row and cursor history |
-| Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; runtime gate pending | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |
-| Attendance and class-booking frontend/API integration | Implemented; runtime gate pending | Check-in console, one-time QR rendering, live presence, schedule, rosters, booking and waitlist actions; attendance columns now use the responsive shared table contract |
-| Milestone 5A — attendance, classes and bookings | Feature-complete; runtime gate pending | Static contracts, production build, type-check and browser QA pass; live Laravel/PostgreSQL/Redis execution remains gated |
-| Trainer assignments and member workout plans | Implemented; runtime gate pending | Explicit active-assignment boundary, ordered prescriptions, partial uniqueness and controlled plan lifecycle |
-| Append-only workout sessions and progress measurements | Implemented; runtime gate pending | Exact integer load/measurement storage, cursor history and member/trainer scope |
-| Redis-queued email, SMS and push notification adapters | Implemented; runtime/provider gate pending | Encrypted destinations, safe payload variables, preferences, idempotency, quiet hours and tenant-context jobs |
-| Training/progress frontend/API integration | Implemented; runtime gate pending | Browser-verified plans, exercise logging, progress history, delivery evidence and member-controlled preferences |
-| Milestone 5B — training, progress and notifications | Feature-complete; runtime/provider gate pending | Static contracts, production build, type-check and browser QA pass; live Laravel/PostgreSQL/Redis/adapters remain gated |
-| Tenant operational reporting API and workspace | Implemented; runtime gate pending | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
+| PostgreSQL RLS and fail-closed tenancy | Passing locally and hosted | Commit `79ed6ae` passed 44 Laravel tests / 335 assertions under PostgreSQL 17 forced RLS and non-superuser `ironcore_app` |
+| Branches, members, staff, invitations, plans and memberships API | Implemented; core runtime passing | Tenant composite FKs, RLS, validation, audit and capped pagination are active |
+| Streaming member CSV imports | Implemented; PostgreSQL/Redis runtime passing | Private tenant paths, Redis job, 500-row inserts, bounded errors and progress counters |
+| Secure web authentication and tenant selection | Implemented; core runtime passing | Stateful Sanctum/CSRF flow, session rotation, explicit super-admin tenant selection and no browser bearer storage |
+| Members frontend/API integration | Implemented; core runtime passing | Tenant route/header agreement, capped server search, loading/error/empty states and member creation; demo preview remains isolated |
+| Branch, plan and membership frontend/API integration | Implemented; core runtime passing | Parallel bounded reads, role-aware writes, exact minor-unit prices and immutable snapshots; isolated preview navigation now renders representative rows instead of blank content |
+| Staff and invitation frontend/API integration | Implemented; core runtime passing | Tenant directory, pending invitations, one-time acceptance links, hierarchy-safe edits and mandatory audit reasons |
+| Milestone 3 — gym, member and staff operations | Feature-complete; core runtime passing | Browser/API contracts and GitHub-hosted Laravel/PostgreSQL/Redis tests pass |
+| Tenant invoices and immutable payment/refund ledger | Implemented; core runtime passing | Server totals, cash/terminal/bank records, hosted online checkout, partial/full refunds and currency-specific summaries |
+| Stripe Connect onboarding and signed webhooks | Implemented; provider sandbox gate pending | Direct charges, no card storage, HMAC verification, narrow account lookup and idempotent settlement |
+| Payments frontend/API integration | Implemented; provider sandbox gate pending | Responsive finance workspace, role-aware actions, exact minor-unit entry and hosted checkout redirect |
+| Platform SaaS plan catalogue and immutable prices | Implemented; core runtime passing; provider gate pending | Platform-owned tiers, five supported currencies, monthly/yearly prices and Stripe product/price references |
+| Tenant-isolated gym subscriptions and SaaS invoices | Implemented; core runtime passing; provider gate pending | Separate platform Stripe customer, one open Checkout, customer portal, snapshots, dunning and invoice history |
+| Stripe Billing signed webhook synchronization | Implemented; core runtime passing; provider gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
+| Platform SaaS subscription frontend/API integration | Implemented; core runtime passing; provider gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
+| Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |
+| Member QR credentials and branch attendance | Implemented; core runtime passing | One-time opaque issuance, hash-only storage, active-membership validation, one open presence row and cursor history |
+| Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; core runtime passing | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |
+| Attendance and class-booking frontend/API integration | Implemented; core runtime passing | Check-in console, one-time QR rendering, live presence, schedule, rosters, booking and waitlist actions; attendance columns now use the responsive shared table contract |
+| Milestone 5A — attendance, classes and bookings | Feature-complete; core runtime passing | Static contracts, production build, type-check, browser QA and GitHub-hosted runtime pass |
+| Trainer assignments and member workout plans | Implemented; core runtime passing | Explicit active-assignment boundary, ordered prescriptions, partial uniqueness and controlled plan lifecycle |
+| Append-only workout sessions and progress measurements | Implemented; core runtime passing | Exact integer load/measurement storage, cursor history and member/trainer scope |
+| Redis-queued email, SMS and push notification adapters | Implemented; Redis runtime passing; provider gate pending | Encrypted destinations, safe payload variables, preferences, idempotency, quiet hours and tenant-context jobs |
+| Training/progress frontend/API integration | Implemented; core runtime passing | Browser-verified plans, exercise logging, progress history, delivery evidence and member-controlled preferences |
+| Milestone 5B — training, progress and notifications | Feature-complete; provider gate pending | Core runtime, static contracts, production build, type-check and browser QA pass; live adapters remain gated |
+| Tenant operational reporting API and workspace | Implemented; core runtime passing; load gate pending | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
 | Security, load and deployment preparation | Implemented; load/deployment gate pending | Named report/readiness throttles, generic PostgreSQL/Redis readiness, synthetic k6 probe, secret scan, deployment runbook and launch checklist |
-| Milestone 6A — reporting and operational hardening | Feature-complete; runtime/load gate pending | 40 static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass, including preview navigation and attendance layout regression coverage |
-| Milestone 6B — dedicated gym-client portal | Feature-complete; runtime gate pending | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
-| Linked member self-service API and least-privilege resources | Implemented; runtime gate pending | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
-| Milestone 7 — linked-member self-service portal | Feature-complete; runtime gate pending | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
-| Secure member account invitation and activation | Implemented; runtime gate pending | Tenant-scoped invitation history, hash-only one-time tokens, atomic user/member linking and immediate member-session entry |
-| Milestone 8 — secure member account activation | Feature-complete; runtime gate pending | Controlled owner/manager/receptionist invitation workflow; 46 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
-| Account recovery, password change and credential revocation | Implemented; runtime gate pending | Non-enumerating queued recovery, fragment-only reset secrets, strong replacement passwords, row-locked credential rotation and monotonic session invalidation |
-| Milestone 9 — account security and recovery | Feature-complete; runtime gate pending | 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass; Laravel/PostgreSQL/Redis/mail execution remains gated |
-| Optional TOTP MFA and one-time recovery codes | Implemented; runtime gate pending | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
-| Milestone 10 — multi-factor authentication | Feature-complete; runtime gate pending | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
-| Milestone 11 — production CI runtime gate | Web hosted check passing; backend repair verified locally | Exact PostgreSQL 17/Redis 8 suite passes locally; the repaired GitHub-hosted backend rerun remains authoritative |
+| Milestone 6A — reporting and operational hardening | Feature-complete; load/deployment gates pending | Core runtime plus static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass |
+| Milestone 6B — dedicated gym-client portal | Feature-complete; core runtime passing | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
+| Linked member self-service API and least-privilege resources | Implemented; core runtime passing | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
+| Milestone 7 — linked-member self-service portal | Feature-complete; core runtime passing | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Secure member account invitation and activation | Implemented; core runtime passing | Tenant-scoped invitation history, hash-only one-time tokens, atomic user/member linking and immediate member-session entry |
+| Milestone 8 — secure member account activation | Feature-complete; core runtime passing | Controlled owner/manager/receptionist invitation workflow; 46 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Account recovery, password change and credential revocation | Implemented; core runtime passing; mail gate pending | Non-enumerating queued recovery, fragment-only reset secrets, strong replacement passwords, row-locked credential rotation and monotonic session invalidation |
+| Milestone 9 — account security and recovery | Feature-complete; mail sandbox gate pending | Core runtime plus 50 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Optional TOTP MFA and one-time recovery codes | Implemented; core runtime passing | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
+| Milestone 10 — multi-factor authentication | Feature-complete; core runtime passing | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
+| Milestone 11 — production CI runtime gate | Complete on commit `79ed6ae` | Both hosted jobs pass; PostgreSQL 17/Redis 8, forced RLS and Laravel production caches are verified |
 | Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
-| Milestone 12 — member data export lifecycle | Implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending | Portable contracts pass locally; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
-| Milestone 13 — hosted runtime-gate repair | Fourth repair passes exact local runtime; hosted rerun pending | Nested tenant route dispatch, PostgreSQL report grouping, stateful auth generation, MFA validation/audit RLS and deterministic dependency/test boot contracts are repaired; 44 tests / 335 assertions pass without warnings |
+| Milestone 12 — member data export lifecycle | Implementation complete; core runtime passing; S3 gate pending | Portable/runtime contracts pass; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
+| Milestone 13 — hosted runtime-gate repair | Complete on commit `79ed6ae` | Both GitHub jobs pass; nested tenant route dispatch, PostgreSQL reporting, stateful auth, MFA audit RLS and deterministic dependency/test boot contracts are verified |
+| Milestone 14 — CodeQL application-security analysis | Implemented; first hosted scan pending | JavaScript/TypeScript and GitHub Actions use pinned CodeQL v4 with `security-extended` queries, least-privilege permissions and weekly rescanning |
 
 ## Change control
 

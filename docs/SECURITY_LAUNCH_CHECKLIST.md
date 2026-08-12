@@ -17,4 +17,4 @@ The release owner must record evidence for every item before production traffic.
 - [ ] Central logs, error tracking, uptime, queue, scheduler, webhook and provider alerts reach the on-call owner.
 - [ ] Member export workflow passes PostgreSQL/Redis/S3 runtime validation; erasure/retention rules, privacy notice, processor agreements and incident-response contacts are approved for launch countries.
 
-Milestone 11 commits the read-only web and Laravel/PostgreSQL/Redis quality workflow. Keep the CI item unchecked until its first hosted run succeeds, both checks are required by `main` branch protection, and a separate application-security scan is selected and evidenced.
+Milestone 11's web and Laravel/PostgreSQL/Redis jobs both passed on commit `79ed6ae`. Milestone 14 adds CodeQL for JavaScript/TypeScript and GitHub Actions. Keep the CI item unchecked until both CodeQL analyses pass and all four named checks are required by `main` branch protection.

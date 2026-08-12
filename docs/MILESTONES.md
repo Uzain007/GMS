@@ -19,7 +19,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Tenant-isolation and audit-log tests
 
 ## Milestone 3 — Gym and member operations
-**Status: feature-complete; Laravel/PostgreSQL runtime gate pending**
+**Status: feature-complete; GitHub-hosted Laravel/PostgreSQL/Redis runtime passing**
 - Gym onboarding and subscription setup
 - Member profiles, plans, contracts and lifecycle states
 - Staff invitations, permissions and CSV import
@@ -27,7 +27,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Tenant-prefixed private uploads and 500-row queued member-import batches
 
 ## Milestone 4 — Payments and SaaS billing
-**Status: feature-complete; provider/runtime gate pending**
+**Status: feature-complete; core runtime passing; provider sandbox gate pending**
 - Hosted Stripe Connect card collection and signed, idempotent provider webhooks
 - Cash, external-terminal, bank and other payment records with audit history
 - Tenant invoices, server-calculated totals, partial/full refunds and reconciliation summaries
@@ -38,7 +38,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 5 — Attendance and engagement
 
-**Status: feature-complete; Laravel/PostgreSQL/Redis and provider runtime gates pending**
+**Status: feature-complete; core runtime passing; provider adapter gates pending**
 - Revocable QR credentials, member-code check-in and live branch attendance
 - Capacity-safe class scheduling, bookings, retained cancellations and FIFO waitlist promotion
 - Role-aware member self-booking, rosters and assigned-trainer attendance
@@ -50,18 +50,18 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 6 — Reporting, hardening and deployment
 
-**Milestone 6A status: feature-complete; Laravel/PostgreSQL/Redis, load and deployment gates pending**
+**Milestone 6A status: feature-complete; core runtime passing; load and deployment gates pending**
 - Bounded financial, member, attendance and class-utilisation reporting for one selected tenant
 - Currency-specific aggregates, equal-length comparison periods, tenant-keyed Redis caching and management-only access
 - Report and readiness throttles, generic PostgreSQL/Redis readiness, secret scan and synthetic k6 load probe
 - Responsive Reports workspace with real authenticated API mode and isolated representative preview data
 - Populated Branches, Membership Plans and Memberships preview navigation plus responsive attendance-table regression coverage
 - Deployment/rollback/recovery runbook and evidence-based security launch checklist
-- Remaining production gates: live Laravel/PostgreSQL RLS/Redis suite, measured k6 run, provider sandboxes, restore drill and monitored deployment
+- Remaining production gates: measured k6 run, provider sandboxes, restore drill and monitored deployment
 
 ## Milestone 7 — Linked-member portal
 
-**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+**Status: feature-complete; GitHub-hosted core runtime passing**
 - Dedicated mobile-first member shell for profile, membership, payments, attendance, classes, training, progress and preferences
 - Server-resolved member identity from the authenticated user link
 - One-time QR pass rotation with hash-only persistence and navigation clearing
@@ -69,7 +69,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 8 — Secure member account activation
 
-**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+**Status: feature-complete; GitHub-hosted core runtime passing**
 - Tenant staff can invite an existing, unlinked member record to activate portal access
 - One-time opaque activation values are returned once and retained only as tenant-scoped SHA-256 digests
 - Acceptance atomically creates or links the platform user, adds the member tenant role and consumes the invitation
@@ -79,7 +79,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 9 — Account security and recovery
 
-**Status: feature-complete; Laravel/PostgreSQL/Redis/mail runtime gate pending**
+**Status: feature-complete; core runtime passing; mail sandbox gate pending**
 - Non-enumerating password recovery with one-time, expiry-bound reset tokens
 - Strong authenticated password change for every platform and tenant role
 - Monotonic session-generation checks across Redis/database sessions and explicit Sanctum token revocation
@@ -88,7 +88,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 10 — Multi-factor authentication
 
-**Status: feature-complete; Laravel/PostgreSQL/Redis runtime gate pending**
+**Status: feature-complete; GitHub-hosted core runtime passing**
 - Optional RFC 6238 authenticator MFA for every platform, tenant-staff and member identity
 - Encrypted 160-bit secrets, row-locked non-replayed TOTP counters and eight one-time recovery codes
 - Application-keyed recovery-code digests with one-time plaintext enrollment/regeneration responses
@@ -99,7 +99,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 11 — Production CI runtime gate
 
-**Status: web hosted check passing; repaired backend suite passes locally; GitHub-hosted rerun pending**
+**Status: complete on commit `79ed6ae`; both hosted jobs passing**
 - Read-only GitHub Actions checks for pull requests, `main` pushes and manual dispatches
 - Locked Node 22.13 web install, lint, type-check, secret scan, production dependency audit, portable contracts and deployable artifact validation
 - PHP 8.3 Laravel execution against PostgreSQL 17 and Redis 8 service containers
@@ -109,7 +109,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 12 — Member data export lifecycle
 
-**Status: implementation complete; Laravel/PostgreSQL/Redis/S3 runtime gate pending**
+**Status: implementation complete; core runtime passing; S3 lifecycle gate pending**
 - Owner/manager/super-admin and linked-member request paths behind normal tenant authorization
 - Redis-queued JSON generation with explicit tenant predicates and forced PostgreSQL RLS
 - Private tenant-prefixed object storage, SHA-256 integrity evidence, authenticated no-store downloads and seven-day expiry
@@ -118,7 +118,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 13 — Hosted runtime-gate repair
 
-**Status: fourth runtime repair passes PostgreSQL 17/Redis 8 locally; GitHub-hosted rerun pending**
+**Status: complete on commit `79ed6ae`; GitHub-hosted runtime passing**
 - Build and artifact validation now run before contracts that import rendered worker output
 - Member-export forced RLS uses the shared `ironcore.current_gym_id` session setting with fail-closed empty handling
 - Unsupported PHP setup input removed and regression contracts added for workflow order and tenant-setting consistency
@@ -130,3 +130,12 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Stateful Sanctum credential rotation refreshes both session and request guards, MFA request rules use supported Laravel 13 validators, and users can read only their own whitelisted platform security audits under FORCE RLS
 - A committed Composer lockfile and non-secret `.env.testing` marker make CI dependency resolution deterministic and eliminate dotenv warnings
 - The complete local production-shaped gate passes 44 Laravel tests and 335 assertions with PostgreSQL 17, Redis 8, non-superuser `ironcore_app`, forced RLS and no warnings
+
+## Milestone 14 — Application-security analysis
+
+**Status: implementation complete; first hosted CodeQL scan pending**
+- Advanced CodeQL analysis for JavaScript/TypeScript application source and GitHub Actions workflows
+- Pull-request, `main` push and weekly scheduled scans using the `security-extended` query suite
+- Immutable reviewed action revisions, checkout credentials disabled and job-scoped SARIF upload permission
+- PHP remains covered by parser validation, Laravel/PostgreSQL/Redis runtime tests, Composer audit and review because CodeQL does not support PHP
+- Portable workflow contracts prevent permission, trigger, language and action-pin regressions

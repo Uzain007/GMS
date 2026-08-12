@@ -158,9 +158,9 @@ The repository includes Laravel feature coverage for cross-tenant plan denial, a
 
 39 tests passed with no failures, skips or cancellations. The committed secret scan found no known live-secret signatures.
 
-### Runtime/load/deployment gate still required
+### Load/provider/deployment gates still required
 
-The Laravel feature suite includes selected-tenant count isolation, mismatched-header denial, role denial and 366-day validation. Live execution still needs PHP/Composer, PostgreSQL 17 under `ironcore_app` and Redis. Run the k6 probe against a synthetic test tenant, complete provider sandbox tests and a backup restore drill, then execute the monitored deployment runbook before production launch.
+The GitHub-hosted Laravel feature suite now passes selected-tenant count isolation, mismatched-header denial, role denial and 366-day validation under PostgreSQL 17 and Redis 8. Run the k6 probe against a synthetic test tenant, complete provider sandbox tests and a backup restore drill, then execute the monitored deployment runbook before production launch.
 
 ## Milestone 6A preview-navigation QA repair
 
@@ -191,9 +191,9 @@ The Laravel feature suite includes selected-tenant count isolation, mismatched-h
 - Composer audit, Laravel production-cache validation and weekly Dependabot review across npm, Composer and GitHub Actions
 - YAML parsing, PHP parser validation, TypeScript, ESLint, secret scan and all 56 portable contracts
 
-### Hosted runtime confirmation still required
+### Hosted runtime confirmed
 
-The repaired suite has now been executed locally against PostgreSQL 17 forced RLS and Redis 8 as the non-superuser `ironcore_app`: all 44 Laravel tests and 335 assertions pass without warnings. The next GitHub-hosted backend run remains authoritative for the committed archive. Do not replace PostgreSQL with SQLite, grant `BYPASSRLS`, or remove fail-on-skip enforcement.
+Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Laravel tests and 335 assertions against PostgreSQL 17 forced RLS and Redis 8 as non-superuser `ironcore_app`, then completed dependency audit and the production cache commands. Do not replace PostgreSQL with SQLite, grant `BYPASSRLS`, or remove fail-on-skip enforcement.
 
 ## Milestone 12 member-data export checkpoint
 
@@ -210,10 +210,18 @@ The repaired suite has now been executed locally against PostgreSQL 17 forced RL
 - The web failure is prevented by creating and validating the deployable artifact before rendered-output contracts import it.
 - The backend failure is prevented by aligning member-export forced RLS with the shared `ironcore.current_gym_id` connection setting and fail-closed empty-string conversion.
 - Portable contracts now assert build-before-render ordering, reject the unsupported setup input and reject the incorrect export RLS namespace.
-- A new GitHub-hosted run remains the authoritative PHP/PostgreSQL/Redis result.
+- Each repaired archive required a new GitHub-hosted run as the authoritative PHP/PostgreSQL/Redis result.
 - The second hosted run passed the complete web job and exposed a Sanctum runtime incompatibility in the backend: cookie-authenticated tests receive a non-persisted `TransientToken`, which has no Eloquent key. Credential rotation and logout now distinguish that session marker from stored bearer tokens, with a portable regression contract guarding every affected controller.
-- The subsequent backend run advanced past authentication and exposed tenant route models being bound before PostgreSQL identity, tenant and role middleware. The runtime priority now establishes those security boundaries before implicit binding, retains authorization-before-lookup semantics, and adds hosted regression coverage; the next GitHub run is authoritative.
+- The subsequent backend run advanced past authentication and exposed tenant route models being bound before PostgreSQL identity, tenant and role middleware. The runtime priority now establishes those security boundaries before implicit binding, retains authorization-before-lookup semantics, and adds hosted regression coverage.
 - The latest hosted failure was reproduced locally on PostgreSQL 17/Redis 8. The fourth repair consumes the validated `{gym}` parameter before positional controller dispatch, moves gym access to trusted `TenantContext`, groups report dates by alias, repairs session-generation guard refresh, replaces unsupported MFA validators, and adds a narrowly scoped own-security-audit SELECT policy.
 - Composer dependencies are now locked and `.env.testing` is present without secrets, preventing dependency drift and dotenv warning noise.
 - The tracked API views directory lets the GitHub production-cache stage complete `config:cache`, `route:cache`, `view:cache` and `optimize:clear` even though the backend currently serves JSON only.
-- Final local runtime result: **44 tests passed, 335 assertions, zero failures, skips, risky tests or warnings** under non-superuser forced RLS and Redis-backed cache/session/queue configuration. The GitHub-hosted rerun is the remaining confirmation.
+- Final result: **44 tests passed, 335 assertions, zero failures, skips, risky tests or warnings** locally and on GitHub under non-superuser forced RLS and Redis-backed cache/session/queue configuration.
+
+## Milestone 14 application-security checkpoint
+
+- CodeQL advanced setup scans JavaScript/TypeScript and GitHub Actions with the `security-extended` query suite.
+- Scans run on pull requests, `main` pushes, manual dispatch and a weekly schedule so newly published queries re-evaluate unchanged source.
+- Every action is pinned to a reviewed immutable revision, checkout credentials are not persisted and only the analysis job receives `security-events: write` for result upload.
+- The first hosted CodeQL result remains the milestone authority. PHP is explicitly outside CodeQL language support and remains covered by syntax parsing, Composer audit, Laravel runtime tests and human review.
+- Local validation passes all 64 portable contracts, ESLint, TypeScript, YAML parsing, secret scan, production build/artifact validation and the zero-vulnerability production npm audit.
