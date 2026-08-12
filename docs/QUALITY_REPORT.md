@@ -223,5 +223,14 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - CodeQL advanced setup scans JavaScript/TypeScript and GitHub Actions with the `security-extended` query suite.
 - Scans run on pull requests, `main` pushes, manual dispatch and a weekly schedule so newly published queries re-evaluate unchanged source.
 - Every action is pinned to a reviewed immutable revision, checkout credentials are not persisted and only the analysis job receives `security-events: write` for result upload.
-- The first hosted CodeQL result remains the milestone authority. PHP is explicitly outside CodeQL language support and remains covered by syntax parsing, Composer audit, Laravel runtime tests and human review.
+- Commit `2ddc641` passed both hosted `CodeQL (actions)` and `CodeQL (javascript-typescript)` analyses. PHP is explicitly outside CodeQL language support and remains covered by syntax parsing, Composer audit, Laravel runtime tests and human review.
 - Local validation passes all 64 portable contracts, ESLint, TypeScript, YAML parsing, secret scan, production build/artifact validation and the zero-vulnerability production npm audit.
+
+## Milestone 15 deployed-web verification checkpoint
+
+- Every frontend build publishes a non-secret full Git SHA release marker; Vercel supplies the deployment-triggering SHA.
+- The credential-free workflow runs after every `main` push, every six hours and by manual dispatch with read-only repository permission and immutable action revisions.
+- A ten-minute bounded retry window distinguishes normal Vercel alias propagation from a stale or failed deployment.
+- The target must be reviewed, HTTPS and explicitly allowlisted; credentials, query strings, fragments, private host literals and cross-origin redirects fail closed.
+- The release probe validates the exact commit, HTTP `200` HTML, HSTS, language/title/platform markers, one same-origin stylesheet and script, and the install manifest contract.
+- All 69 portable contracts, ESLint, TypeScript, the production build/artifact check, secret scan and zero-vulnerability production npm audit pass locally. The first GitHub-hosted run against the matching Vercel deployment remains the milestone authority.

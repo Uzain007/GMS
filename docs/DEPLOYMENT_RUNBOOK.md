@@ -21,8 +21,9 @@ This runbook targets a production topology with a separately deployed web app, L
 6. Deploy the API, queue workers and scheduler from the same release. Run `php artisan config:cache`, `route:cache` and `view:cache` during image/release preparation.
 7. Restart queue workers with `php artisan queue:restart`, then shift traffic only after `/up` and `/api/v1/health/readiness` pass.
 8. Deploy the frontend with the exact production API origin. Verify Sanctum stateful domains, CORS, secure cookies and the shared HTTPS parent domain.
-9. Exercise login, password recovery through the default Redis queue and mail sandbox, MFA enrollment/challenge/recovery on the shared Redis cache, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
-10. Watch error rate, queue age, failed jobs, database saturation and webhook failures through the rollback window.
+9. Require `Deployed web release` to pass for the deployed commit. The probe waits for the public alias to expose the triggering full SHA, then checks HTTPS/HSTS, the reviewed shell, same-origin CSS/JavaScript and the install manifest.
+10. Exercise login, password recovery through the default Redis queue and mail sandbox, MFA enrollment/challenge/recovery on the shared Redis cache, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
+11. Watch error rate, queue age, failed jobs, database saturation and webhook failures through the rollback window.
 
 ## Required production environment
 
@@ -41,4 +42,6 @@ Alert on readiness failures, HTTP 5xx/error rate, p95 latency, PostgreSQL connec
 
 ## Repository quality gate
 
-Before a release commit is eligible for deployment, GitHub must report both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` as successful. Configure `main` branch protection to require these checks and a pull request; never allow a deployment credential or production provider secret into the quality workflow. The backend check is intentionally fail-on-skip so SQLite or a privileged PostgreSQL connection cannot masquerade as RLS evidence.
+Before a release commit is eligible for deployment, GitHub must report `Web build and contracts`, `Laravel, PostgreSQL RLS and Redis`, `CodeQL (actions)` and `CodeQL (javascript-typescript)` as successful. After Vercel updates the production alias, `Deployed web release` must confirm that the same full commit SHA is serving. Configure `main` branch protection to require the pre-deployment checks and a pull request; never allow a deployment credential or production provider secret into a quality or smoke workflow. The backend check is intentionally fail-on-skip so SQLite or a privileged PostgreSQL connection cannot masquerade as RLS evidence.
+
+The committed smoke target is `https://gms-beige-ten.vercel.app/`. A reviewed source change must update both its URL and exact hostname allowlist before a production-domain migration. The check is intentionally public and credential-free; authenticated Laravel readiness and business workflows remain the monitored deployment steps above.

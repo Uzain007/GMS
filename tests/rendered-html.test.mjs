@@ -4,6 +4,8 @@ import test from "node:test";
 
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
+const developmentReleaseMeta =
+  /<meta(?=[^>]*\bname=["']ironcore-release["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
 test("renders development preview metadata", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -32,6 +34,7 @@ test("renders development preview metadata", async () => {
   );
   const html = await response.text();
   assert.match(html, developmentPreviewMeta);
+  assert.match(html, developmentReleaseMeta);
   assert.match(html, /IRONCORE/i);
   assert.match(html, /Good morning/i);
   assert.match(html, /Total members/i);

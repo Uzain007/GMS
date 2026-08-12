@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.20.0 — Milestone 14 application-security analysis |
+| MAD version | 0.21.0 — Milestone 15 deployed-web release verification |
 | Last verified | 12 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-14-codeql-security-scan` |
-| Active milestone | Milestone 14 — CodeQL application/workflow analysis implemented; first hosted scan pending |
+| Active branch | `feature/milestone-15-deployed-web-smoke` |
+| Active milestone | Milestone 15 — deployed-web release identity and smoke gate implemented; first hosted run pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -957,6 +957,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The committed Composer lockfile makes the Laravel 13 dependency graph deterministic; the non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 - CodeQL advanced analysis scans both JavaScript/TypeScript application source and GitHub Actions workflows on pull requests, `main` pushes and a weekly schedule. It runs the `security-extended` query suite, checks out without persisted credentials and grants only the job-scoped `security-events: write` permission required to upload code-scanning results. PHP remains covered by parser validation, Laravel runtime tests, Composer audit and review because CodeQL does not support PHP.
+- Each web build publishes the non-secret immutable Git commit as the `ironcore-release` metadata value. Vercel builds use `VERCEL_GIT_COMMIT_SHA`; GitHub/local validation may use `GITHUB_SHA` or the explicit `development` fallback. A commit identifier is provenance, never an authorization or tenant input.
+- The deployed-web smoke workflow runs on each `main` push, every six hours and by manual dispatch. It waits at most ten minutes for the allowlisted HTTPS deployment to serve the triggering full Git SHA, then verifies a `200` HTML shell, HSTS, the reviewed title/platform markers, same-origin CSS and JavaScript, and the install manifest. Its target cannot contain credentials, query parameters or fragments and cannot be a local/private host literal.
+- The deployed-web smoke is a public frontend availability/provenance gate only. It sends no production credential or tenant/member value and does not replace authenticated Laravel readiness, PostgreSQL/Redis monitoring, provider sandbox execution, load evidence or a backup restore drill.
 
 ## Active feature status
 
@@ -1006,7 +1009,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Secure member data exports | Implemented; runtime/storage gate pending | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
 | Milestone 12 — member data export lifecycle | Implementation complete; core runtime passing; S3 gate pending | Portable/runtime contracts pass; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
 | Milestone 13 — hosted runtime-gate repair | Complete on commit `79ed6ae` | Both GitHub jobs pass; nested tenant route dispatch, PostgreSQL reporting, stateful auth, MFA audit RLS and deterministic dependency/test boot contracts are verified |
-| Milestone 14 — CodeQL application-security analysis | Implemented; first hosted scan pending | JavaScript/TypeScript and GitHub Actions use pinned CodeQL v4 with `security-extended` queries, least-privilege permissions and weekly rescanning |
+| Milestone 14 — CodeQL application-security analysis | Complete on commit `2ddc641` | Both JavaScript/TypeScript and GitHub Actions analyses passed with pinned CodeQL v4, `security-extended` queries and least-privilege permissions |
+| Milestone 15 — deployed-web release verification | Implemented; first hosted smoke pending | Full-SHA deployment identity, allowlisted HTTPS probing, HSTS, same-origin asset and install-manifest checks run after `main` pushes and every six hours |
 
 ## Change control
 

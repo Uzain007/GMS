@@ -43,6 +43,7 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Product architecture, phased delivery plan and environment template
 - Passing GitHub quality gate for the web build plus live Laravel/PostgreSQL RLS/Redis execution
 - CodeQL application and GitHub Actions security analysis with scheduled rescans
+- Commit-matched Vercel smoke checks for HTTPS, release identity, assets and the install manifest
 - Automated build, rendered-output and product-contract tests
 
 The signed-out preview uses representative in-browser data; authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. The GitHub-hosted Laravel/PostgreSQL/Redis gate passes; Stripe, notification, object-storage, load, restore and monitored-deployment gates still require their target environments and credentials.

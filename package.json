@@ -13,6 +13,7 @@
     "test": "npm run build && npm run typecheck && node --test tests/*.test.mjs",
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "security:scan": "bash scripts/security/scan-secrets.sh",
+    "smoke:deployment": "node scripts/smoke/deployed-web.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern backend/vendor",
     "typecheck": "tsc --noEmit",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"

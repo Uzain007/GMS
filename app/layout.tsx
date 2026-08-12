@@ -12,12 +12,18 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// The public commit identifier lets a deployment smoke test prove that the
+// checked release, rather than a previously cached deployment, is serving.
+const releaseCommit =
+  process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "development";
+
 export const metadata: Metadata = {
   title: "IronCore | Gym management, built to scale",
   description:
     "The multi-tenant gym management platform for memberships, payments, staff and growth.",
   other: {
     "codex-preview": "development",
+    "ironcore-release": releaseCommit,
   },
   icons: {
     icon: "/favicon.svg",

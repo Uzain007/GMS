@@ -133,9 +133,20 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 14 — Application-security analysis
 
-**Status: implementation complete; first hosted CodeQL scan pending**
+**Status: complete on commit `2ddc641`**
 - Advanced CodeQL analysis for JavaScript/TypeScript application source and GitHub Actions workflows
 - Pull-request, `main` push and weekly scheduled scans using the `security-extended` query suite
 - Immutable reviewed action revisions, checkout credentials disabled and job-scoped SARIF upload permission
 - PHP remains covered by parser validation, Laravel/PostgreSQL/Redis runtime tests, Composer audit and review because CodeQL does not support PHP
 - Portable workflow contracts prevent permission, trigger, language and action-pin regressions
+- The first hosted security workflow passed both `CodeQL (actions)` and `CodeQL (javascript-typescript)` analyses
+
+## Milestone 15 — Deployed-web release verification
+
+**Status: implementation complete; first hosted smoke pending**
+- Non-secret full Git SHA metadata proves which immutable frontend release is serving
+- Main-push smoke waits for the Vercel alias to serve that exact SHA instead of accepting a stale deployment
+- Six-hour scheduled and manual runs continuously verify HTTPS/HSTS, the reviewed IronCore shell, same-origin CSS/JavaScript and the install manifest
+- The probe is pinned to an explicit public hostname, rejects credentials/query/fragment/private-host targets and sends no tenant or member data
+- Portable contracts cover workflow triggers, least privilege, immutable actions, release metadata and target validation
+- Authenticated API, provider, load, storage and restore-drill gates remain separate production requirements
