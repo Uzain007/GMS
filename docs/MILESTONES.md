@@ -143,7 +143,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 15 — Deployed-web release verification
 
-**Status: hosted deployment smoke passed on `5f485f2`; environment-aware CI contract repair pending**
+**Status: complete on commit `45cf343`; quality, security and deployed-web checks passing**
 - Non-secret full Git SHA metadata proves which immutable frontend release is serving
 - Main-push smoke waits for the Vercel alias to serve that exact SHA instead of accepting a stale deployment
 - Six-hour scheduled and manual runs continuously verify HTTPS/HSTS, the reviewed IronCore shell, same-origin CSS/JavaScript and the install manifest
@@ -152,3 +152,12 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - The first hosted smoke confirmed that Vercel served the exact `5f485f2` release with the reviewed HSTS, shell, asset and manifest contracts
 - Rendered-output validation derives the expected marker from Vercel/GitHub build identity before the explicit local `development` fallback
 - Authenticated API, provider, load, storage and restore-drill gates remain separate production requirements
+
+## Milestone 16 — S3-compatible member-export runtime gate
+
+**Status: implemented; hosted verification pending**
+- Disposable S3-compatible service in the existing least-privilege backend CI lane
+- Production `GenerateMemberDataExport` execution over the AWS SDK/Flysystem HTTP boundary
+- Private tenant-prefixed object, exact SHA-256 digest and byte-count verification
+- Production `PurgeMemberDataExport` execution with expired-byte deletion and retained audit metadata
+- Non-secret emulator credentials only; production bucket encryption, access policy and lifecycle evidence remain deployment gates

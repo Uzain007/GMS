@@ -11,16 +11,17 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Audits production npm dependencies at high severity or above.
 - Builds and validates the deployable web artifact.
 
-### Laravel, PostgreSQL RLS and Redis
+### Laravel, PostgreSQL RLS, Redis and S3-compatible storage
 
 - Installs PHP 8.3 and the extensions used by the production API.
-- Starts disposable PostgreSQL 17 and Redis 8 services.
+- Starts disposable PostgreSQL 17, Redis 8 and S3-compatible LocalStack services.
 - Creates the test database under `ironcore_app`, an explicit non-superuser login that cannot create databases/roles, inherit privileges or bypass RLS.
 - Generates a new ephemeral Laravel `APP_KEY`; no committed or production key is used.
 - Installs and audits Composer dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
 - Proves that every public table containing `gym_id` has both RLS and FORCE RLS enabled and that Redis-backed cache, session and queue configuration is active.
+- Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
 
-The bootstrap script refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`. Its credentials are disposable workflow-only values and it never creates or modifies production infrastructure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; the storage test independently requires `IRONCORE_S3_RUNTIME_GATE=true`. All database and storage credentials are disposable workflow-only values, and the job never creates or modifies production infrastructure.
 
 ## GitHub handoff
 
@@ -35,7 +36,7 @@ Weekly Dependabot checks cover npm, Composer and GitHub Actions metadata. Depend
 
 ## Evidence boundary
 
-A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate and provides forced-RLS evidence for the current migrations and feature suite. It does not replace Stripe/mail/SMS/push sandbox tests, measured k6 load testing, backup restoration, infrastructure monitoring, privacy approval or production user-acceptance testing.
+A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence for the current migrations and feature suite, and proves the S3 protocol path for private member-export generation and deletion. It does not replace production bucket encryption/IAM/lifecycle evidence, Stripe/mail/SMS/push sandbox tests, measured k6 load testing, backup restoration, infrastructure monitoring, privacy approval or production user-acceptance testing.
 
 Commit `79ed6ae` closed this gate on 12 August 2026: both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` completed successfully. The backend lane passed all 44 Laravel tests and 335 assertions, dependency audit and production cache commands under the non-superuser forced-RLS configuration.
 

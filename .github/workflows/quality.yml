@@ -61,6 +61,7 @@ jobs:
     env:
       CI: "true"
       IRONCORE_RUNTIME_GATE: "true"
+      IRONCORE_S3_RUNTIME_GATE: "true"
       APP_NAME: IronCore API
       APP_ENV: testing
       APP_DEBUG: "false"
@@ -88,7 +89,14 @@ jobs:
       SESSION_DRIVER: redis
       QUEUE_CONNECTION: redis
       MAIL_MAILER: array
-      FILESYSTEM_DISK: local
+      # These are disposable emulator credentials, never production secrets.
+      FILESYSTEM_DISK: s3
+      AWS_ACCESS_KEY_ID: ironcore-ci-s3
+      AWS_SECRET_ACCESS_KEY: ironcore-ci-s3-only
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_BUCKET: ironcore-ci-exports
+      AWS_ENDPOINT: http://127.0.0.1:4566
+      AWS_USE_PATH_STYLE_ENDPOINT: "true"
       LOG_CHANNEL: stderr
     services:
       postgres:
@@ -113,6 +121,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      s3:
+        # LocalStack is an ephemeral S3 protocol gate, not a production provider.
+        image: localstack/localstack:4.14.0
+        env:
+          SERVICES: s3
+          EAGER_SERVICE_LOADING: "1"
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl --fail --silent http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 18
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,7 +167,7 @@ jobs:
         working-directory: backend
         run: composer audit --no-interaction
 
-      - name: Run Laravel, PostgreSQL RLS and Redis tests
+      - name: Run Laravel, PostgreSQL RLS, Redis and S3 tests
         working-directory: backend
         run: php artisan test --fail-on-skipped --fail-on-risky
 

@@ -6,6 +6,8 @@ The Redis job carries immutable gym/export identifiers, establishes its own tena
 
 Exports expire after seven days. A tenant-bound delayed job deletes the private object and retains only request/audit metadata. Object-storage lifecycle policy must independently enforce the same or shorter retention as defence in depth.
 
+The hosted runtime gate provisions a disposable S3-compatible service with non-secret test credentials and executes the production generation and purge jobs. It verifies the tenant-prefixed private object, JSON identity, SHA-256 digest, byte count, delayed purge dispatch and final byte deletion. This proves the Laravel/AWS SDK/Flysystem protocol path without contacting or weakening production storage.
+
 The export includes the member profile and bounded domain records currently held by IronCore. Encrypted notification destinations are deliberately excluded from the generated document. The workflow does not implement erasure: deletion and pseudonymisation must first reconcile statutory financial/audit retention and launch-country requirements approved by counsel or the accountable privacy owner.
 
-Before production, verify queue retries, S3 encryption/private ACLs, lifecycle rules, download authorization, audit visibility, a representative large export, and deletion of expired bytes in the target environment.
+Before production, additionally verify queue retries, server-side encryption, restrictive bucket/IAM policy, lifecycle rules, download authorization, audit visibility and a representative large export in the selected target environment. The CI emulator is runtime evidence, not provider configuration evidence.

@@ -234,3 +234,12 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - The target must be reviewed, HTTPS and explicitly allowlisted; credentials, query strings, fragments, private host literals and cross-origin redirects fail closed.
 - The release probe validates the exact commit, HTTP `200` HTML, HSTS, language/title/platform markers, one same-origin stylesheet and script, and the install manifest contract.
 - The first hosted smoke passed against Vercel commit `5f485f2`, confirming the exact release plus HSTS, shell, same-origin assets and install manifest. Its accompanying web quality job exposed a contract that assumed the local `development` release marker even when GitHub supplied a real build SHA; the repaired assertion now follows the same Vercel/GitHub/local precedence as production metadata.
+- Commit `45cf343` passed the repaired quality gate, both CodeQL analyses and deployed-web smoke. Live cloud-browser QA confirmed the matching release marker and working platform, gym and member preview navigation without application-origin errors.
+
+## Milestone 16 S3-compatible export runtime checkpoint
+
+- The backend workflow provisions disposable S3-compatible storage alongside PostgreSQL 17 and Redis 8, using only non-secret test credentials.
+- A production-job integration test creates the bucket through the AWS SDK, runs `GenerateMemberDataExport`, reads the private tenant-prefixed object through Flysystem, and verifies JSON identity, exact SHA-256 and byte count.
+- The same test confirms the delayed tenant-bound purge is dispatched, executes `PurgeMemberDataExport` after expiry, and proves the bytes are deleted while the metadata becomes expired.
+- All 71 portable contracts pass and prevent removal of the explicit S3 gate, emulator health check, private-object assertion, integrity check or deletion assertion.
+- Hosted verification remains authoritative because this workspace does not provide PHP, Composer or Docker. Production encryption, IAM/bucket policy and lifecycle configuration remain separate deployment evidence.
