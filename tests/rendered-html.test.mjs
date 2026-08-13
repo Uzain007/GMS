@@ -4,8 +4,12 @@ import test from "node:test";
 
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const developmentReleaseMeta =
-  /<meta(?=[^>]*\bname=["']ironcore-release["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
+const expectedRelease =
+  process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "development";
+const releaseMeta = new RegExp(
+  `<meta(?=[^>]*\\bname=["']ironcore-release["'])(?=[^>]*\\bcontent=["']${expectedRelease}["'])[^>]*>`,
+  "i",
+);
 
 test("renders development preview metadata", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -34,7 +38,7 @@ test("renders development preview metadata", async () => {
   );
   const html = await response.text();
   assert.match(html, developmentPreviewMeta);
-  assert.match(html, developmentReleaseMeta);
+  assert.match(html, releaseMeta);
   assert.match(html, /IRONCORE/i);
   assert.match(html, /Good morning/i);
   assert.match(html, /Total members/i);

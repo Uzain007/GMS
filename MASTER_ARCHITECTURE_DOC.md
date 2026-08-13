@@ -10,8 +10,8 @@
 | Last verified | 12 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `feature/milestone-15-deployed-web-smoke` |
-| Active milestone | Milestone 15 — deployed-web release identity and smoke gate implemented; first hosted run pending |
+| Active branch | `feature/milestone-15-ci-repair` |
+| Active milestone | Milestone 15 — hosted deployment smoke passed on `5f485f2`; environment-aware rendered-release contract repair pending hosted verification |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -1010,7 +1010,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 12 — member data export lifecycle | Implementation complete; core runtime passing; S3 gate pending | Portable/runtime contracts pass; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
 | Milestone 13 — hosted runtime-gate repair | Complete on commit `79ed6ae` | Both GitHub jobs pass; nested tenant route dispatch, PostgreSQL reporting, stateful auth, MFA audit RLS and deterministic dependency/test boot contracts are verified |
 | Milestone 14 — CodeQL application-security analysis | Complete on commit `2ddc641` | Both JavaScript/TypeScript and GitHub Actions analyses passed with pinned CodeQL v4, `security-extended` queries and least-privilege permissions |
-| Milestone 15 — deployed-web release verification | Implemented; first hosted smoke pending | Full-SHA deployment identity, allowlisted HTTPS probing, HSTS, same-origin asset and install-manifest checks run after `main` pushes and every six hours |
+| Milestone 15 — deployed-web release verification | Hosted smoke passed on `5f485f2`; CI contract repair pending | Vercel served the exact full SHA and passed HSTS, same-origin asset and install-manifest checks; the rendered contract now expects the CI-provided SHA instead of a local-only fallback |
 
 ## Change control
 

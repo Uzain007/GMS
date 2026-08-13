@@ -143,10 +143,12 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 15 — Deployed-web release verification
 
-**Status: implementation complete; first hosted smoke pending**
+**Status: hosted deployment smoke passed on `5f485f2`; environment-aware CI contract repair pending**
 - Non-secret full Git SHA metadata proves which immutable frontend release is serving
 - Main-push smoke waits for the Vercel alias to serve that exact SHA instead of accepting a stale deployment
 - Six-hour scheduled and manual runs continuously verify HTTPS/HSTS, the reviewed IronCore shell, same-origin CSS/JavaScript and the install manifest
 - The probe is pinned to an explicit public hostname, rejects credentials/query/fragment/private-host targets and sends no tenant or member data
 - Portable contracts cover workflow triggers, least privilege, immutable actions, release metadata and target validation
+- The first hosted smoke confirmed that Vercel served the exact `5f485f2` release with the reviewed HSTS, shell, asset and manifest contracts
+- Rendered-output validation derives the expected marker from Vercel/GitHub build identity before the explicit local `development` fallback
 - Authenticated API, provider, load, storage and restore-drill gates remain separate production requirements
