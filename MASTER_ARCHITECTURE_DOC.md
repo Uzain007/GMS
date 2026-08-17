@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.23.0 — Milestone 17 synthetic PostgreSQL restore drill |
-| Last verified | 13 August 2026 |
+| MAD version | 0.24.0 — Milestone 18 synthetic cached-report performance gate |
+| Last verified | 17 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `milestone-17-backup-restore` |
-| Active milestone | Milestone 17 — synthetic PostgreSQL backup/restore and restored-tenant RLS gate implemented; hosted verification pending |
+| Active branch | `milestone-18-load-validation` |
+| Active milestone | Milestone 18 — credential-free cached-report latency and tenant-isolation load gate implemented; hosted verification pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -953,6 +953,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, the production build/artifact validation before rendered-output contracts, all portable contracts and the production-dependency audit.
 - The backend job uses PHP 8.3 with PostgreSQL 17, Redis 8 and a disposable LocalStack S3 service. It creates an ephemeral `ironcore_app` login with `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT` and `NOBYPASSRLS`, owns only the disposable test database, and fails rather than skipping when PostgreSQL RLS, Redis or S3 runtime requirements are absent.
 - After the feature suite, the backend job inserts two fixed synthetic tenants through `ironcore_app`, creates a PostgreSQL 17 custom-format archive, restores it into a new disposable database and reconnects as `ironcore_app`. The drill fails unless every restored `gym_id` table retains RLS plus FORCE RLS, no-context reads fail closed, each selected tenant sees exactly its own fixture and an unrelated tenant sees none. A trap removes the archive, restored database and source fixtures on success or failure.
+- After the restore drill, the backend job creates one 500-member report tenant, one isolated tenant and 16 ten-minute operator tokens under `ironcore_app`. Pinned k6 1.7.1 warms the 60-second Redis report cache and drives eight requests per second for 30 seconds against a 16-worker disposable Laravel server. The gate requires an unchanged cached payload, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms while retaining the production 30-per-minute user/gym limiter. The target and tokens exist only on the disposable runner.
 - Auth generation, database identity, tenant membership and role authorization execute before implicit route-model binding. This ordering lets PostgreSQL RLS resolve tenant-owned records only after the connection security context exists and returns role denial before record lookup.
 - After `ResolveTenant` validates route/header agreement and promotes the gym into `TenantContext`, it consumes the `{gym}` route parameter before controller dispatch. Controllers needing the selected gym read the trusted context, preventing Laravel's positional dispatcher from shifting nested member, staff, booking or export parameters.
 - The committed Composer lockfile makes the Laravel 13 dependency graph deterministic; the non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
@@ -996,9 +997,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Redis-queued email, SMS and push notification adapters | Implemented; Redis runtime passing; provider gate pending | Encrypted destinations, safe payload variables, preferences, idempotency, quiet hours and tenant-context jobs |
 | Training/progress frontend/API integration | Implemented; core runtime passing | Browser-verified plans, exercise logging, progress history, delivery evidence and member-controlled preferences |
 | Milestone 5B — training, progress and notifications | Feature-complete; provider gate pending | Core runtime, static contracts, production build, type-check and browser QA pass; live adapters remain gated |
-| Tenant operational reporting API and workspace | Implemented; core runtime passing; load gate pending | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
-| Security, load and deployment preparation | Implemented; load/deployment gate pending | Named report/readiness throttles, generic PostgreSQL/Redis readiness, synthetic k6 probe, secret scan, deployment runbook and launch checklist |
-| Milestone 6A — reporting and operational hardening | Feature-complete; load/deployment gates pending | Core runtime plus static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass |
+| Tenant operational reporting API and workspace | Implemented; core runtime passing; synthetic load gate implemented | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
+| Security, load and deployment preparation | Implemented; synthetic load gate pending hosted verification; production deployment gate pending | Named throttles, readiness, credential-free k6 regression baseline, secret scan, runbook and launch checklist |
+| Milestone 6A — reporting and operational hardening | Feature-complete; synthetic load gate implemented; deployment gate pending | Core runtime plus static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass |
 | Milestone 6B — dedicated gym-client portal | Feature-complete; core runtime passing | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
 | Linked member self-service API and least-privilege resources | Implemented; core runtime passing | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
 | Milestone 7 — linked-member self-service portal | Feature-complete; core runtime passing | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
@@ -1015,7 +1016,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 14 — CodeQL application-security analysis | Complete on commit `2ddc641` | Both JavaScript/TypeScript and GitHub Actions analyses passed with pinned CodeQL v4, `security-extended` queries and least-privilege permissions |
 | Milestone 15 — deployed-web release verification | Complete on commit `45cf343` | Quality, CodeQL and deployment smoke all pass; Vercel serves the exact commit and the platform, gym and member previews pass live interaction QA without application-origin errors |
 | Milestone 16 — S3-compatible export runtime gate | Complete on commit `7033e2b` | Quality, CodeQL and deployed-web checks pass; the backend lane executes production export generation, private retrieval, integrity evidence and expiry deletion without production credentials |
-| Milestone 17 — synthetic PostgreSQL backup/restore drill | Implemented; hosted verification pending | The disposable backend lane archives and restores two synthetic tenants, then proves least-privilege identity, restored FORCE RLS, fail-closed reads and cross-tenant denial |
+| Milestone 17 — synthetic PostgreSQL backup/restore drill | Complete on commit `b5bb2d0` | Quality, CodeQL and deployed-web checks pass; the restored database retains least-privilege identity, FORCE RLS, fail-closed reads and cross-tenant denial |
+| Milestone 18 — synthetic cached-report performance gate | Implemented; hosted verification pending | Pinned k6 validates cached payload identity, p95/p99 latency and cross-tenant denial with 500 synthetic members and expiring CI-only tokens |
 
 ## Change control
 

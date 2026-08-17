@@ -14,7 +14,7 @@ This runbook targets a production topology with a separately deployed web app, L
 ## Release sequence
 
 1. Build an immutable frontend artifact and Laravel image from a reviewed commit.
-2. Run the automated Node contracts, PHP tests, PostgreSQL RLS tests, secret scan and dependency/security scans in CI.
+2. Run the automated Node contracts, PHP tests, PostgreSQL RLS tests, synthetic cached-report load gate, secret scan and dependency/security scans in CI.
 3. Back up PostgreSQL and confirm the latest restore drill before a schema-changing release.
 4. Put all secrets in the host secret manager. Never copy `.env` into an image or Git.
 5. Run `php artisan migrate --force` once using a deployment job with the schema-owner role. The web/worker runtime remains `ironcore_app`.
@@ -37,6 +37,8 @@ Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, PostgreSQL/R
 - Rotate any credential suspected of exposure and invalidate affected sessions/provider endpoints.
 
 The CI restore drill is the minimum schema/data portability baseline: it uses only a disposable PostgreSQL 17 service and synthetic tenants, and verifies restored FORCE RLS with `ironcore_app`. Before production launch, record separate provider evidence for encrypted backups, PITR/retention, an isolated restore of approved non-production data, measured RPO/RTO, monitoring and controlled cutover.
+
+The CI k6 run is a regression baseline for cached reporting, not a capacity claim. Before launch, repeat an approved synthetic-data test against the selected API/PostgreSQL/Redis topology, record saturation and recovery behavior, and choose production alert thresholds without using real member data.
 
 ## Monitoring gates
 

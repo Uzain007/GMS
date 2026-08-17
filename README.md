@@ -46,9 +46,10 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Commit-matched Vercel smoke checks for HTTPS, release identity, assets and the install manifest
 - Disposable S3-compatible runtime coverage for private member-export generation, integrity and expiry deletion
 - Synthetic PostgreSQL 17 custom-archive restore coverage for retained FORCE RLS and cross-tenant denial
+- Credential-free k6 gate for cached 500-member tenant reporting, latency thresholds and cross-tenant denial
 - Automated build, rendered-output and product-contract tests
 
-The signed-out preview uses representative in-browser data; authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. The GitHub-hosted Laravel/PostgreSQL/Redis/S3 gate passes. A credential-free synthetic backup/restore drill is implemented for PostgreSQL schema, data and forced-RLS continuity; provider PITR, encryption, retention and RPO/RTO evidence remain separate. Stripe, notification, load and monitored-deployment gates still require their target environments and credentials.
+The signed-out preview uses representative in-browser data; authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. The GitHub-hosted Laravel/PostgreSQL/Redis/S3 gate passes. Credential-free synthetic restore and k6 report-load gates cover database portability, forced-RLS continuity, cached latency and tenant denial; production-sized capacity, provider PITR/encryption/RPO/RTO, Stripe, notification and monitored-deployment evidence remain separate.
 
 ## Run locally
 

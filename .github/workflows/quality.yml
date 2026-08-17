@@ -63,6 +63,7 @@ jobs:
       IRONCORE_RUNTIME_GATE: "true"
       IRONCORE_S3_RUNTIME_GATE: "true"
       IRONCORE_RESTORE_DRILL_GATE: "true"
+      IRONCORE_LOAD_GATE: "true"
       APP_NAME: IronCore API
       APP_ENV: testing
       APP_DEBUG: "false"
@@ -176,6 +177,46 @@ jobs:
         env:
           POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         run: bash scripts/ci/verify-postgres-restore.sh
+
+      - name: Prepare synthetic report load fixture
+        run: php scripts/ci/prepare-load-fixture.php
+
+      - name: Set up pinned Grafana k6 runtime
+        uses: grafana/setup-k6-action@db07bd9765aac508ef18982e52ab937fe633a065 # v1.2.1
+        with:
+          k6-version: "1.7.1"
+
+      - name: Start disposable Laravel load target
+        working-directory: backend
+        shell: bash
+        run: |
+          setsid env PHP_CLI_SERVER_WORKERS=16 php artisan serve --host=127.0.0.1 --port=8000 > /tmp/ironcore-load-server.log 2>&1 &
+          echo "$!" > /tmp/ironcore-load-server.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/up > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -100 /tmp/ironcore-load-server.log
+          exit 1
+
+      - name: Gate cached tenant report throughput and isolation
+        run: k6 run scripts/load/report-overview.k6.js
+
+      - name: Stop disposable Laravel load target
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/ironcore-load-server.pid ]]; then
+            server_pid="$(tr -cd '0-9' < /tmp/ironcore-load-server.pid)"
+            if [[ -n "$server_pid" ]]; then
+              kill -- "-$server_pid" 2>/dev/null || true
+            fi
+          fi
+          if [[ "${{ job.status }}" != "success" && -f /tmp/ironcore-load-server.log ]]; then
+            tail -100 /tmp/ironcore-load-server.log
+          fi
 
       - name: Validate production Laravel caches
         working-directory: backend

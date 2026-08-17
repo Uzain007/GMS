@@ -50,14 +50,14 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 6 — Reporting, hardening and deployment
 
-**Milestone 6A status: feature-complete; core runtime passing; load and deployment gates pending**
+**Milestone 6A status: feature-complete; core runtime passing; synthetic load gate implemented; production deployment gate pending**
 - Bounded financial, member, attendance and class-utilisation reporting for one selected tenant
 - Currency-specific aggregates, equal-length comparison periods, tenant-keyed Redis caching and management-only access
 - Report and readiness throttles, generic PostgreSQL/Redis readiness, secret scan and synthetic k6 load probe
 - Responsive Reports workspace with real authenticated API mode and isolated representative preview data
 - Populated Branches, Membership Plans and Memberships preview navigation plus responsive attendance-table regression coverage
 - Deployment/rollback/recovery runbook and evidence-based security launch checklist
-- Remaining production gates: measured k6 run, provider sandboxes, provider PITR/RPO/RTO restore evidence and monitored deployment
+- Remaining production gates: deployment-topology capacity/saturation run, provider sandboxes, provider PITR/RPO/RTO evidence and monitored deployment
 
 ## Milestone 7 — Linked-member portal
 
@@ -164,7 +164,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 17 — Synthetic PostgreSQL backup and restore drill
 
-**Status: implemented; hosted verification pending**
+**Status: complete on commit `b5bb2d0`; hosted runtime passing**
 - Two fixed synthetic gyms, assignments and members are written through non-superuser `ironcore_app` under normal tenant settings
 - PostgreSQL 17 creates a custom-format archive and restores it into a fresh disposable database with ownership/ACL portability flags
 - The restored connection must remain `NOSUPERUSER`, `NOINHERIT` and `NOBYPASSRLS`
@@ -172,3 +172,13 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - No-context reads fail closed, each selected gym sees exactly its own fixture, and an unrelated gym sees none
 - Cleanup removes the restored database, archive and source fixtures even on failure
 - Production encrypted backups, PITR, retention and measured RPO/RTO remain provider-environment gates
+
+## Milestone 18 — Synthetic cached-report performance gate
+
+**Status: implemented; hosted verification pending**
+- Pinned k6 1.7.1 runs inside the existing credential-free PostgreSQL/Redis backend lane
+- One 500-member tenant and one unrelated tenant are created through non-superuser `ironcore_app`
+- Sixteen ten-minute CI-only operators spread pressure without bypassing or weakening the production report throttle
+- A warmed 60-second Redis report response must remain identical throughout the run, with p95 below 500 ms and p99 below 1,000 ms
+- The same probe requires cross-tenant denial and zero committed access tokens or provider credentials
+- Production-scale capacity and saturation testing remain a deployment-topology gate

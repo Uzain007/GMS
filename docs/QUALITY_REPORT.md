@@ -158,9 +158,9 @@ The repository includes Laravel feature coverage for cross-tenant plan denial, a
 
 39 tests passed with no failures, skips or cancellations. The committed secret scan found no known live-secret signatures.
 
-### Load/provider/deployment gates still required
+### Production provider/deployment gates still required
 
-The GitHub-hosted Laravel feature suite now passes selected-tenant count isolation, mismatched-header denial, role denial and 366-day validation under PostgreSQL 17 and Redis 8. Run the k6 probe against a synthetic test tenant, complete provider sandbox tests and a backup restore drill, then execute the monitored deployment runbook before production launch.
+The GitHub-hosted Laravel suite covers selected-tenant count isolation, mismatched-header denial, role denial and 366-day validation under PostgreSQL 17 and Redis 8. Milestones 17 and 18 add synthetic restore and cached-report k6 regression gates. Production still requires provider sandbox evidence, provider PITR/RPO/RTO recovery evidence, deployment-topology capacity/saturation testing and the monitored deployment runbook.
 
 ## Milestone 6A preview-navigation QA repair
 
@@ -254,3 +254,12 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - A failure-safe cleanup removes the restored database, dump file and source fixtures. No production database, credential or member record is used.
 - Local shell syntax and portable contract validation pass; the GitHub-hosted PostgreSQL execution remains the authoritative completion gate.
 - This synthetic drill does not replace provider evidence for encrypted backups, PITR/retention, isolated operational recovery or measured RPO/RTO.
+
+## Milestone 18 synthetic report-load checkpoint
+
+- The hosted backend creates a 500-member tenant, an unrelated tenant and 16 expiring synthetic gym-owner tokens under the normal non-superuser/RLS runtime.
+- Pinned k6 warms the tenant-keyed 60-second Redis report cache and drives eight requests per second for 30 seconds across disposable operators, keeping every operator below the real report throttle.
+- The gate requires the warmed payload identity to remain stable, all report assertions to pass, cross-tenant access to return `403`, HTTP failure rate below 1%, p95 below 500 ms and p99 below 1,000 ms.
+- The Laravel target uses 16 local PHP workers and is stopped by an unconditional cleanup step. No production URL, credential, tenant or member data is used.
+- Portable contracts validate the immutable action pin, fixed k6 version, guarded fixture, expiring tokens, thresholds, tenant denial and cleanup behavior.
+- GitHub-hosted execution remains authoritative; production-sized capacity and saturation evidence must still be collected against the selected deployment topology.

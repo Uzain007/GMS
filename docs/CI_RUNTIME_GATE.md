@@ -22,8 +22,10 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
 - Writes two synthetic tenants through `ironcore_app`, creates a PostgreSQL 17 custom-format archive and restores it into a fresh disposable database.
 - Reconnects to the restored database as `ironcore_app` and fails unless every `gym_id` table retains RLS plus FORCE RLS, no-context reads return no tenant rows, each selected tenant sees only its own fixture and an unrelated tenant sees none.
+- Creates a 500-member synthetic gym plus an isolated gym, distributes load across 16 ten-minute CI-only operator tokens, and runs pinned k6 against a 16-worker disposable Laravel server.
+- Warms the tenant-keyed Redis report cache, then requires 100% valid cached payloads, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms without weakening the real 30-per-minute user/gym throttle.
 
-The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; the storage test independently requires `IRONCORE_S3_RUNTIME_GATE=true`, and the restore script also requires `IRONCORE_RESTORE_DRILL_GATE=true` plus the reviewed GitHub PostgreSQL service-container identity. All database and storage credentials are disposable workflow-only values, and the job never creates or modifies production infrastructure. A cleanup trap deletes the synthetic fixtures, archive and restored database on success or failure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, restore and load stages independently require their explicit gate markers. All credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup removes the restore artifacts and stops the local load server on success or failure.
 
 ## GitHub handoff
 
@@ -38,11 +40,13 @@ Weekly Dependabot checks cover npm, Composer and GitHub Actions metadata. Depend
 
 ## Evidence boundary
 
-A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence for the current migrations and feature suite, proves the S3 protocol path for private member-export generation/deletion, and proves a synthetic custom-archive restore preserves tenant data and forced-RLS behavior. It does not replace production bucket encryption/IAM/lifecycle evidence, provider encrypted backup/PITR/retention and measured RPO/RTO evidence, Stripe/mail/SMS/push sandbox tests, measured k6 load testing, infrastructure monitoring, privacy approval or production user-acceptance testing.
+A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence, proves the S3 member-export lifecycle, proves synthetic custom-archive restoration, and establishes a repeatable cached-report performance regression baseline. It does not replace production-sized capacity testing against the selected topology, bucket encryption/IAM/lifecycle evidence, provider encrypted backup/PITR/retention and measured RPO/RTO evidence, provider sandbox tests, infrastructure monitoring, privacy approval or production user-acceptance testing.
 
 Commit `79ed6ae` closed this gate on 12 August 2026: both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` completed successfully. The backend lane passed all 44 Laravel tests and 335 assertions, dependency audit and production cache commands under the non-superuser forced-RLS configuration.
 
 Commit `7033e2b` closed the S3-compatible runtime addition on 13 August 2026. Quality, CodeQL and deployed-web checks passed; the backend lane completed the real HTTP object-storage generation, integrity and expiry lifecycle while Vercel served the exact release and all three preview portals passed live interaction QA.
+
+Commit `b5bb2d0` closed the synthetic PostgreSQL restore addition on 17 August 2026. Quality, CodeQL and deployed-web checks passed; the restored database retained least-privilege identity, FORCE RLS and selected-tenant isolation.
 
 ## First hosted-run repair
 
