@@ -19,14 +19,14 @@ jobs:
   smoke:
     name: Deployed web release
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       IRONCORE_SMOKE_WEB_URL: https://gms-beige-ten.vercel.app/
       IRONCORE_SMOKE_ALLOWED_HOSTS: gms-beige-ten.vercel.app
       IRONCORE_EXPECTED_COMMIT: ${{ github.sha }}
-      # Vercel may need more than ten minutes to publish a queued immutable
-      # release. Keep the wait bounded while leaving CI time for final checks.
-      IRONCORE_SMOKE_DEPLOY_WAIT_MS: "900000"
+      # Two observed releases arrived after the former ten- and fifteen-minute
+      # limits. Keep a bounded 30-minute wait plus five minutes for final checks.
+      IRONCORE_SMOKE_DEPLOY_WAIT_MS: "1800000"
       IRONCORE_SMOKE_RETRY_MS: "15000"
       IRONCORE_SMOKE_REQUEST_TIMEOUT_MS: "15000"
     steps:

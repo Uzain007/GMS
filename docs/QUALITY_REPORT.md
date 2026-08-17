@@ -269,4 +269,15 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 
 - The `066a4d6` push smoke reached the former ten-minute propagation ceiling before Vercel published the matching release; this was a deployment-timing failure, not a web or backend quality-test failure.
 - A later credential-free smoke passed on its first attempt against the exact `066a4d6` release, including HTTP 200, HSTS, same-origin CSS/JavaScript and the install manifest.
-- The workflow now allows a bounded fifteen-minute deployment window inside a 20-minute job, with portable contracts preventing accidental removal of either limit.
+- The `5183f84` push then reached the fifteen-minute ceiling before Vercel later exposed that exact full release SHA, proving the first extension was still too short rather than exposing a product regression.
+- The workflow now allows a bounded thirty-minute deployment window inside a 35-minute job, with portable contracts preventing accidental removal of either limit.
+
+## Milestone 19 production configuration preflight checkpoint
+
+- `php artisan ironcore:production-preflight` validates Laravel's resolved/cached release configuration and returns a non-zero result before migrations or traffic when a launch-critical setting is unsafe or incomplete.
+- The backend gate covers HTTPS/browser-session alignment, explicit trusted proxies, non-superuser PostgreSQL, encrypted PostgreSQL/Redis transport, Redis cache/session/queues, private S3-compatible storage, Stripe signing/callback settings, authenticated SMTP, central log routing and complete optional notification-adapter pairs.
+- `npm run preflight:production-web` rejects representative demo mode, unsafe or missing public API origins and missing full-SHA release identity before a production frontend build.
+- Both preflights emit stable setting names and requirements only. A Laravel regression test injects marker values and asserts that none appear in output.
+- Local validation passes the production web preflight, secret scan, TypeScript, ESLint, deployable Vinext build/artifact validation, PHP syntax parsing and all **80 portable contracts** with zero failures, skips or cancellations.
+- The production dependency audit passes the required high-severity threshold with zero moderate/high/critical findings. One low-severity optional `@babel/core` advisory remains in Next.js's `styled-jsx` path and is outside this milestone's dependency changes.
+- The new Laravel command feature tests are committed-ready but require the existing PHP/PostgreSQL/Redis hosted lane after the user approves a commit/push; no production credential or provider connection is used there.

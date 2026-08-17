@@ -5,7 +5,10 @@ import test from "node:test";
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 const expectedRelease =
-  process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "development";
+  process.env.VERCEL_GIT_COMMIT_SHA ??
+  process.env.GITHUB_SHA ??
+  process.env.IRONCORE_RELEASE_SHA ??
+  "development";
 const releaseMeta = new RegExp(
   `<meta(?=[^>]*\\bname=["']ironcore-release["'])(?=[^>]*\\bcontent=["']${expectedRelease}["'])[^>]*>`,
   "i",

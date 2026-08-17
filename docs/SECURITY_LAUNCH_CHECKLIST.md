@@ -13,6 +13,7 @@ The release owner must record evidence for every item before production traffic.
 - [ ] Redis authentication/TLS, persistence, memory alerts and failed-job handling are enabled.
 - [ ] Object storage is private, encrypted, tenant-prefixed and protected by retention/lifecycle policy.
 - [ ] CI passes PHP/Laravel tests, RLS tests, frontend contracts, secret scan, dependency audit and an application security scan.
+- [ ] The backend and web production preflights pass against the final resolved deployment settings before migrations or traffic; retained output contains no configured values.
 - [ ] The deployed frontend exposes the reviewed full release SHA and the credential-free live smoke passes HTTPS/HSTS, shell, same-origin asset and install-manifest checks.
 - [ ] Synthetic report load meets thresholds without tenant leakage; production tests never use real member data.
 - [ ] Central logs, error tracking, uptime, queue, scheduler, webhook and provider alerts reach the on-call owner.

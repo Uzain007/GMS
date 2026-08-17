@@ -186,7 +186,18 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Post-Milestone 18 — Deployed-release propagation hardening
 
-**Status: implemented; hosted verification pending**
+**Status: implemented; hosted re-verification pending**
 - The first `066a4d6` push smoke reached its former ten-minute deployment wait before Vercel published the matching release
 - A subsequent credential-free smoke confirmed the exact commit, HTTP 200, HSTS, same-origin assets and valid install manifest
-- The bounded deployment wait is fifteen minutes inside a separate 20-minute job ceiling; authenticated API and production provider gates remain separate
+- The next push again proved that fifteen minutes was insufficient before Vercel later served the exact `5183f84` release
+- The evidence-based bounded deployment wait is now thirty minutes inside a separate 35-minute job ceiling; authenticated API and production provider gates remain separate
+
+## Milestone 19 — Production configuration preflight
+
+**Status: implementation complete; local quality gate passing; hosted verification pending approved push**
+- A fail-closed Laravel command validates resolved production configuration after cache generation and before migrations or traffic
+- The API gate covers production/debug mode, application key strength, public HTTPS origins, exact cookie/CORS/Sanctum alignment, trusted proxies, PostgreSQL least privilege, encrypted database/Redis transport, Redis-backed cache/session/queues, private S3-compatible storage, Stripe signing/callback settings, delivering mail, production log routing and optional notification-adapter pairing
+- A separate web-build preflight rejects representative demo mode, a missing or unsafe public API origin and a missing immutable full-SHA release identity
+- Failure output names only configuration requirements and never prints a secret or configured value
+- Automated tests cover a valid production shape, unsafe denial, cookie/origin mismatch, optional-adapter mismatch and secret-safe output
+- Passing preflights does not claim provider connectivity, provider sandbox execution, backup/storage controls, monitoring, privacy approval, branch protection or production-capacity evidence

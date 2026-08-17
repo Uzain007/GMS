@@ -17,17 +17,18 @@ This runbook targets a production topology with a separately deployed web app, L
 2. Run the automated Node contracts, PHP tests, PostgreSQL RLS tests, synthetic cached-report load gate, secret scan and dependency/security scans in CI.
 3. Back up PostgreSQL and confirm the latest restore drill before a schema-changing release.
 4. Put all secrets in the host secret manager. Never copy `.env` into an image or Git.
-5. Run `php artisan migrate --force` once using a deployment job with the schema-owner role. The web/worker runtime remains `ironcore_app`.
-6. Deploy the API, queue workers and scheduler from the same release. Run `php artisan config:cache`, `route:cache` and `view:cache` during image/release preparation.
-7. Restart queue workers with `php artisan queue:restart`, then shift traffic only after `/up` and `/api/v1/health/readiness` pass.
-8. Deploy the frontend with the exact production API origin. Verify Sanctum stateful domains, CORS, secure cookies and the shared HTTPS parent domain.
-9. Require `Deployed web release` to pass for the deployed commit. The probe waits for the public alias to expose the triggering full SHA, then checks HTTPS/HSTS, the reviewed shell, same-origin CSS/JavaScript and the install manifest.
-10. Exercise login, password recovery through the default Redis queue and mail sandbox, MFA enrollment/challenge/recovery on the shared Redis cache, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
-11. Watch error rate, queue age, failed jobs, database saturation and webhook failures through the rollback window.
+5. Build Laravel's configuration cache, then run `php artisan ironcore:production-preflight`. Stop before migrations if it fails; its output is safe to retain as release evidence.
+6. Run `php artisan migrate --force` once using a deployment job with the schema-owner role. The web/worker runtime remains `ironcore_app`.
+7. Deploy the API, queue workers and scheduler from the same release. Run `php artisan route:cache` and `view:cache` during image/release preparation.
+8. Restart queue workers with `php artisan queue:restart`, then shift traffic only after `/up` and `/api/v1/health/readiness` pass.
+9. In the production web-build environment, run `npm run preflight:production-web`, then build and deploy the frontend with the exact production API origin.
+10. Require `Deployed web release` to pass for the deployed commit. The probe waits for the public alias to expose the triggering full SHA, then checks HTTPS/HSTS, the reviewed shell, same-origin CSS/JavaScript and the install manifest.
+11. Exercise login, password recovery through the default Redis queue and mail sandbox, MFA enrollment/challenge/recovery on the shared Redis cache, explicit tenant selection, one tenant read/write path, one queued notification, and signed Stripe test webhooks.
+12. Watch error rate, queue age, failed jobs, database saturation and webhook failures through the rollback window.
 
 ## Required production environment
 
-Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, PostgreSQL/Redis/object-storage credentials, exact `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`, `SESSION_SECURE_COOKIE=true`, provider secrets and notification-adapter credentials. Keep `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` on Redis.
+Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, reviewed `TRUSTED_PROXIES`, encrypted PostgreSQL/Redis connections, object-storage configuration, exact `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`, `SESSION_SECURE_COOKIE=true`, provider secrets and notification-adapter credentials. Keep `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` on Redis. Run both commands in [PRODUCTION_PREFLIGHT.md](PRODUCTION_PREFLIGHT.md) against the final deployment environment.
 
 ## Rollback and recovery
 

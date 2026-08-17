@@ -15,7 +15,10 @@ const geistMono = Geist_Mono({
 // The public commit identifier lets a deployment smoke test prove that the
 // checked release, rather than a previously cached deployment, is serving.
 const releaseCommit =
-  process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "development";
+  process.env.VERCEL_GIT_COMMIT_SHA ??
+  process.env.GITHUB_SHA ??
+  process.env.IRONCORE_RELEASE_SHA ??
+  "development";
 
 export const metadata: Metadata = {
   title: "IronCore | Gym management, built to scale",

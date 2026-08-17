@@ -17,6 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $trustedProxies = config('app.trusted_proxies', []);
+        if (is_array($trustedProxies) && $trustedProxies !== []) {
+            $middleware->trustProxies(at: $trustedProxies === ['*'] ? '*' : $trustedProxies);
+        }
+
         $middleware->statefulApi();
         $middleware->alias([
             'database.identity' => BindDatabaseIdentity::class,

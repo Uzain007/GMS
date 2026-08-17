@@ -27,8 +27,8 @@ test("deployed web smoke runs after main changes and on a bounded schedule", () 
   assert.match(workflow, /IRONCORE_EXPECTED_COMMIT: \$\{\{ github\.sha \}\}/);
   assert.match(workflow, /IRONCORE_SMOKE_WEB_URL: https:\/\/gms-beige-ten\.vercel\.app\//);
   assert.match(workflow, /IRONCORE_SMOKE_ALLOWED_HOSTS: gms-beige-ten\.vercel\.app/);
-  assert.match(workflow, /timeout-minutes: 20/);
-  assert.match(workflow, /IRONCORE_SMOKE_DEPLOY_WAIT_MS: "900000"/);
+  assert.match(workflow, /timeout-minutes: 35/);
+  assert.match(workflow, /IRONCORE_SMOKE_DEPLOY_WAIT_MS: "1800000"/);
 });
 
 test("deployed web smoke actions are immutable and need no package install", () => {
@@ -44,7 +44,8 @@ test("deployed web smoke actions are immutable and need no package install", () 
 
 test("release identity uses Vercel's immutable Git commit before local fallbacks", () => {
   assert.match(layout, /process\.env\.VERCEL_GIT_COMMIT_SHA \?\?/);
-  assert.match(layout, /process\.env\.GITHUB_SHA \?\? "development"/);
+  assert.match(layout, /process\.env\.GITHUB_SHA \?\?/);
+  assert.match(layout, /process\.env\.IRONCORE_RELEASE_SHA \?\?/);
   assert.match(layout, /"ironcore-release": releaseCommit/);
 });
 
