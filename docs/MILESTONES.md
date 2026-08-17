@@ -57,7 +57,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Responsive Reports workspace with real authenticated API mode and isolated representative preview data
 - Populated Branches, Membership Plans and Memberships preview navigation plus responsive attendance-table regression coverage
 - Deployment/rollback/recovery runbook and evidence-based security launch checklist
-- Remaining production gates: measured k6 run, provider sandboxes, restore drill and monitored deployment
+- Remaining production gates: measured k6 run, provider sandboxes, provider PITR/RPO/RTO restore evidence and monitored deployment
 
 ## Milestone 7 — Linked-member portal
 
@@ -109,7 +109,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 12 — Member data export lifecycle
 
-**Status: implementation complete; core runtime passing; S3 lifecycle gate pending**
+**Status: implementation complete; hosted S3-compatible runtime passing**
 - Owner/manager/super-admin and linked-member request paths behind normal tenant authorization
 - Redis-queued JSON generation with explicit tenant predicates and forced PostgreSQL RLS
 - Private tenant-prefixed object storage, SHA-256 integrity evidence, authenticated no-store downloads and seven-day expiry
@@ -155,9 +155,20 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 16 — S3-compatible member-export runtime gate
 
-**Status: implemented; hosted verification pending**
+**Status: complete on commit `7033e2b`; hosted runtime passing**
 - Disposable S3-compatible service in the existing least-privilege backend CI lane
 - Production `GenerateMemberDataExport` execution over the AWS SDK/Flysystem HTTP boundary
 - Private tenant-prefixed object, exact SHA-256 digest and byte-count verification
 - Production `PurgeMemberDataExport` execution with expired-byte deletion and retained audit metadata
 - Non-secret emulator credentials only; production bucket encryption, access policy and lifecycle evidence remain deployment gates
+
+## Milestone 17 — Synthetic PostgreSQL backup and restore drill
+
+**Status: implemented; hosted verification pending**
+- Two fixed synthetic gyms, assignments and members are written through non-superuser `ironcore_app` under normal tenant settings
+- PostgreSQL 17 creates a custom-format archive and restores it into a fresh disposable database with ownership/ACL portability flags
+- The restored connection must remain `NOSUPERUSER`, `NOINHERIT` and `NOBYPASSRLS`
+- Every restored public `gym_id` table must retain RLS and FORCE RLS
+- No-context reads fail closed, each selected gym sees exactly its own fixture, and an unrelated gym sees none
+- Cleanup removes the restored database, archive and source fixtures even on failure
+- Production encrypted backups, PITR, retention and measured RPO/RTO remain provider-environment gates

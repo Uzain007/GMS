@@ -62,6 +62,7 @@ jobs:
       CI: "true"
       IRONCORE_RUNTIME_GATE: "true"
       IRONCORE_S3_RUNTIME_GATE: "true"
+      IRONCORE_RESTORE_DRILL_GATE: "true"
       APP_NAME: IronCore API
       APP_ENV: testing
       APP_DEBUG: "false"
@@ -170,6 +171,11 @@ jobs:
       - name: Run Laravel, PostgreSQL RLS, Redis and S3 tests
         working-directory: backend
         run: php artisan test --fail-on-skipped --fail-on-risky
+
+      - name: Run synthetic PostgreSQL backup and restore drill
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/ci/verify-postgres-restore.sh
 
       - name: Validate production Laravel caches
         working-directory: backend

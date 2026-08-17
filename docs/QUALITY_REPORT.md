@@ -242,4 +242,15 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - A production-job integration test creates the bucket through the AWS SDK, runs `GenerateMemberDataExport`, reads the private tenant-prefixed object through Flysystem, and verifies JSON identity, exact SHA-256 and byte count.
 - The same test confirms the delayed tenant-bound purge is dispatched, executes `PurgeMemberDataExport` after expiry, and proves the bytes are deleted while the metadata becomes expired.
 - All 71 portable contracts pass and prevent removal of the explicit S3 gate, emulator health check, private-object assertion, integrity check or deletion assertion.
-- Hosted verification remains authoritative because this workspace does not provide PHP, Composer or Docker. Production encryption, IAM/bucket policy and lifecycle configuration remain separate deployment evidence.
+- Commit `7033e2b` passed quality, both CodeQL analyses and deployed-web smoke. The hosted backend completed its PostgreSQL/Redis/S3 lane in 1m 37s, and live Vercel QA confirmed the matching release plus working platform, gym and member portal navigation without application-origin errors.
+- Production encryption, IAM/bucket policy and lifecycle configuration remain separate deployment evidence.
+
+## Milestone 17 synthetic PostgreSQL restore checkpoint
+
+- The hosted backend now writes two fixed synthetic tenants through the same non-superuser `ironcore_app` identity used by Laravel.
+- PostgreSQL 17 creates a compressed custom archive and restores it into a newly created disposable database with ownership and ACL portability options.
+- Post-restore assertions rediscover every public `gym_id` table and require both RLS and FORCE RLS while confirming the role still cannot create databases/roles, inherit privileges or bypass RLS.
+- Tenant checks prove no-context reads fail closed, each selected gym sees exactly its own restored member/assignment and a third unrelated gym sees no rows.
+- A failure-safe cleanup removes the restored database, dump file and source fixtures. No production database, credential or member record is used.
+- Local shell syntax and portable contract validation pass; the GitHub-hosted PostgreSQL execution remains the authoritative completion gate.
+- This synthetic drill does not replace provider evidence for encrypted backups, PITR/retention, isolated operational recovery or measured RPO/RTO.

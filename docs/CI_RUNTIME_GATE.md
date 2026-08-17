@@ -20,8 +20,10 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Installs and audits Composer dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
 - Proves that every public table containing `gym_id` has both RLS and FORCE RLS enabled and that Redis-backed cache, session and queue configuration is active.
 - Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
+- Writes two synthetic tenants through `ironcore_app`, creates a PostgreSQL 17 custom-format archive and restores it into a fresh disposable database.
+- Reconnects to the restored database as `ironcore_app` and fails unless every `gym_id` table retains RLS plus FORCE RLS, no-context reads return no tenant rows, each selected tenant sees only its own fixture and an unrelated tenant sees none.
 
-The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; the storage test independently requires `IRONCORE_S3_RUNTIME_GATE=true`. All database and storage credentials are disposable workflow-only values, and the job never creates or modifies production infrastructure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; the storage test independently requires `IRONCORE_S3_RUNTIME_GATE=true`, and the restore script also requires `IRONCORE_RESTORE_DRILL_GATE=true` plus the reviewed GitHub PostgreSQL service-container identity. All database and storage credentials are disposable workflow-only values, and the job never creates or modifies production infrastructure. A cleanup trap deletes the synthetic fixtures, archive and restored database on success or failure.
 
 ## GitHub handoff
 
@@ -36,9 +38,11 @@ Weekly Dependabot checks cover npm, Composer and GitHub Actions metadata. Depend
 
 ## Evidence boundary
 
-A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence for the current migrations and feature suite, and proves the S3 protocol path for private member-export generation and deletion. It does not replace production bucket encryption/IAM/lifecycle evidence, Stripe/mail/SMS/push sandbox tests, measured k6 load testing, backup restoration, infrastructure monitoring, privacy approval or production user-acceptance testing.
+A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence for the current migrations and feature suite, proves the S3 protocol path for private member-export generation/deletion, and proves a synthetic custom-archive restore preserves tenant data and forced-RLS behavior. It does not replace production bucket encryption/IAM/lifecycle evidence, provider encrypted backup/PITR/retention and measured RPO/RTO evidence, Stripe/mail/SMS/push sandbox tests, measured k6 load testing, infrastructure monitoring, privacy approval or production user-acceptance testing.
 
 Commit `79ed6ae` closed this gate on 12 August 2026: both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` completed successfully. The backend lane passed all 44 Laravel tests and 335 assertions, dependency audit and production cache commands under the non-superuser forced-RLS configuration.
+
+Commit `7033e2b` closed the S3-compatible runtime addition on 13 August 2026. Quality, CodeQL and deployed-web checks passed; the backend lane completed the real HTTP object-storage generation, integrity and expiry lifecycle while Vercel served the exact release and all three preview portals passed live interaction QA.
 
 ## First hosted-run repair
 

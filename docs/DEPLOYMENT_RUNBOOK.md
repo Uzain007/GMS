@@ -36,6 +36,8 @@ Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, PostgreSQL/R
 - Pause workers before restoring PostgreSQL. Restore into an isolated environment, validate tenant counts and RLS, then switch through the provider's controlled recovery procedure.
 - Rotate any credential suspected of exposure and invalidate affected sessions/provider endpoints.
 
+The CI restore drill is the minimum schema/data portability baseline: it uses only a disposable PostgreSQL 17 service and synthetic tenants, and verifies restored FORCE RLS with `ironcore_app`. Before production launch, record separate provider evidence for encrypted backups, PITR/retention, an isolated restore of approved non-production data, measured RPO/RTO, monitoring and controlled cutover.
+
 ## Monitoring gates
 
 Alert on readiness failures, HTTP 5xx/error rate, p95 latency, PostgreSQL connections/locks/storage, Redis memory/evictions, queue depth/oldest age/failed jobs, scheduler heartbeat, Stripe webhook retries, notification-provider failures and backup/PITR status.

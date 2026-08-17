@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.22.0 — Milestone 16 S3-compatible export runtime gate |
+| MAD version | 0.23.0 — Milestone 17 synthetic PostgreSQL restore drill |
 | Last verified | 13 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `milestone-16-storage-runtime` |
-| Active milestone | Milestone 16 — S3-compatible member-export generation and expiry gate implemented; hosted verification pending |
+| Active branch | `milestone-17-backup-restore` |
+| Active milestone | Milestone 17 — synthetic PostgreSQL backup/restore and restored-tenant RLS gate implemented; hosted verification pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -952,6 +952,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Load validation targets report cache behaviour, bounded query latency, authentication throttles and tenant isolation. Load scripts use synthetic tenant IDs/tokens supplied only through environment variables and never contain committed credentials.
 - Pull requests and `main` pushes run two independent, read-only GitHub Actions jobs. The web job uses the committed npm lockfile and runs lint, type-checking, the secret scan, the production build/artifact validation before rendered-output contracts, all portable contracts and the production-dependency audit.
 - The backend job uses PHP 8.3 with PostgreSQL 17, Redis 8 and a disposable LocalStack S3 service. It creates an ephemeral `ironcore_app` login with `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT` and `NOBYPASSRLS`, owns only the disposable test database, and fails rather than skipping when PostgreSQL RLS, Redis or S3 runtime requirements are absent.
+- After the feature suite, the backend job inserts two fixed synthetic tenants through `ironcore_app`, creates a PostgreSQL 17 custom-format archive, restores it into a new disposable database and reconnects as `ironcore_app`. The drill fails unless every restored `gym_id` table retains RLS plus FORCE RLS, no-context reads fail closed, each selected tenant sees exactly its own fixture and an unrelated tenant sees none. A trap removes the archive, restored database and source fixtures on success or failure.
 - Auth generation, database identity, tenant membership and role authorization execute before implicit route-model binding. This ordering lets PostgreSQL RLS resolve tenant-owned records only after the connection security context exists and returns role denial before record lookup.
 - After `ResolveTenant` validates route/header agreement and promotes the gym into `TenantContext`, it consumes the `{gym}` route parameter before controller dispatch. Controllers needing the selected gym read the trusted context, preventing Laravel's positional dispatcher from shifting nested member, staff, booking or export parameters.
 - The committed Composer lockfile makes the Laravel 13 dependency graph deterministic; the non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
@@ -961,6 +962,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The deployed-web smoke workflow runs on each `main` push, every six hours and by manual dispatch. It waits at most ten minutes for the allowlisted HTTPS deployment to serve the triggering full Git SHA, then verifies a `200` HTML shell, HSTS, the reviewed title/platform markers, same-origin CSS and JavaScript, and the install manifest. Its target cannot contain credentials, query parameters or fragments and cannot be a local/private host literal.
 - The deployed-web smoke is a public frontend availability/provenance gate only. It sends no production credential or tenant/member value and does not replace authenticated Laravel readiness, PostgreSQL/Redis monitoring, provider sandbox execution, load evidence or a backup restore drill.
 - The object-storage runtime gate uses disposable non-secret credentials and an ephemeral S3-compatible emulator. It executes the production member-export and expiry jobs over HTTP, checks the private tenant-prefixed object, stored digest/size and byte deletion, and never contacts production storage. Provider encryption, bucket policy, lifecycle configuration and restore evidence remain deployment-environment gates.
+- The synthetic database restore drill proves repository schema/data restoration mechanics and forced-RLS continuity without production data or credentials. It does not prove a provider's encrypted backup schedule, point-in-time recovery, retention, cross-region recovery, RPO/RTO or operational cutover; those remain deployment-environment gates.
 
 ## Active feature status
 
@@ -1007,12 +1009,13 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Optional TOTP MFA and one-time recovery codes | Implemented; core runtime passing | Platform-owned encrypted secrets, non-replayed TOTP steps, HMAC-only recovery-code storage and short-lived Redis login challenges |
 | Milestone 10 — multi-factor authentication | Feature-complete; core runtime passing | Login, password-reset and existing-member activation entry paths require the second factor; 54 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
 | Milestone 11 — production CI runtime gate | Complete on commit `79ed6ae` | Both hosted jobs pass; PostgreSQL 17/Redis 8, forced RLS and Laravel production caches are verified |
-| Secure member data exports | Implemented; S3-compatible CI gate pending hosted verification | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
-| Milestone 12 — member data export lifecycle | Implementation complete; S3 runtime gate pending hosted verification | The production generation and purge jobs now have an HTTP object-storage gate; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
+| Secure member data exports | Implemented; S3-compatible CI gate passing | Staff and linked-member requests, tenant-bound queued generation, private S3-compatible JSON, integrity digest, authenticated no-store download and seven-day byte expiry |
+| Milestone 12 — member data export lifecycle | Implementation complete; S3 runtime gate passing | The production generation and purge jobs passed the hosted HTTP object-storage gate; erasure remains pending launch-country retention approval because immutable financial/audit evidence may require preservation |
 | Milestone 13 — hosted runtime-gate repair | Complete on commit `79ed6ae` | Both GitHub jobs pass; nested tenant route dispatch, PostgreSQL reporting, stateful auth, MFA audit RLS and deterministic dependency/test boot contracts are verified |
 | Milestone 14 — CodeQL application-security analysis | Complete on commit `2ddc641` | Both JavaScript/TypeScript and GitHub Actions analyses passed with pinned CodeQL v4, `security-extended` queries and least-privilege permissions |
 | Milestone 15 — deployed-web release verification | Complete on commit `45cf343` | Quality, CodeQL and deployment smoke all pass; Vercel serves the exact commit and the platform, gym and member previews pass live interaction QA without application-origin errors |
-| Milestone 16 — S3-compatible export runtime gate | Implemented; hosted verification pending | The backend CI lane provisions disposable S3-compatible storage and executes production export generation, private retrieval, integrity evidence and expiry deletion without production credentials |
+| Milestone 16 — S3-compatible export runtime gate | Complete on commit `7033e2b` | Quality, CodeQL and deployed-web checks pass; the backend lane executes production export generation, private retrieval, integrity evidence and expiry deletion without production credentials |
+| Milestone 17 — synthetic PostgreSQL backup/restore drill | Implemented; hosted verification pending | The disposable backend lane archives and restores two synthetic tenants, then proves least-privilege identity, restored FORCE RLS, fail-closed reads and cross-tenant denial |
 
 ## Change control
 
