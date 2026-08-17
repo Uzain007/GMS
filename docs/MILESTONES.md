@@ -50,7 +50,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 6 — Reporting, hardening and deployment
 
-**Milestone 6A status: feature-complete; core runtime passing; synthetic load gate implemented; production deployment gate pending**
+**Milestone 6A status: feature-complete; core runtime and synthetic load gate passing; production deployment gate pending**
 - Bounded financial, member, attendance and class-utilisation reporting for one selected tenant
 - Currency-specific aggregates, equal-length comparison periods, tenant-keyed Redis caching and management-only access
 - Report and readiness throttles, generic PostgreSQL/Redis readiness, secret scan and synthetic k6 load probe
@@ -175,10 +175,18 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 18 — Synthetic cached-report performance gate
 
-**Status: implemented; hosted verification pending**
+**Status: complete on commit `066a4d6`; hosted quality gate passing**
 - Pinned k6 1.7.1 runs inside the existing credential-free PostgreSQL/Redis backend lane
 - One 500-member tenant and one unrelated tenant are created through non-superuser `ironcore_app`
 - Sixteen ten-minute CI-only operators spread pressure without bypassing or weakening the production report throttle
 - A warmed 60-second Redis report response must remain identical throughout the run, with p95 below 500 ms and p99 below 1,000 ms
 - The same probe requires cross-tenant denial and zero committed access tokens or provider credentials
 - Production-scale capacity and saturation testing remain a deployment-topology gate
+- The hosted backend completed the PostgreSQL/Redis/S3 suite, restore drill and pinned k6 gate successfully
+
+## Post-Milestone 18 — Deployed-release propagation hardening
+
+**Status: implemented; hosted verification pending**
+- The first `066a4d6` push smoke reached its former ten-minute deployment wait before Vercel published the matching release
+- A subsequent credential-free smoke confirmed the exact commit, HTTP 200, HSTS, same-origin assets and valid install manifest
+- The bounded deployment wait is fifteen minutes inside a separate 20-minute job ceiling; authenticated API and production provider gates remain separate

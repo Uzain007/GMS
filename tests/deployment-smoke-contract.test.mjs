@@ -27,7 +27,8 @@ test("deployed web smoke runs after main changes and on a bounded schedule", () 
   assert.match(workflow, /IRONCORE_EXPECTED_COMMIT: \$\{\{ github\.sha \}\}/);
   assert.match(workflow, /IRONCORE_SMOKE_WEB_URL: https:\/\/gms-beige-ten\.vercel\.app\//);
   assert.match(workflow, /IRONCORE_SMOKE_ALLOWED_HOSTS: gms-beige-ten\.vercel\.app/);
-  assert.match(workflow, /IRONCORE_SMOKE_DEPLOY_WAIT_MS: "600000"/);
+  assert.match(workflow, /timeout-minutes: 20/);
+  assert.match(workflow, /IRONCORE_SMOKE_DEPLOY_WAIT_MS: "900000"/);
 });
 
 test("deployed web smoke actions are immutable and need no package install", () => {

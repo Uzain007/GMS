@@ -262,4 +262,11 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - The gate requires the warmed payload identity to remain stable, all report assertions to pass, cross-tenant access to return `403`, HTTP failure rate below 1%, p95 below 500 ms and p99 below 1,000 ms.
 - The Laravel target uses 16 local PHP workers and is stopped by an unconditional cleanup step. No production URL, credential, tenant or member data is used.
 - Portable contracts validate the immutable action pin, fixed k6 version, guarded fixture, expiring tokens, thresholds, tenant denial and cleanup behavior.
-- GitHub-hosted execution remains authoritative; production-sized capacity and saturation evidence must still be collected against the selected deployment topology.
+- Commit `066a4d6` passed both hosted quality jobs. The backend lane completed the PostgreSQL/Redis/S3 suite, restore drill and pinned k6 report gate successfully.
+- Production-sized capacity and saturation evidence must still be collected against the selected deployment topology.
+
+## Post-Milestone 18 deployed-release propagation checkpoint
+
+- The `066a4d6` push smoke reached the former ten-minute propagation ceiling before Vercel published the matching release; this was a deployment-timing failure, not a web or backend quality-test failure.
+- A later credential-free smoke passed on its first attempt against the exact `066a4d6` release, including HTTP 200, HSTS, same-origin CSS/JavaScript and the install manifest.
+- The workflow now allows a bounded fifteen-minute deployment window inside a 20-minute job, with portable contracts preventing accidental removal of either limit.

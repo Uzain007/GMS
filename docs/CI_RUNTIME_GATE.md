@@ -48,6 +48,8 @@ Commit `7033e2b` closed the S3-compatible runtime addition on 13 August 2026. Qu
 
 Commit `b5bb2d0` closed the synthetic PostgreSQL restore addition on 17 August 2026. Quality, CodeQL and deployed-web checks passed; the restored database retained least-privilege identity, FORCE RLS and selected-tenant isolation.
 
+Commit `066a4d6` closed the synthetic cached-report load addition on 17 August 2026. Both hosted quality jobs passed; the backend lane completed the PostgreSQL/Redis/S3 tests, restore drill and pinned k6 cached-report latency and tenant-denial gate.
+
 ## First hosted-run repair
 
 The first `main` run after Milestone 12 exposed two ordering/namespace defects that local build-first validation could not reveal: rendered-output contracts executed before `dist/server/index.js` existed, and the member-export policy read `app.current_gym_id` while the shared tenant context writes `ironcore.current_gym_id`. Milestone 13 makes the verified build precede the portable contracts, aligns the export policy with the established fail-closed setting, removes an unsupported setup action input, and adds regression assertions for both contracts.

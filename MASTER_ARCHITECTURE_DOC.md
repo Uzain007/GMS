@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.24.0 — Milestone 18 synthetic cached-report performance gate |
+| MAD version | 0.25.0 — Milestone 18 hosted closure and deployed-release propagation hardening |
 | Last verified | 17 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
-| Active branch | `milestone-18-load-validation` |
-| Active milestone | Milestone 18 — credential-free cached-report latency and tenant-isolation load gate implemented; hosted verification pending |
+| Active branch | `main` |
+| Active milestone | Milestone 18 complete on `066a4d6`; post-milestone production launch-readiness hardening active |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -960,7 +960,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 - CodeQL advanced analysis scans both JavaScript/TypeScript application source and GitHub Actions workflows on pull requests, `main` pushes and a weekly schedule. It runs the `security-extended` query suite, checks out without persisted credentials and grants only the job-scoped `security-events: write` permission required to upload code-scanning results. PHP remains covered by parser validation, Laravel runtime tests, Composer audit and review because CodeQL does not support PHP.
 - Each web build publishes the non-secret immutable Git commit as the `ironcore-release` metadata value. Vercel builds use `VERCEL_GIT_COMMIT_SHA`; GitHub/local validation may use `GITHUB_SHA` or the explicit `development` fallback. A commit identifier is provenance, never an authorization or tenant input.
-- The deployed-web smoke workflow runs on each `main` push, every six hours and by manual dispatch. It waits at most ten minutes for the allowlisted HTTPS deployment to serve the triggering full Git SHA, then verifies a `200` HTML shell, HSTS, the reviewed title/platform markers, same-origin CSS and JavaScript, and the install manifest. Its target cannot contain credentials, query parameters or fragments and cannot be a local/private host literal.
+- The deployed-web smoke workflow runs on each `main` push, every six hours and by manual dispatch. It waits at most fifteen minutes for the allowlisted HTTPS deployment to serve the triggering full Git SHA, then verifies a `200` HTML shell, HSTS, the reviewed title/platform markers, same-origin CSS and JavaScript, and the install manifest. Its target cannot contain credentials, query parameters or fragments and cannot be a local/private host literal. The job retains a separate 20-minute ceiling so the bounded propagation window cannot consume its final verification budget.
 - The deployed-web smoke is a public frontend availability/provenance gate only. It sends no production credential or tenant/member value and does not replace authenticated Laravel readiness, PostgreSQL/Redis monitoring, provider sandbox execution, load evidence or a backup restore drill.
 - The object-storage runtime gate uses disposable non-secret credentials and an ephemeral S3-compatible emulator. It executes the production member-export and expiry jobs over HTTP, checks the private tenant-prefixed object, stored digest/size and byte deletion, and never contacts production storage. Provider encryption, bucket policy, lifecycle configuration and restore evidence remain deployment-environment gates.
 - The synthetic database restore drill proves repository schema/data restoration mechanics and forced-RLS continuity without production data or credentials. It does not prove a provider's encrypted backup schedule, point-in-time recovery, retention, cross-region recovery, RPO/RTO or operational cutover; those remain deployment-environment gates.
@@ -997,9 +997,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Redis-queued email, SMS and push notification adapters | Implemented; Redis runtime passing; provider gate pending | Encrypted destinations, safe payload variables, preferences, idempotency, quiet hours and tenant-context jobs |
 | Training/progress frontend/API integration | Implemented; core runtime passing | Browser-verified plans, exercise logging, progress history, delivery evidence and member-controlled preferences |
 | Milestone 5B — training, progress and notifications | Feature-complete; provider gate pending | Core runtime, static contracts, production build, type-check and browser QA pass; live adapters remain gated |
-| Tenant operational reporting API and workspace | Implemented; core runtime passing; synthetic load gate implemented | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
-| Security, load and deployment preparation | Implemented; synthetic load gate pending hosted verification; production deployment gate pending | Named throttles, readiness, credential-free k6 regression baseline, secret scan, runbook and launch checklist |
-| Milestone 6A — reporting and operational hardening | Feature-complete; synthetic load gate implemented; deployment gate pending | Core runtime plus static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass |
+| Tenant operational reporting API and workspace | Implemented; core runtime and synthetic load gate passing | Bounded 366-day aggregates, currency separation, tenant cache keys, comparison periods, management access and responsive browser UI |
+| Security, load and deployment preparation | Implemented; synthetic load gate passing; production deployment gate pending | Named throttles, readiness, credential-free k6 regression baseline, secret scan, runbook and launch checklist |
+| Milestone 6A — reporting and operational hardening | Feature-complete; synthetic load gate passing; deployment gate pending | Core runtime plus static/build/render contracts, type-check, lint, artifact validation, secret scan and browser QA pass |
 | Milestone 6B — dedicated gym-client portal | Feature-complete; core runtime passing | Role-separated shell and selected-gym dashboard using already tenant-scoped responses; 41 contracts, build, type-check, lint, artifact/secret validation and browser interaction QA pass |
 | Linked member self-service API and least-privilege resources | Implemented; core runtime passing | Authenticated user link resolved server-side for profile, membership, invoices, payments, bounded attendance and safe QR metadata/rotation |
 | Milestone 7 — linked-member self-service portal | Feature-complete; core runtime passing | Dedicated responsive member shell and install manifest; 43 contracts, production build, type-check, lint, artifact validation, secret scan and browser interaction QA pass |
@@ -1017,7 +1017,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 15 — deployed-web release verification | Complete on commit `45cf343` | Quality, CodeQL and deployment smoke all pass; Vercel serves the exact commit and the platform, gym and member previews pass live interaction QA without application-origin errors |
 | Milestone 16 — S3-compatible export runtime gate | Complete on commit `7033e2b` | Quality, CodeQL and deployed-web checks pass; the backend lane executes production export generation, private retrieval, integrity evidence and expiry deletion without production credentials |
 | Milestone 17 — synthetic PostgreSQL backup/restore drill | Complete on commit `b5bb2d0` | Quality, CodeQL and deployed-web checks pass; the restored database retains least-privilege identity, FORCE RLS, fail-closed reads and cross-tenant denial |
-| Milestone 18 — synthetic cached-report performance gate | Implemented; hosted verification pending | Pinned k6 validates cached payload identity, p95/p99 latency and cross-tenant denial with 500 synthetic members and expiring CI-only tokens |
+| Milestone 18 — synthetic cached-report performance gate | Complete on commit `066a4d6` | Hosted quality passed both jobs; pinned k6 validated cached payload identity, p95/p99 latency and cross-tenant denial with 500 synthetic members and expiring CI-only tokens |
+| Post-Milestone 18 deployed-release propagation hardening | Implemented; hosted verification pending | A push smoke timed out at the former ten-minute ceiling before Vercel later served the correct `066a4d6` release; the bounded wait is now fifteen minutes inside a 20-minute job |
 
 ## Change control
 
