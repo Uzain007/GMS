@@ -4,6 +4,7 @@ namespace App\Services\Notifications;
 
 use App\Models\NotificationDelivery;
 use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 class EmailNotificationAdapter
 {
@@ -11,7 +12,12 @@ class EmailNotificationAdapter
     {
         $subject = (string) ($delivery->variables['subject'] ?? 'IronCore notification');
         $body = (string) ($delivery->variables['body'] ?? 'You have a new IronCore update.');
-        Mail::raw($body, fn ($message) => $message->to($delivery->destination)->subject($subject));
+        try {
+            Mail::raw($body, fn ($message) => $message->to($delivery->destination)->subject($subject));
+        } catch (Throwable) {
+            throw NotificationProviderException::rejected();
+        }
+
         return null;
     }
 }

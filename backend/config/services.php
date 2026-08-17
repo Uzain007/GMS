@@ -19,5 +19,13 @@ return [
         // Provider destinations and tokens remain environment-only.
         'sms' => ['endpoint' => env('NOTIFICATION_SMS_ENDPOINT'), 'token' => env('NOTIFICATION_SMS_TOKEN')],
         'push' => ['endpoint' => env('NOTIFICATION_PUSH_ENDPOINT'), 'token' => env('NOTIFICATION_PUSH_TOKEN')],
+        // Verification is never disabled. This optional bundle supports a
+        // provider/private CA and the generated certificate in the CI gate.
+        'ca_bundle' => env('NOTIFICATION_CA_BUNDLE'),
+        'runtime_gate' => [
+            'evidence_url' => env('IRONCORE_NOTIFICATION_RUNTIME_EVIDENCE_URL'),
+            'evidence_token' => env('IRONCORE_NOTIFICATION_RUNTIME_EVIDENCE_TOKEN'),
+            'rejection_marker' => env('IRONCORE_NOTIFICATION_RUNTIME_REJECTION_MARKER'),
+        ],
     ],
 ];

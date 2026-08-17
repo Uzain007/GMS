@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.26.0 — Milestone 19 production configuration preflight |
+| MAD version | 0.27.0 — Milestone 20 notification transport runtime gate |
 | Last verified | 17 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 19 implementation complete locally; hosted verification awaits the approved commit/push |
+| Active milestone | Milestone 20 implementation complete locally; hosted notification runtime awaits the approved commit/push |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -967,6 +967,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Before a production release runs migrations or receives traffic, `php artisan ironcore:production-preflight` must pass against Laravel's resolved configuration. The command fails closed on debug/non-production mode, an invalid application key, non-HTTPS public origins, unsafe cross-origin session/CORS/Sanctum settings, missing trusted proxies, a privileged/non-PostgreSQL runtime identity, non-Redis cache/session/queues, insecure database or Redis transport, non-private object storage configuration, missing Stripe signing secrets/callbacks, non-delivering mail, local-only logging or partially configured notification adapters.
 - Production web builds must separately run `npm run preflight:production-web`. It rejects representative demo mode, missing/non-public HTTPS API origins and missing immutable full-SHA release identity. This build-time check receives public deployment metadata only and never accepts a backend or provider secret.
 - Both preflights report only stable configuration names and requirements; they never print configured values. Passing them proves configuration shape only. Provider sandbox execution, service connectivity, provider backup/storage controls, monitored topology, privacy approval, branch protection and production capacity evidence remain separate launch gates.
+- The hosted backend gate runs password recovery and tenant notification jobs through Redis against a disposable loopback-only SMTP/HTTPS transport. SMTP authentication, HTTPS bearer authorization, email/SMS/push payloads and provider IDs use synthetic CI-only values; no production provider or credential is contacted.
+- Notification adapters convert transport/provider exceptions into a stable generic exception without retaining the original exception chain. This prevents provider response bodies, endpoint details or destinations from entering failed-job evidence while preserving a retryable failure signal.
+- The credential-free transport gate proves IronCore's queue and protocol boundaries only. Selected transactional email, SMS and push providers still require their own sandbox delivery, sender/domain approval, suppression handling, rate-limit, observability and production credential evidence before enablement.
 
 ## Active feature status
 
@@ -1022,7 +1025,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 17 — synthetic PostgreSQL backup/restore drill | Complete on commit `b5bb2d0` | Quality, CodeQL and deployed-web checks pass; the restored database retains least-privilege identity, FORCE RLS, fail-closed reads and cross-tenant denial |
 | Milestone 18 — synthetic cached-report performance gate | Complete on commit `066a4d6` | Hosted quality passed both jobs; pinned k6 validated cached payload identity, p95/p99 latency and cross-tenant denial with 500 synthetic members and expiring CI-only tokens |
 | Post-Milestone 18 deployed-release propagation hardening | Implemented; hosted re-verification pending | Push smokes timed out at former ten- and fifteen-minute ceilings before Vercel later served each exact release; the evidence-based bounded wait is now thirty minutes inside a 35-minute job |
-| Milestone 19 — production configuration preflight | Implementation complete; local quality passing; hosted verification pending | Fail-closed secret-safe Laravel and web preflights gate resolved production settings before migrations, traffic or a live web build; external provider/infrastructure evidence remains separate |
+| Milestone 19 — production configuration preflight | Implementation complete; web/security/deployed checks passing; backend rerun required | The backend job reached a third-party package-download HTTP 429 before tests; no IronCore assertion failed. Fail-closed secret-safe Laravel and web preflights gate resolved production settings before migrations, traffic or a live web build |
+| Milestone 20 — notification transport runtime gate | Implementation complete; local quality passing; hosted runtime pending | Disposable authenticated SMTP and HTTPS boundaries exercise password recovery plus tenant email/SMS/push jobs through Redis, deny cross-tenant payloads and sanitize provider failures without production credentials |
 
 ## Change control
 

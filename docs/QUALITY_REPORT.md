@@ -280,4 +280,15 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - Both preflights emit stable setting names and requirements only. A Laravel regression test injects marker values and asserts that none appear in output.
 - Local validation passes the production web preflight, secret scan, TypeScript, ESLint, deployable Vinext build/artifact validation, PHP syntax parsing and all **80 portable contracts** with zero failures, skips or cancellations.
 - The production dependency audit passes the required high-severity threshold with zero moderate/high/critical findings. One low-severity optional `@babel/core` advisory remains in Next.js's `styled-jsx` path and is outside this milestone's dependency changes.
-- The new Laravel command feature tests are committed-ready but require the existing PHP/PostgreSQL/Redis hosted lane after the user approves a commit/push; no production credential or provider connection is used there.
+- The first approved hosted backend attempt stopped during Composer installation when GitHub codeload returned HTTP 429 for Symfony; the web, CodeQL and deployed-release checks passed, and no IronCore Laravel assertion ran or failed. A later backend run must provide the runtime result.
+
+## Milestone 20 notification transport runtime checkpoint
+
+- The backend quality lane now starts a loopback-only authenticated SMTP and certificate-verified HTTPS provider boundary using a certificate/private key generated inside the disposable runner.
+- Password recovery crosses the public non-enumerating API, Redis queue, password broker and SMTP boundary; the received synthetic message must retain the fragment-only reset link.
+- Tenant email, SMS and push deliveries cross Redis and the real transport adapters with exact payload/provider-ID assertions. A mismatched immutable gym/delivery payload must fail closed before any provider request, and a disabled channel is suppressed before an attempt.
+- Adapter failures now discard the original transport exception chain before retry/failed-job evidence can retain provider response bodies, endpoint details, credentials or member destinations. Stored delivery failure evidence remains generic and bounded.
+- The custom notification CA bundle is optional, never disables verification and must reference a readable PEM file when production preflight evaluates it.
+- Local validation passes the clean production build, artifact/render contracts, production web preflight, TypeScript, ESLint, PHP syntax parsing, secret scan and all **84 portable contracts** with zero failures, skips or cancellations.
+- The production npm lockfile audit reports zero vulnerabilities. The Laravel/PostgreSQL/Redis provider-boundary tests require the existing hosted lane after the user approves a commit/push; all workflow credentials and provider values are synthetic and runner-only.
+- This credential-free protocol gate does not replace selected-provider sandbox delivery, sender/domain approval, suppression/rate-limit handling, alerting or production credentials.

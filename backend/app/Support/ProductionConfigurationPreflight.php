@@ -156,6 +156,12 @@ final class ProductionConfigurationPreflight
             }
         }
 
+        $notificationCaBundle = config('services.notifications.ca_bundle');
+        if (! $this->blank($notificationCaBundle)
+            && (! is_file($notificationCaBundle) || ! is_readable($notificationCaBundle))) {
+            $failures[] = 'NOTIFICATION_CA_BUNDLE must reference a readable PEM trust bundle when configured.';
+        }
+
         return array_values(array_unique($failures));
     }
 

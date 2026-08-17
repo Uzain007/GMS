@@ -194,10 +194,20 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 19 — Production configuration preflight
 
-**Status: implementation complete; local quality gate passing; hosted verification pending approved push**
+**Status: implementation complete; web/security/deployed checks passing; backend rerun required**
 - A fail-closed Laravel command validates resolved production configuration after cache generation and before migrations or traffic
 - The API gate covers production/debug mode, application key strength, public HTTPS origins, exact cookie/CORS/Sanctum alignment, trusted proxies, PostgreSQL least privilege, encrypted database/Redis transport, Redis-backed cache/session/queues, private S3-compatible storage, Stripe signing/callback settings, delivering mail, production log routing and optional notification-adapter pairing
 - A separate web-build preflight rejects representative demo mode, a missing or unsafe public API origin and a missing immutable full-SHA release identity
 - Failure output names only configuration requirements and never prints a secret or configured value
 - Automated tests cover a valid production shape, unsafe denial, cookie/origin mismatch, optional-adapter mismatch and secret-safe output
 - Passing preflights does not claim provider connectivity, provider sandbox execution, backup/storage controls, monitoring, privacy approval, branch protection or production-capacity evidence
+- The first hosted backend run stopped during Composer installation when GitHub codeload returned HTTP 429; the web, CodeQL and deployed-release checks passed and no IronCore backend assertion ran or failed
+
+## Milestone 20 — Notification transport runtime gate
+
+**Status: implementation complete; local quality gate passing; hosted runtime pending approved push**
+- Exercise queued password recovery through Redis and a disposable authenticated SMTP boundary
+- Exercise tenant-bound email, SMS and push deliveries through Redis and loopback-only HTTPS endpoints with synthetic bearer credentials
+- Prove provider request shapes, returned provider IDs, tenant isolation and preference enforcement without production data or provider access
+- Sanitize transport/provider exceptions before retry and failed-job evidence can retain endpoint, response or destination details
+- Keep selected-provider sandbox delivery, sender/domain approval, suppression/rate-limit behaviour, monitoring and live credentials as explicit deployment gates

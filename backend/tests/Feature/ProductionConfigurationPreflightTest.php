@@ -82,6 +82,19 @@ class ProductionConfigurationPreflightTest extends TestCase
         $this->assertStringContainsString('TRUSTED_PROXIES must name', Artisan::output());
     }
 
+    public function test_notification_ca_bundle_must_be_readable_without_echoing_its_path(): void
+    {
+        $this->configureSafeProductionShape();
+        $marker = '/deployment/private/notification-ca-marker.pem';
+        config(['services.notifications.ca_bundle' => $marker]);
+
+        $exitCode = Artisan::call('ironcore:production-preflight');
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('NOTIFICATION_CA_BUNDLE must reference a readable PEM trust bundle', Artisan::output());
+        $this->assertStringNotContainsString($marker, Artisan::output());
+    }
+
     private function configureSafeProductionShape(): void
     {
         config([
@@ -137,6 +150,7 @@ class ProductionConfigurationPreflightTest extends TestCase
             'services.notifications.sms.token' => null,
             'services.notifications.push.endpoint' => null,
             'services.notifications.push.token' => null,
+            'services.notifications.ca_bundle' => null,
             'mail.default' => 'smtp',
             'mail.mailers.smtp' => [
                 'transport' => 'smtp',
