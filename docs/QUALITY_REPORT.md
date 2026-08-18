@@ -303,3 +303,12 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - The optional Stripe CA bundle never disables verification and production preflight rejects an unreadable configured file without printing its path.
 - Local validation passes the clean production build and artifact/render checks, TypeScript, ESLint, PHP syntax parsing, secret scan and all **89 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
 - The Laravel/PostgreSQL runtime tests require the existing hosted lane after the user approves a commit/push. This credential-free boundary does not replace real Stripe test-mode onboarding, Checkout, refunds, portal actions, asynchronous webhooks, monitoring or production credentials.
+
+## Milestone 22 hosted dependency-install resilience checkpoint
+
+- Public workflow evidence shows the Milestone 19, 20 and 21 web jobs passed while each backend job stopped at `Install backend dependencies` before any Laravel assertion; the first retained diagnosis was a transient GitHub codeload HTTP 429.
+- Official `actions/cache` v5.0.3 is pinned to full commit `cdf6c1fa76f9f475f3d7449005a359c84ca0f306` and restores Composer download archives only under an operating-system/PHP/exact-lockfile key. Generated `vendor` code is excluded.
+- Composer parallel HTTP pressure is limited to four. The Node 22.13 retry runner preserves the exact `--prefer-dist` locked install, waits 15/30/60 seconds and fails after attempt four without an update, source substitution, cache clearing or credential injection.
+- Executable regression tests simulate recovery after two transient failures and hard failure after the fourth attempt, while also checking exact arguments, unchanged lockfile content, cache scope, immutable action pinning and absence of workflow credentials.
+- Local validation passes a clean production build, post-build artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, secret scan and all **92 portable contracts** with zero failures, skips or cancellations. The production npm dependency audit reports zero vulnerabilities.
+- No PHP dependency, Laravel source, tenant schema, route, permission or product behavior changed. An approved commit/push is still required before the GitHub-hosted PostgreSQL/Redis/S3/provider/restore/load authority can complete.

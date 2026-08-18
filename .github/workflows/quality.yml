@@ -60,6 +60,9 @@ jobs:
     timeout-minutes: 20
     env:
       CI: "true"
+      # Keep transient registry pressure bounded without exposing a GitHub token
+      # to Composer scripts or changing the reviewed dependency lockfile.
+      COMPOSER_MAX_PARALLEL_HTTP: "4"
       IRONCORE_RUNTIME_GATE: "true"
       IRONCORE_S3_RUNTIME_GATE: "true"
       IRONCORE_RESTORE_DRILL_GATE: "true"
@@ -187,6 +190,11 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      - name: Set up locked Node runtime for CI helpers
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.13.0
+
       - name: Generate an ephemeral application key
         shell: bash
         run: echo "APP_KEY=base64:$(php -r 'echo base64_encode(random_bytes(32));')" >> "$GITHUB_ENV"
@@ -198,9 +206,21 @@ jobs:
         working-directory: backend
         run: composer validate --strict --no-check-publish
 
+      - name: Locate Composer download cache
+        id: composer-cache
+        shell: bash
+        working-directory: backend
+        run: echo "path=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore lockfile-keyed Composer download cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ steps.composer-cache.outputs.path }}
+          key: composer-files-${{ runner.os }}-php-8.3-${{ hashFiles('backend/composer.lock') }}
+
       - name: Install backend dependencies
         working-directory: backend
-        run: composer install --prefer-dist --no-interaction --no-progress
+        run: node ../scripts/ci/install-composer-dependencies.mjs
 
       - name: Audit backend dependencies
         working-directory: backend

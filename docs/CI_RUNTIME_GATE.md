@@ -17,7 +17,7 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Starts disposable PostgreSQL 17, Redis 8 and S3-compatible LocalStack services.
 - Creates the test database under `ironcore_app`, an explicit non-superuser login that cannot create databases/roles, inherit privileges or bypass RLS.
 - Generates a new ephemeral Laravel `APP_KEY`; no committed or production key is used.
-- Installs and audits Composer dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
+- Restores only Composer download archives from an immutable lockfile-keyed cache, limits parallel provider requests and retries the exact locked install four times with bounded backoff before failing closed. It then audits dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
 - Proves that every public table containing `gym_id` has both RLS and FORCE RLS enabled and that Redis-backed cache, session and queue configuration is active.
 - Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
 - Runs password recovery and tenant email/SMS/push jobs through Redis against disposable authenticated SMTP and HTTPS endpoints, including cross-tenant denial and secret-safe provider failure evidence.
@@ -27,7 +27,7 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Creates a 500-member synthetic gym plus an isolated gym, distributes load across 16 ten-minute CI-only operator tokens, and runs pinned k6 against a 16-worker disposable Laravel server.
 - Warms the tenant-keyed Redis report cache, then requires 100% valid cached payloads, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms without weakening the real 30-per-minute user/gym throttle.
 
-The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, Stripe, restore and load stages independently require their explicit gate markers. All credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification, Stripe and load processes and removes generated certificates and restore artifacts on success or failure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, Stripe, restore and load stages independently require their explicit gate markers. Composer receives no GitHub token or production credential, never runs an update, and never restores generated `vendor` code. All runtime-gate credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification, Stripe and load processes and removes generated certificates and restore artifacts on success or failure.
 
 ## GitHub handoff
 
@@ -63,3 +63,15 @@ The following backend rerun reached the tenant feature suite and exposed an RLS-
 The next rerun proved that priority alone was insufficient because Laravel's controller dispatcher still passed the already-consumed `{gym}` value positionally, shifting every nested parameter by one. `ResolveTenant` now removes that parameter only after route/header agreement, gym lookup and active-access authorization, while gym and SaaS controllers read the trusted `TenantContext`. The same repair closes PostgreSQL's duplicate-timezone-placeholder grouping error, stateful session-generation drift, unsupported MFA validators and platform security-audit visibility. A production-shaped local run passed all 44 Laravel tests and 335 assertions without warnings as non-superuser `ironcore_app` on PostgreSQL 17 forced RLS and Redis 8; commit `79ed6ae` then passed the same hosted authority.
 
 The production-cache stage is also exercised locally. The API keeps an empty tracked `resources/views` directory so Laravel's `view:cache` command succeeds even though IronCore currently returns JSON rather than Blade pages.
+
+## Milestone 22 dependency-install resilience
+
+The Milestone 19, 20 and 21 hosted quality runs each passed the complete web job but stopped at `Install backend dependencies` before any Laravel assertion ran. Milestone 19 retained the provider evidence identifying a transient GitHub codeload HTTP 429; the later runs failed at the same boundary. Milestone 22 addresses that repeated infrastructure failure without changing the reviewed dependency graph:
+
+- official `actions/cache` v5.0.3 is pinned to full commit `cdf6c1fa76f9f475f3d7449005a359c84ca0f306`;
+- the cache path comes from Composer and stores download archives only, keyed by operating system, PHP 8.3 and the exact backend lockfile hash;
+- `COMPOSER_MAX_PARALLEL_HTTP=4` reduces burst pressure, while the install runner retains `--prefer-dist` and retries after 15, 30 and 60 seconds;
+- the fourth failure remains a hard failure, and no fallback updates dependencies, clears trusted cache evidence, uses source substitution or exposes `github.token`/repository secrets;
+- executable portable tests simulate both recovery after transient failures and exhaustion of the retry ceiling.
+
+Only a hosted run after the approved commit can prove that the backend reaches and passes the existing Laravel/PostgreSQL/Redis/S3/provider/restore/load authority.

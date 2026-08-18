@@ -205,7 +205,7 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 20 — Notification transport runtime gate
 
-**Status: implementation complete; local quality gate passing; hosted runtime pending approved push**
+**Status: implementation complete; web/security/deployed checks passing; hosted backend stopped during dependency installation**
 - Exercise queued password recovery through Redis and a disposable authenticated SMTP boundary
 - Exercise tenant-bound email, SMS and push deliveries through Redis and loopback-only HTTPS endpoints with synthetic bearer credentials
 - Prove provider request shapes, returned provider IDs, tenant isolation and preference enforcement without production data or provider access
@@ -214,9 +214,19 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 21 — Stripe transport runtime gate
 
-**Status: implementation complete; local quality gate passing; hosted runtime pending approved push**
+**Status: implementation complete; web/security/deployed checks passing; hosted backend stopped during dependency installation**
 - Exercise Stripe Connect onboarding, account refresh, direct-charge Checkout and refunds through a disposable loopback-only HTTPS boundary
 - Exercise platform product/price, customer, subscription Checkout and customer-portal requests without connected-account routing
 - Verify distinct Connect and Billing webhook signatures, opaque account/customer tenant resolution, server-authored metadata and replay idempotency
 - Prove cross-tenant metadata cannot mutate payment or subscription state and keep all evidence synthetic and credential-free
 - Keep real Stripe test-mode onboarding, Checkout, refunds, portal, event delivery, monitoring and production credentials as explicit provider/deployment gates
+
+## Milestone 22 — Hosted dependency-install resilience
+
+**Status: implementation complete locally; hosted re-verification pending approved push**
+- Cache only Composer download archives under an immutable action and exact `composer.lock`-derived key; never cache generated `vendor` code
+- Limit Composer's parallel HTTP requests and retry failed locked installs four times with bounded 15/30/60-second backoff
+- Preserve `--prefer-dist`, non-interactive locked installation and fail closed after the final attempt without running `composer update` or clearing the reviewed cache
+- Keep checkout credentials disabled and expose no GitHub token, production secret or provider credential to dependency scripts
+- Add executable portable coverage for transient recovery, the final failure ceiling, exact arguments, cache scope and credential absence
+- Re-run the complete PostgreSQL/Redis/S3/provider/restore/load backend authority only after an approved commit and push
