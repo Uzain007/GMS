@@ -13,4 +13,4 @@ This preserves HTTPS and client-IP forwarding protection at the production edge 
 
 ## Evidence boundary
 
-Portable tests prevent configuration access from returning to early bootstrap and validate the config/preflight contract. Laravel feature tests cover an allowed CIDR, the explicit provider wildcard and invalid hostname rejection. Only an approved commit/push can re-run the complete hosted PostgreSQL/Redis/S3/provider/restore/load authority and confirm package discovery in the Linux PHP runtime.
+Portable tests prevent configuration access from returning to early bootstrap and validate the config/preflight contract. Laravel feature tests cover an allowed CIDR, the explicit provider wildcard and invalid hostname rejection. The approved `4f31f61` run confirmed dependency activation and package discovery in the Linux PHP runtime, then passed 60 Laravel tests before exposing the separate multipart SMTP evidence defect addressed by Milestone 25.

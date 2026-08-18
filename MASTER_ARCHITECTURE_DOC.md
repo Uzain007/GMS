@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.31.0 — Milestone 24 bootstrap-safe trusted proxy configuration |
+| MAD version | 0.32.0 — Milestone 25 MIME-aware SMTP runtime evidence |
 | Last verified | 18 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 24 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
+| Active milestone | Milestone 25 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -968,6 +968,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Production web builds must separately run `npm run preflight:production-web`. It rejects representative demo mode, missing/non-public HTTPS API origins and missing immutable full-SHA release identity. This build-time check receives public deployment metadata only and never accepts a backend or provider secret.
 - Both preflights report only stable configuration names and requirements; they never print configured values. Passing them proves configuration shape only. Provider sandbox execution, service connectivity, provider backup/storage controls, monitored topology, privacy approval, branch protection and production capacity evidence remain separate launch gates.
 - The hosted backend gate runs password recovery and tenant notification jobs through Redis against a disposable loopback-only SMTP/HTTPS transport. SMTP authentication, HTTPS bearer authorization, email/SMS/push payloads and provider IDs use synthetic CI-only values; no production provider or credential is contacted.
+- The disposable SMTP boundary decodes each multipart text body according to its declared MIME transfer encoding and keeps both raw and decoded evidence only in authenticated runner memory. Test failures use stable assertions rather than printing reset values or message bodies into hosted logs.
 - Notification adapters convert transport/provider exceptions into a stable generic exception without retaining the original exception chain. This prevents provider response bodies, endpoint details or destinations from entering failed-job evidence while preserving a retryable failure signal.
 - The credential-free transport gate proves IronCore's queue and protocol boundaries only. Selected transactional email, SMS and push providers still require their own sandbox delivery, sender/domain approval, suppression handling, rate-limit, observability and production credential evidence before enablement.
 - The hosted backend gate runs Stripe Connect and platform Billing operations against a disposable loopback-only HTTPS boundary using synthetic CI-only bearer and webhook-signing credentials. It proves the production request shapes, connected-account routing, idempotency headers, distinct money flows and signed webhook entry points without contacting Stripe or handling real payment data.
@@ -1033,7 +1034,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 21 — Stripe transport runtime gate | Implementation complete; web/security/deployed checks passing; hosted backend stopped before tests | Disposable HTTPS Stripe boundary exercises Connect and platform Billing requests, distinct signed webhooks, idempotency and tenant denial without provider credentials or real payment data |
 | Milestone 22 — hosted dependency-install resilience | Complete; hosted retry still stopped before tests | Lockfile-keyed Composer download caching, reduced parallel HTTP pressure and four bounded retries preserved the locked graph but did not clear the repeated GitHub download limit |
 | Milestone 23 — credential-isolated Composer prefetch | Complete; hosted prefetch passed | The read-only workflow token was isolated to bounded no-plugin/no-script package prefetches and stripped before normal Composer/Laravel activation; hosted package download completed, then package discovery exposed a separate early-bootstrap defect |
-| Milestone 24 — bootstrap-safe trusted proxy configuration | Implementation complete locally; hosted re-verification pending | Trusted proxy values move to Laravel's request-time `trustedproxy` configuration, so package discovery and CLI boot do not resolve the config service early; production proxy validation and forwarding-header protection remain fail closed |
+| Milestone 24 — bootstrap-safe trusted proxy configuration | Complete; hosted package discovery passed | Trusted proxy values moved to Laravel's request-time `trustedproxy` configuration; hosted dependency activation and package discovery succeeded, then the suite exposed a separate raw-MIME notification assertion defect |
+| Milestone 25 — MIME-aware SMTP runtime evidence | Implementation complete locally; hosted re-verification pending | The disposable provider decodes quoted-printable/Base64 text parts independently in authenticated runner memory; reset-link and tenant-email assertions remain semantic and secret-safe without changing production mail behavior |
 
 ## Change control
 

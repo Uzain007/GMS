@@ -59,9 +59,15 @@ class MilestoneTwentyNotificationProviderRuntimeTest extends TestCase
             fn (array $message): bool => in_array('runtime-account@example.test', $message['recipients'], true),
         );
         $this->assertIsArray($resetMessage);
-        $decodedReset = quoted_printable_decode($resetMessage['raw']);
-        $this->assertStringContainsString('#reset_email=runtime%40example.test', $decodedReset);
-        $this->assertStringContainsString('reset_token=', $decodedReset);
+        $decodedReset = $this->decodedSmtpText($resetMessage);
+        $this->assertTrue(
+            str_contains($decodedReset, '#reset_email=runtime%40example.test'),
+            'The SMTP reset message must retain the encoded email in the URL fragment.',
+        );
+        $this->assertTrue(
+            str_contains($decodedReset, 'reset_token='),
+            'The SMTP reset message must retain its fragment-only reset token field.',
+        );
 
         [$gym, $member, $actor, $preference] = $this->tenantMember();
         $service = app(NotificationService::class);
@@ -109,7 +115,10 @@ class MilestoneTwentyNotificationProviderRuntimeTest extends TestCase
             fn (array $message): bool => in_array('runtime-member@example.test', $message['recipients'], true),
         );
         $this->assertIsArray($emailMessage);
-        $this->assertStringContainsString('Email boundary confirmed.', quoted_printable_decode($emailMessage['raw']));
+        $this->assertTrue(
+            str_contains($this->decodedSmtpText($emailMessage), 'Email boundary confirmed.'),
+            'The SMTP boundary must preserve the tenant notification body.',
+        );
         $this->assertSame([[
             'to' => '+447700900123',
             'message' => 'SMS boundary confirmed.',
@@ -300,6 +309,21 @@ class MilestoneTwentyNotificationProviderRuntimeTest extends TestCase
     private function evidenceBaseUrl(): string
     {
         return rtrim((string) config('services.notifications.runtime_gate.evidence_url'), '/');
+    }
+
+    /** @param array<string, mixed> $message */
+    private function decodedSmtpText(array $message): string
+    {
+        $parts = $message['text_parts'] ?? null;
+        $this->assertIsArray($parts, 'The SMTP boundary must expose decoded MIME text parts.');
+
+        return collect($parts)->map(function (mixed $part): string {
+            $this->assertIsArray($part, 'Each SMTP text part must be structured evidence.');
+            $this->assertContains($part['media_type'] ?? null, ['text/plain', 'text/html']);
+            $this->assertIsString($part['content'] ?? null);
+
+            return $part['content'];
+        })->implode("\n");
     }
 
     /** @return array<string, string> */

@@ -243,9 +243,18 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 24 — Bootstrap-safe trusted proxy configuration
 
-**Status: implementation complete locally; hosted re-verification pending approved push**
+**Status: complete; hosted dependency activation and Laravel package discovery passed**
 - Remove early configuration resolution from `bootstrap/app.php` so Composer package discovery and Laravel CLI startup can create the application safely
 - Let Laravel's default trusted-proxy HTTP middleware resolve reviewed proxy IPs, CIDRs or the explicit provider wildcard after configuration is available
 - Preserve the fail-closed production preflight for an empty or invalid `TRUSTED_PROXIES` boundary
 - Add Laravel and portable regression coverage for wildcard normalization, invalid proxy rejection and a configuration-free bootstrap file
-- Re-run the complete PostgreSQL/Redis/S3/provider/restore/load backend authority only after an approved commit and push
+- The approved `4f31f61` run passed dependency installation, audit, package discovery and 60 Laravel tests; one separate notification-runtime assertion failed while inspecting raw multipart email evidence
+
+## Milestone 25 — MIME-aware SMTP runtime evidence
+
+**Status: implementation complete locally; hosted re-verification pending approved push**
+- Decode each captured SMTP text part according to its own declared transfer encoding instead of treating the complete multipart message as one quoted-printable body
+- Support folded multipart boundaries, quoted-printable soft wrapping and Base64 text bodies without adding a dependency or changing production email delivery
+- Keep raw and decoded email evidence inside the authenticated in-memory CI provider and never write message bodies to provider logs
+- Use stable boolean Laravel assertions so a failure cannot echo a reset value or complete message body into hosted logs
+- Re-run the complete Laravel/PostgreSQL/Redis/S3/provider/restore/load authority only after an approved commit and push

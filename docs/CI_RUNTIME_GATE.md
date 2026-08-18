@@ -96,4 +96,12 @@ The approved `48561a8` run proved the prefetch and credential boundary. All 116 
 
 Milestone 24 removes configuration resolution from `bootstrap/app.php`. Laravel's built-in trusted-proxy middleware remains in the default global HTTP stack and reads `config/trustedproxy.php` while handling a request, after configuration is available. The production preflight reads the same resolved value and still rejects an empty boundary, hostnames and malformed IP/CIDR entries while accepting the explicit provider wildcard.
 
-Portable coverage fails if bootstrap regains a `config()` or `trustProxies()` call, and Laravel feature coverage verifies both invalid-proxy rejection and wildcard acceptance. The complete hosted backend authority still requires the user's approved commit/push; no workflow, dependency graph, tenant boundary or product behavior changed.
+Portable coverage fails if bootstrap regains a `config()` or `trustProxies()` call, and Laravel feature coverage verifies both invalid-proxy rejection and wildcard acceptance. No workflow, dependency graph, tenant boundary or product behavior changed.
+
+The approved `4f31f61` run confirmed that repair: dependency activation, Laravel package discovery and audit passed, the provider boundaries started, and the feature suite executed. Sixty Laravel tests passed before one notification-runtime assertion failed because it applied quoted-printable decoding to a complete multipart message rather than to each encoded MIME body.
+
+## Milestone 25 MIME-aware SMTP runtime evidence
+
+Milestone 25 keeps production password recovery and notification delivery unchanged. The disposable Node SMTP boundary now parses folded multipart boundaries and decodes individual text parts using their declared quoted-printable, Base64, 7-bit, 8-bit or binary transfer encoding. Raw and decoded messages remain behind the synthetic bearer-protected evidence endpoint in runner memory and are never printed by the provider.
+
+The Laravel runtime test searches only the decoded text parts and uses stable boolean failure messages, so a failed assertion does not echo a reset value or complete message body. Executable Node coverage proves folded boundaries, quoted-printable soft wrapping and Base64 decoding. The complete hosted backend authority still requires the user's approved commit/push; no workflow, dependency graph, tenant boundary or production behavior changed.

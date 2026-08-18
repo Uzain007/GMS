@@ -8,11 +8,12 @@ Milestone 20 adds a disposable provider boundary to the existing hosted backend 
 - The certificate and private key are generated inside the disposable runner and are never committed.
 - Synthetic credentials protect SMTP, SMS, push and the test-only evidence endpoint.
 - Password recovery is requested through the public non-enumerating API, consumed from Redis and delivered through SMTP with its fragment-only reset link.
+- Captured multipart email text bodies are decoded independently from their declared quoted-printable, Base64 or pass-through transfer encoding before semantic assertions run.
 - Tenant email, SMS and push deliveries are queued through Redis, processed with the immutable `gym_id`, and checked for exact protocol payloads and provider IDs.
 - A mismatched gym/delivery payload must fail closed before any provider request.
 - A marker-bearing provider rejection must become a generic exception with no original exception chain, endpoint, destination, credential or response marker in retained delivery evidence.
 
-The provider process keeps synthetic request evidence only in memory, binds only `127.0.0.1`, emits no message payloads to logs and is stopped on success or failure.
+The provider process keeps raw and decoded synthetic request evidence only in its authenticated memory, binds only `127.0.0.1`, emits no message payloads to logs and is stopped on success or failure. Runtime failures use stable messages rather than including reset values or full SMTP bodies.
 
 ## Evidence boundary
 

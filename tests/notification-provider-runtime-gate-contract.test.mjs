@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { decodeMimeTextParts } from "../scripts/ci/mime-message.mjs";
+
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 const workflow = await read(".github/workflows/quality.yml");
@@ -44,7 +46,40 @@ test("disposable provider binds loopback and requires SMTP plus bearer authentic
   assert.match(sandbox, /equalSecret\(bearer\(request\), expectedToken\)/);
   assert.match(sandbox, /equalSecret\(bearer\(request\), evidenceToken\)/);
   assert.match(sandbox, /cache-control": "no-store"/);
+  assert.match(sandbox, /text_parts: decodeMimeTextParts\(raw\)/);
   assert.doesNotMatch(sandbox, /0\.0\.0\.0/);
+});
+
+test("SMTP evidence decodes quoted-printable and base64 MIME text parts", () => {
+  const html = '<a href="http://localhost/#reset_email=runtime%40example.test&amp;reset_token=xyz">Reset</a>';
+  const message = [
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/alternative;",
+    ' boundary="ironcore-runtime-boundary"',
+    "",
+    "This is a multipart message.",
+    "--ironcore-runtime-boundary",
+    "Content-Type: text/plain; charset=utf-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    "Reset: http://localhost/#reset_email=3Druntime%40example.test&reset_=",
+    "token=3Dabc",
+    "--ironcore-runtime-boundary",
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    Buffer.from(html, "utf8").toString("base64"),
+    "--ironcore-runtime-boundary--",
+    "",
+  ].join("\r\n");
+
+  assert.deepEqual(decodeMimeTextParts(message), [
+    {
+      media_type: "text/plain",
+      content: "Reset: http://localhost/#reset_email=runtime%40example.test&reset_token=abc",
+    },
+    { media_type: "text/html", content: html },
+  ]);
 });
 
 test("runtime coverage crosses Redis and denies a mismatched tenant payload", () => {
@@ -60,6 +95,8 @@ test("runtime coverage crosses Redis and denies a mismatched tenant payload", ()
   assert.match(runtimeTest, /NotificationDeliveryStatus::Queued/);
   assert.match(runtimeTest, /test_disabled_channel_is_suppressed_before_any_provider_request/);
   assert.match(runtimeTest, /NotificationDeliveryStatus::Suppressed/);
+  assert.match(runtimeTest, /decodedSmtpText/);
+  assert.doesNotMatch(runtimeTest, /quoted_printable_decode/);
 });
 
 test("adapter failures discard provider exception chains before queue evidence", () => {

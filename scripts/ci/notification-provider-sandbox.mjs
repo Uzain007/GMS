@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import https from "node:https";
 import net from "node:net";
 
+import { decodeMimeTextParts } from "./mime-message.mjs";
+
 const host = "127.0.0.1";
 
 function required(name) {
@@ -123,10 +125,14 @@ const smtpServer = net.createServer((socket) => {
   const handleLine = (line) => {
     if (dataLines) {
       if (line === ".") {
+        const raw = dataLines.join("\r\n");
         evidence.smtp.push({
           mail_from: mailFrom,
           recipients: [...recipients],
-          raw: dataLines.join("\r\n"),
+          raw,
+          // Decoded bodies remain inside the authenticated, in-memory CI
+          // evidence boundary and are never written to provider logs.
+          text_parts: decodeMimeTextParts(raw),
         });
         resetEnvelope();
         reply("250 2.0.0 Message accepted for delivery");

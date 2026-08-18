@@ -331,3 +331,13 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - A Laravel feature test covers wildcard normalization, and the portable regression contract prevents early config resolution from returning to bootstrap.
 - Local validation passes a clean production build, artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, production web preflight, secret scan and all **94 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
 - The local workstation has no PHP/Composer/PostgreSQL runtime, so the complete existing Laravel/PostgreSQL/Redis/S3/provider/restore/load authority remains pending an approved commit/push. No commit or push is part of this milestone handoff.
+- The approved `4f31f61` run passed dependency installation, audit and Laravel package discovery. Sixty Laravel tests passed with 459 assertions before one notification-runtime test failed while searching a raw multipart message with a whole-message quoted-printable decoder.
+
+## Milestone 25 MIME-aware SMTP runtime evidence checkpoint
+
+- The disposable SMTP boundary now parses folded multipart boundaries and decodes each text part from its declared quoted-printable, Base64 or pass-through transfer encoding.
+- Raw and decoded messages stay inside the authenticated in-memory CI evidence service; the provider writes neither to logs.
+- Password-reset and tenant-email runtime assertions inspect decoded text parts and report stable failure messages without echoing reset values or complete messages.
+- Executable coverage proves quoted-printable soft-line joining and Base64 decoding in the same multipart message, while the existing Redis, tenant-denial, suppression and sanitized-provider-failure contracts remain intact.
+- Local validation passes a clean production build, artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, production web preflight, secret scan and all **95 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
+- The local workstation has no PHP/Composer/PostgreSQL runtime, so the complete Laravel/PostgreSQL/Redis/S3/provider/restore/load authority remains pending an approved commit/push. No commit or push is part of this milestone handoff.
