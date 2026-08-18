@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.29.0 — Milestone 22 hosted dependency-install resilience |
+| MAD version | 0.30.0 — Milestone 23 credential-isolated Composer prefetch |
 | Last verified | 18 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 22 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
+| Active milestone | Milestone 23 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -956,7 +956,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - After the restore drill, the backend job creates one 500-member report tenant, one isolated tenant and 16 ten-minute operator tokens under `ironcore_app`. Pinned k6 1.7.1 warms the 60-second Redis report cache and drives eight requests per second for 30 seconds against a 16-worker disposable Laravel server. The gate requires an unchanged cached payload, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms while retaining the production 30-per-minute user/gym limiter. The target and tokens exist only on the disposable runner.
 - Auth generation, database identity, tenant membership and role authorization execute before implicit route-model binding. This ordering lets PostgreSQL RLS resolve tenant-owned records only after the connection security context exists and returns role denial before record lookup.
 - After `ResolveTenant` validates route/header agreement and promotes the gym into `TenantContext`, it consumes the `{gym}` route parameter before controller dispatch. Controllers needing the selected gym read the trusted context, preventing Laravel's positional dispatcher from shifting nested member, staff, booking or export parameters.
-- The committed Composer lockfile makes the Laravel 13 dependency graph deterministic. Hosted CI caches only Composer download archives under a lockfile-derived key, limits parallel provider requests and uses four finite backoff attempts; it never updates the lockfile, caches `vendor`, or exposes a GitHub/production credential to dependency scripts. The non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
+- The committed Composer lockfile makes the Laravel 13 dependency graph deterministic. Hosted CI caches only Composer download archives under a lockfile-derived key, limits parallel provider requests and uses four finite prefetch attempts. The read-only workflow token exists only in a Composer child with plugins and scripts disabled; the activation child removes `COMPOSER_AUTH` and all GitHub token variables before Laravel or dependency code can execute. CI never updates the lockfile, caches `vendor` or receives a production credential. The non-secret test environment marker prevents missing-dotenv warnings without storing configuration or credentials.
 - CI receives no production provider credentials. Its database passwords and generated `APP_KEY` are ephemeral test-only values; workflow permissions remain `contents: read`, third-party actions are pinned to reviewed full commit hashes, checkout credentials are not persisted, and fork pull requests receive no secrets.
 - CodeQL advanced analysis scans both JavaScript/TypeScript application source and GitHub Actions workflows on pull requests, `main` pushes and a weekly schedule. It runs the `security-extended` query suite, checks out without persisted credentials and grants only the job-scoped `security-events: write` permission required to upload code-scanning results. PHP remains covered by parser validation, Laravel runtime tests, Composer audit and review because CodeQL does not support PHP.
 - Each web build publishes the non-secret immutable Git commit as the `ironcore-release` metadata value. Vercel builds use `VERCEL_GIT_COMMIT_SHA`, GitHub builds use `GITHUB_SHA`, and another deployment platform must inject `IRONCORE_RELEASE_SHA`; local preview alone may use the explicit `development` fallback. A commit identifier is provenance, never an authorization or tenant input.
@@ -1031,7 +1031,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 19 — production configuration preflight | Implementation complete; web/security/deployed checks passing; backend rerun required | The backend job reached a third-party package-download HTTP 429 before tests; no IronCore assertion failed. Fail-closed secret-safe Laravel and web preflights gate resolved production settings before migrations, traffic or a live web build |
 | Milestone 20 — notification transport runtime gate | Implementation complete; web/security/deployed checks passing; hosted backend stopped before tests | Disposable authenticated SMTP and HTTPS boundaries exercise password recovery plus tenant email/SMS/push jobs through Redis, deny cross-tenant payloads and sanitize provider failures without production credentials |
 | Milestone 21 — Stripe transport runtime gate | Implementation complete; web/security/deployed checks passing; hosted backend stopped before tests | Disposable HTTPS Stripe boundary exercises Connect and platform Billing requests, distinct signed webhooks, idempotency and tenant denial without provider credentials or real payment data |
-| Milestone 22 — hosted dependency-install resilience | Implementation complete locally; hosted re-verification pending | Lockfile-keyed Composer download caching, reduced parallel HTTP pressure and four bounded retries address the repeated pre-test registry failure without changing dependencies or exposing workflow credentials |
+| Milestone 22 — hosted dependency-install resilience | Complete; hosted retry still stopped before tests | Lockfile-keyed Composer download caching, reduced parallel HTTP pressure and four bounded retries preserved the locked graph but did not clear the repeated GitHub download limit |
+| Milestone 23 — credential-isolated Composer prefetch | Implementation complete locally; hosted re-verification pending | The read-only workflow token is isolated to bounded no-plugin/no-script package prefetches and stripped before normal Composer/Laravel activation; the dependency graph and application behavior are unchanged |
 
 ## Change control
 

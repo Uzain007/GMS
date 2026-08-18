@@ -17,7 +17,7 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Starts disposable PostgreSQL 17, Redis 8 and S3-compatible LocalStack services.
 - Creates the test database under `ironcore_app`, an explicit non-superuser login that cannot create databases/roles, inherit privileges or bypass RLS.
 - Generates a new ephemeral Laravel `APP_KEY`; no committed or production key is used.
-- Restores only Composer download archives from an immutable lockfile-keyed cache, limits parallel provider requests and retries the exact locked install four times with bounded backoff before failing closed. It then audits dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
+- Restores only Composer download archives from an immutable lockfile-keyed cache, limits parallel provider requests and retries an authenticated exact-lock prefetch four times with plugins/scripts disabled. It then strips the workflow credential, activates the locked packages normally, audits dependencies, runs the complete Laravel suite with skipped/risky tests treated as failures, and validates production config/route/view caches.
 - Proves that every public table containing `gym_id` has both RLS and FORCE RLS enabled and that Redis-backed cache, session and queue configuration is active.
 - Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
 - Runs password recovery and tenant email/SMS/push jobs through Redis against disposable authenticated SMTP and HTTPS endpoints, including cross-tenant denial and secret-safe provider failure evidence.
@@ -27,7 +27,7 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Creates a 500-member synthetic gym plus an isolated gym, distributes load across 16 ten-minute CI-only operator tokens, and runs pinned k6 against a 16-worker disposable Laravel server.
 - Warms the tenant-keyed Redis report cache, then requires 100% valid cached payloads, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms without weakening the real 30-per-minute user/gym throttle.
 
-The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, Stripe, restore and load stages independently require their explicit gate markers. Composer receives no GitHub token or production credential, never runs an update, and never restores generated `vendor` code. All runtime-gate credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification, Stripe and load processes and removes generated certificates and restore artifacts on success or failure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, Stripe, restore and load stages independently require their explicit gate markers. Only Composer's reviewed no-plugin/no-script prefetch child receives the ephemeral read-only workflow token through in-memory `COMPOSER_AUTH`. The separate activation child explicitly removes that value and all GitHub token variables before Laravel or third-party code can run. Composer never receives a production credential, runs an update or restores generated `vendor` code. All runtime-gate credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification, Stripe and load processes and removes generated certificates and restore artifacts on success or failure.
 
 ## GitHub handoff
 
@@ -75,3 +75,17 @@ The Milestone 19, 20 and 21 hosted quality runs each passed the complete web job
 - executable portable tests simulate both recovery after transient failures and exhaustion of the retry ceiling.
 
 Only a hosted run after the approved commit can prove that the backend reaches and passes the existing Laravel/PostgreSQL/Redis/S3/provider/restore/load authority.
+
+The approved `12276be` run retained the cache/retry contract but exhausted all four attempts at `Install backend dependencies`. The web, CodeQL and deployed-web checks passed; no Laravel assertion ran.
+
+## Milestone 23 credential-isolated Composer prefetch
+
+Milestone 23 keeps the Milestone 22 lockfile, cache, concurrency and retry controls while authenticating only the network phase:
+
+- the install step hands GitHub Actions' ephemeral `github.token` to the reviewed local Node runner under one dedicated environment name;
+- each retry invokes the exact locked `--prefer-dist` install with `--no-plugins --no-scripts`, preventing root/dependency scripts and Composer plugins from executing with the token;
+- the runner constructs `COMPOSER_AUTH` only in that child and removes the handoff variable plus `GITHUB_TOKEN`/`GH_TOKEN` aliases;
+- after prefetch succeeds, one separate normal install runs with all Composer/GitHub credential variables removed, generating the final autoloader and executing Laravel package discovery;
+- repository secrets, production/provider credentials, dependency updates, source substitution and generated-`vendor` caching remain prohibited.
+
+Portable tests simulate transient recovery, final exhaustion and activation failure while asserting exact arguments, environment separation, safe-variable retention, secret-free runner messages and an unchanged lockfile. Only a hosted run after the approved commit can confirm that this repair reaches the existing backend authority.

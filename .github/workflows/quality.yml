@@ -219,6 +219,10 @@ jobs:
           key: composer-files-${{ runner.os }}-php-8.3-${{ hashFiles('backend/composer.lock') }}
 
       - name: Install backend dependencies
+        # The runner passes this read-only token only to Composer's
+        # no-plugin/no-script prefetch child, then strips it before activation.
+        env:
+          IRONCORE_COMPOSER_GITHUB_TOKEN: ${{ github.token }}
         working-directory: backend
         run: node ../scripts/ci/install-composer-dependencies.mjs
 

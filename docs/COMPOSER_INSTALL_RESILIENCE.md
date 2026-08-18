@@ -7,3 +7,5 @@ The workflow discovers Composer's download-cache directory and restores only tha
 The install runner sets parallel Composer HTTP requests to four and executes the exact non-interactive `--prefer-dist` install. Transient failures wait 15, 30 and 60 seconds before attempts two, three and four. A fourth failure exits non-zero. It never runs `composer update`, clears the reviewed download cache, substitutes a source install or receives `github.token`, repository secrets or production/provider credentials.
 
 Portable tests execute the retry runner with synthetic outcomes and verify recovery, exhaustion, exact arguments, cache scope, immutable action pinning and credential absence. The first approved hosted run remains authoritative for Laravel, PostgreSQL forced RLS, Redis, S3, provider transports, restore and load execution.
+
+The approved Milestone 22 run exhausted all four attempts at the same dependency-install boundary. Milestone 23 therefore keeps this cache/backoff baseline and adds the narrowly isolated authenticated prefetch described in [COMPOSER_AUTHENTICATED_PREFETCH.md](COMPOSER_AUTHENTICATED_PREFETCH.md).

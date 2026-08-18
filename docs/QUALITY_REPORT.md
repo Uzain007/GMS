@@ -311,4 +311,13 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - Composer parallel HTTP pressure is limited to four. The Node 22.13 retry runner preserves the exact `--prefer-dist` locked install, waits 15/30/60 seconds and fails after attempt four without an update, source substitution, cache clearing or credential injection.
 - Executable regression tests simulate recovery after two transient failures and hard failure after the fourth attempt, while also checking exact arguments, unchanged lockfile content, cache scope, immutable action pinning and absence of workflow credentials.
 - Local validation passes a clean production build, post-build artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, secret scan and all **92 portable contracts** with zero failures, skips or cancellations. The production npm dependency audit reports zero vulnerabilities.
-- No PHP dependency, Laravel source, tenant schema, route, permission or product behavior changed. An approved commit/push is still required before the GitHub-hosted PostgreSQL/Redis/S3/provider/restore/load authority can complete.
+- No PHP dependency, Laravel source, tenant schema, route, permission or product behavior changed. The approved `12276be` run exhausted all four attempts at the same dependency boundary, so no hosted backend assertion ran.
+
+## Milestone 23 credential-isolated Composer prefetch checkpoint
+
+- The approved Milestone 22 run passed the web, CodeQL and deployed-release checks but exhausted all four Composer attempts before Laravel started, so the hosted backend authority remains open.
+- GitHub Actions' ephemeral read-only token is now converted to in-memory Composer authentication only for locked prefetch children that disable every plugin and script.
+- A separate normal Composer activation child explicitly removes `COMPOSER_AUTH`, the workflow handoff variable, `GITHUB_TOKEN` and `GH_TOKEN` before Laravel package discovery or any third-party code can run.
+- Lockfile-keyed archive caching, reduced parallelism, exact `--prefer-dist` packages and finite 15/30/60-second backoff remain; `composer update`, source substitution and generated-`vendor` caching remain prohibited.
+- Executable tests cover exact phase arguments, credential isolation, safe environment retention, secret-free runner output, transient recovery, retry exhaustion, activation failure and unchanged lockfile content.
+- No dependency, Laravel source, tenant schema, route, permission or product behavior changed. The complete local quality gate passes **93 portable contracts**; the hosted backend gate requires an approved commit/push.

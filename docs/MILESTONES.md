@@ -223,10 +223,20 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 22 — Hosted dependency-install resilience
 
-**Status: implementation complete locally; hosted re-verification pending approved push**
+**Status: complete; approved hosted run exhausted all four attempts before backend tests**
 - Cache only Composer download archives under an immutable action and exact `composer.lock`-derived key; never cache generated `vendor` code
 - Limit Composer's parallel HTTP requests and retry failed locked installs four times with bounded 15/30/60-second backoff
 - Preserve `--prefer-dist`, non-interactive locked installation and fail closed after the final attempt without running `composer update` or clearing the reviewed cache
 - Keep checkout credentials disabled and expose no GitHub token, production secret or provider credential to dependency scripts
 - Add executable portable coverage for transient recovery, the final failure ceiling, exact arguments, cache scope and credential absence
+- The approved `12276be` run passed web, security and deployed-web checks but the backend still stopped at dependency installation before any Laravel assertion
+
+## Milestone 23 — Credential-isolated Composer prefetch
+
+**Status: implementation complete locally; hosted re-verification pending approved push**
+- Supply GitHub Actions' ephemeral read-only token only to bounded Composer prefetch children with plugins and scripts disabled
+- Strip `COMPOSER_AUTH` and every GitHub token variable before the separate normal Composer/Laravel activation child starts
+- Keep the exact lockfile, `--prefer-dist`, reduced parallelism, lockfile-keyed archive cache and four-attempt backoff without caching `vendor`
+- Fail activation immediately instead of retrying application or dependency-script defects as transport failures
+- Add executable coverage for phase arguments, token isolation, safe environment retention, secret-free logs, recovery, exhaustion and activation failure
 - Re-run the complete PostgreSQL/Redis/S3/provider/restore/load backend authority only after an approved commit and push

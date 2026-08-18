@@ -26,3 +26,5 @@ Milestone 20's disposable SMTP/HTTPS boundary is intentionally credential-free. 
 Milestone 21's disposable Stripe HTTPS boundary is also credential-free. Even after it passes, keep the Stripe item unchecked until test mode proves hosted onboarding, Checkout, refunds, portal actions, asynchronous webhook delivery and operational alerting with the selected Stripe account configuration.
 
 Milestone 22 addresses the repeated pre-test Composer registry failure with a lockfile-keyed download cache and finite retries. Keep the CI item unchecked until an approved push reaches and passes both hosted quality jobs; cache/retry behavior is reliability evidence, not a substitute for the Laravel/PostgreSQL/Redis runtime authority.
+
+Milestone 23 authenticates only the Composer package prefetch, with plugins and scripts disabled, using GitHub Actions' ephemeral read-only token. The normal Composer/Laravel activation child removes every Composer/GitHub credential variable first. Keep the CI item unchecked until an approved push passes the complete hosted backend authority.
