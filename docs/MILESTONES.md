@@ -233,10 +233,19 @@ Each milestone ends with build verification, focused logic tests and responsive 
 
 ## Milestone 23 — Credential-isolated Composer prefetch
 
-**Status: implementation complete locally; hosted re-verification pending approved push**
+**Status: complete; hosted package prefetch passed and exposed a separate Laravel bootstrap defect**
 - Supply GitHub Actions' ephemeral read-only token only to bounded Composer prefetch children with plugins and scripts disabled
 - Strip `COMPOSER_AUTH` and every GitHub token variable before the separate normal Composer/Laravel activation child starts
 - Keep the exact lockfile, `--prefer-dist`, reduced parallelism, lockfile-keyed archive cache and four-attempt backoff without caching `vendor`
 - Fail activation immediately instead of retrying application or dependency-script defects as transport failures
 - Add executable coverage for phase arguments, token isolation, safe environment retention, secret-free logs, recovery, exhaustion and activation failure
+- The approved `48561a8` run downloaded and installed the complete locked graph, removed the workflow credential and reached normal Laravel activation; package discovery then failed because `bootstrap/app.php` resolved configuration before Laravel registered the config service
+
+## Milestone 24 — Bootstrap-safe trusted proxy configuration
+
+**Status: implementation complete locally; hosted re-verification pending approved push**
+- Remove early configuration resolution from `bootstrap/app.php` so Composer package discovery and Laravel CLI startup can create the application safely
+- Let Laravel's default trusted-proxy HTTP middleware resolve reviewed proxy IPs, CIDRs or the explicit provider wildcard after configuration is available
+- Preserve the fail-closed production preflight for an empty or invalid `TRUSTED_PROXIES` boundary
+- Add Laravel and portable regression coverage for wildcard normalization, invalid proxy rejection and a configuration-free bootstrap file
 - Re-run the complete PostgreSQL/Redis/S3/provider/restore/load backend authority only after an approved commit and push

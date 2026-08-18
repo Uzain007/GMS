@@ -37,8 +37,12 @@ final class ProductionConfigurationPreflight
             $failures[] = 'FRONTEND_URL must be a public HTTPS origin without credentials, query or fragment.';
         }
 
-        $trustedProxies = config('app.trusted_proxies');
-        if (! is_array($trustedProxies) || $trustedProxies === [] || $this->arrayAny($trustedProxies, fn (mixed $proxy): bool => ! $this->isValidProxy($proxy))) {
+        $trustedProxies = config('trustedproxy.proxies');
+        $hasValidProxyBoundary = $trustedProxies === '*'
+            || (is_array($trustedProxies)
+                && $trustedProxies !== []
+                && ! $this->arrayAny($trustedProxies, fn (mixed $proxy): bool => ! $this->isValidProxyAddress($proxy)));
+        if (! $hasValidProxyBoundary) {
             $failures[] = 'TRUSTED_PROXIES must name the production proxy or load-balancer boundary.';
         }
 
@@ -239,17 +243,13 @@ final class ProductionConfigurationPreflight
         return preg_match('/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i', $host) === 1 && str_contains($host, '.');
     }
 
-    private function isValidProxy(mixed $value): bool
+    private function isValidProxyAddress(mixed $value): bool
     {
         if (! is_string($value) || trim($value) === '') {
             return false;
         }
 
         $proxy = trim($value);
-        if ($proxy === '*') {
-            return true;
-        }
-
         [$address, $prefix] = array_pad(explode('/', $proxy, 2), 2, null);
         $version = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? 4 : (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? 6 : null);
         if ($version === null) {

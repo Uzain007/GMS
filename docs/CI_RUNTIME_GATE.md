@@ -88,4 +88,12 @@ Milestone 23 keeps the Milestone 22 lockfile, cache, concurrency and retry contr
 - after prefetch succeeds, one separate normal install runs with all Composer/GitHub credential variables removed, generating the final autoloader and executing Laravel package discovery;
 - repository secrets, production/provider credentials, dependency updates, source substitution and generated-`vendor` caching remain prohibited.
 
-Portable tests simulate transient recovery, final exhaustion and activation failure while asserting exact arguments, environment separation, safe-variable retention, secret-free runner messages and an unchanged lockfile. Only a hosted run after the approved commit can confirm that this repair reaches the existing backend authority.
+Portable tests simulate transient recovery, final exhaustion and activation failure while asserting exact arguments, environment separation, safe-variable retention, secret-free runner messages and an unchanged lockfile.
+
+The approved `48561a8` run proved the prefetch and credential boundary. All 116 locked packages installed during authenticated prefetch, the normal activation child ran without a credential and required no further download, and Laravel then failed during `artisan package:discover` because `bootstrap/app.php` called `config()` before the config service was registered. That is an application-startup defect rather than a package-transport failure.
+
+## Milestone 24 bootstrap-safe trusted proxy configuration
+
+Milestone 24 removes configuration resolution from `bootstrap/app.php`. Laravel's built-in trusted-proxy middleware remains in the default global HTTP stack and reads `config/trustedproxy.php` while handling a request, after configuration is available. The production preflight reads the same resolved value and still rejects an empty boundary, hostnames and malformed IP/CIDR entries while accepting the explicit provider wildcard.
+
+Portable coverage fails if bootstrap regains a `config()` or `trustProxies()` call, and Laravel feature coverage verifies both invalid-proxy rejection and wildcard acceptance. The complete hosted backend authority still requires the user's approved commit/push; no workflow, dependency graph, tenant boundary or product behavior changed.

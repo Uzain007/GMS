@@ -74,7 +74,28 @@ class ProductionConfigurationPreflightTest extends TestCase
     public function test_trusted_proxy_must_be_an_ip_cidr_or_explicit_provider_wildcard(): void
     {
         $this->configureSafeProductionShape();
-        config(['app.trusted_proxies' => ['proxy.ironcore.co.uk']]);
+        config(['trustedproxy.proxies' => ['proxy.ironcore.co.uk']]);
+
+        $exitCode = Artisan::call('ironcore:production-preflight');
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('TRUSTED_PROXIES must name', Artisan::output());
+    }
+
+    public function test_explicit_provider_wildcard_is_accepted(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['trustedproxy.proxies' => '*']);
+
+        $exitCode = Artisan::call('ironcore:production-preflight');
+
+        $this->assertSame(0, $exitCode);
+    }
+
+    public function test_provider_wildcard_cannot_be_mixed_with_proxy_addresses(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['trustedproxy.proxies' => ['*', '10.0.0.0/8']]);
 
         $exitCode = Artisan::call('ironcore:production-preflight');
 
@@ -116,7 +137,7 @@ class ProductionConfigurationPreflightTest extends TestCase
             'app.key' => 'base64:'.base64_encode(str_repeat('k', 32)),
             'app.url' => 'https://api.ironcore.co.uk',
             'app.frontend_url' => 'https://app.ironcore.co.uk',
-            'app.trusted_proxies' => ['10.0.0.0/8'],
+            'trustedproxy.proxies' => ['10.0.0.0/8'],
             'cors.allowed_origins' => ['https://app.ironcore.co.uk'],
             'sanctum.stateful' => ['app.ironcore.co.uk'],
             'session.domain' => '.ironcore.co.uk',

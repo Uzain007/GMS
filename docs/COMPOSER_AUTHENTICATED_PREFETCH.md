@@ -8,4 +8,4 @@ After a successful prefetch, the runner starts a separate normal locked install 
 
 The existing lockfile-keyed download cache, four-attempt 15/30/60-second backoff, `--prefer-dist`, reduced parallelism and no-`vendor` cache contract remain active. Repository secrets and production/provider credentials are not accepted. Portable tests verify the exact phase arguments, token isolation, safe-variable retention, secret-free logs, bounded recovery/exhaustion, activation failure and unchanged lockfile content.
 
-Only an approved commit/push can run the GitHub-hosted Laravel/PostgreSQL/Redis/S3/provider/restore/load authority and confirm that this transport repair reaches the existing tests.
+The approved `48561a8` run confirmed the transport repair: authenticated prefetch downloaded and installed all 116 locked packages, then the credential-free activation found nothing further to download. Laravel package discovery subsequently exposed a separate early-bootstrap config-service defect, which Milestone 24 addresses in [LARAVEL_BOOTSTRAP_SAFETY.md](LARAVEL_BOOTSTRAP_SAFETY.md). No Laravel assertion ran in that backend job.

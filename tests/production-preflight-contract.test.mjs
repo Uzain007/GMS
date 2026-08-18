@@ -17,6 +17,10 @@ const phpTests = await readFile(
   "utf8",
 );
 const bootstrap = await readFile("backend/bootstrap/app.php", "utf8");
+const trustedProxyConfig = await readFile(
+  "backend/config/trustedproxy.php",
+  "utf8",
+);
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 
 const validWebEnvironment = {
@@ -89,9 +93,21 @@ test("Laravel production preflight covers launch-critical resolved config withou
   assert.doesNotMatch(phpCommand, /config\(|env\(/);
   assert.match(phpTests, /assertStringNotContainsString/);
   assert.match(phpTests, /test_cookie_and_browser_origin_mismatch_fails_closed/);
-  assert.match(bootstrap, /trustProxies/);
   assert.equal(
     packageJson.scripts["preflight:production-web"],
     "node scripts/preflight/production-web.mjs",
   );
+});
+
+test("Laravel bootstrap defers trusted proxy resolution until request middleware", () => {
+  assert.doesNotMatch(bootstrap, /\bconfig\s*\(/);
+  assert.doesNotMatch(bootstrap, /trustProxies\s*\(/);
+  assert.match(trustedProxyConfig, /TRUSTED_PROXIES/);
+  assert.match(
+    trustedProxyConfig,
+    /\$proxies === \['\*'\] \? '\*' : \$proxies/,
+  );
+  assert.match(phpPreflight, /config\('trustedproxy\.proxies'\)/);
+  assert.match(phpTests, /test_explicit_provider_wildcard_is_accepted/);
+  assert.match(phpTests, /test_provider_wildcard_cannot_be_mixed/);
 });

@@ -28,3 +28,5 @@ Milestone 21's disposable Stripe HTTPS boundary is also credential-free. Even af
 Milestone 22 addresses the repeated pre-test Composer registry failure with a lockfile-keyed download cache and finite retries. Keep the CI item unchecked until an approved push reaches and passes both hosted quality jobs; cache/retry behavior is reliability evidence, not a substitute for the Laravel/PostgreSQL/Redis runtime authority.
 
 Milestone 23 authenticates only the Composer package prefetch, with plugins and scripts disabled, using GitHub Actions' ephemeral read-only token. The normal Composer/Laravel activation child removes every Composer/GitHub credential variable first. Keep the CI item unchecked until an approved push passes the complete hosted backend authority.
+
+The approved Milestone 23 run proved that credential boundary and reached Laravel package discovery. Milestone 24 moves trusted-proxy resolution out of early application bootstrap while retaining request-time forwarding-header protection and preflight validation. Keep the CI item unchecked until an approved Milestone 24 push passes the complete hosted backend authority.

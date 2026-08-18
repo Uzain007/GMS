@@ -315,9 +315,19 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 
 ## Milestone 23 credential-isolated Composer prefetch checkpoint
 
-- The approved Milestone 22 run passed the web, CodeQL and deployed-release checks but exhausted all four Composer attempts before Laravel started, so the hosted backend authority remains open.
+- The approved Milestone 22 run passed the web, CodeQL and deployed-release checks but exhausted all four Composer attempts before Laravel started, which established the transport blocker addressed here.
 - GitHub Actions' ephemeral read-only token is now converted to in-memory Composer authentication only for locked prefetch children that disable every plugin and script.
 - A separate normal Composer activation child explicitly removes `COMPOSER_AUTH`, the workflow handoff variable, `GITHUB_TOKEN` and `GH_TOKEN` before Laravel package discovery or any third-party code can run.
 - Lockfile-keyed archive caching, reduced parallelism, exact `--prefer-dist` packages and finite 15/30/60-second backoff remain; `composer update`, source substitution and generated-`vendor` caching remain prohibited.
 - Executable tests cover exact phase arguments, credential isolation, safe environment retention, secret-free runner output, transient recovery, retry exhaustion, activation failure and unchanged lockfile content.
-- No dependency, Laravel source, tenant schema, route, permission or product behavior changed. The complete local quality gate passes **93 portable contracts**; the hosted backend gate requires an approved commit/push.
+- No dependency, Laravel source, tenant schema, route, permission or product behavior changed. The complete local quality gate passed **93 portable contracts**.
+- The approved `48561a8` run installed all 116 locked packages during authenticated prefetch and reached credential-free activation. `artisan package:discover` then exposed an early-bootstrap config-service defect before any Laravel assertion ran.
+
+## Milestone 24 bootstrap-safe trusted proxy checkpoint
+
+- Trusted proxy parsing now lives in `config/trustedproxy.php`, where Laravel's default HTTP middleware resolves it after configuration is available.
+- `bootstrap/app.php` no longer calls `config()` or manually configures trusted proxies while the application container is still being created, removing the exact package-discovery failure.
+- Production preflight remains fail closed for empty, hostname or malformed proxy values and accepts reviewed IP/CIDR boundaries plus the explicit provider wildcard.
+- A Laravel feature test covers wildcard normalization, and the portable regression contract prevents early config resolution from returning to bootstrap.
+- Local validation passes a clean production build, artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, production web preflight, secret scan and all **94 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
+- The local workstation has no PHP/Composer/PostgreSQL runtime, so the complete existing Laravel/PostgreSQL/Redis/S3/provider/restore/load authority remains pending an approved commit/push. No commit or push is part of this milestone handoff.

@@ -28,7 +28,7 @@ This runbook targets a production topology with a separately deployed web app, L
 
 ## Required production environment
 
-Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, reviewed `TRUSTED_PROXIES`, encrypted PostgreSQL/Redis connections, object-storage configuration, exact `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`, `SESSION_SECURE_COOKIE=true`, provider secrets and notification-adapter credentials. Keep `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` on Redis. Run both commands in [PRODUCTION_PREFLIGHT.md](PRODUCTION_PREFLIGHT.md) against the final deployment environment.
+Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, reviewed comma-separated IP/CIDR `TRUSTED_PROXIES` (or the explicit provider `*` boundary), encrypted PostgreSQL/Redis connections, object-storage configuration, exact `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`, `SESSION_SECURE_COOKIE=true`, provider secrets and notification-adapter credentials. Keep `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` on Redis. Run both commands in [PRODUCTION_PREFLIGHT.md](PRODUCTION_PREFLIGHT.md) against the final deployment environment.
 
 ## Rollback and recovery
 

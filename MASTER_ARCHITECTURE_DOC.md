@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.30.0 — Milestone 23 credential-isolated Composer prefetch |
+| MAD version | 0.31.0 — Milestone 24 bootstrap-safe trusted proxy configuration |
 | Last verified | 18 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 23 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
+| Active milestone | Milestone 24 implementation complete locally; hosted backend re-verification awaits the approved commit/push |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -1032,7 +1032,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 20 — notification transport runtime gate | Implementation complete; web/security/deployed checks passing; hosted backend stopped before tests | Disposable authenticated SMTP and HTTPS boundaries exercise password recovery plus tenant email/SMS/push jobs through Redis, deny cross-tenant payloads and sanitize provider failures without production credentials |
 | Milestone 21 — Stripe transport runtime gate | Implementation complete; web/security/deployed checks passing; hosted backend stopped before tests | Disposable HTTPS Stripe boundary exercises Connect and platform Billing requests, distinct signed webhooks, idempotency and tenant denial without provider credentials or real payment data |
 | Milestone 22 — hosted dependency-install resilience | Complete; hosted retry still stopped before tests | Lockfile-keyed Composer download caching, reduced parallel HTTP pressure and four bounded retries preserved the locked graph but did not clear the repeated GitHub download limit |
-| Milestone 23 — credential-isolated Composer prefetch | Implementation complete locally; hosted re-verification pending | The read-only workflow token is isolated to bounded no-plugin/no-script package prefetches and stripped before normal Composer/Laravel activation; the dependency graph and application behavior are unchanged |
+| Milestone 23 — credential-isolated Composer prefetch | Complete; hosted prefetch passed | The read-only workflow token was isolated to bounded no-plugin/no-script package prefetches and stripped before normal Composer/Laravel activation; hosted package download completed, then package discovery exposed a separate early-bootstrap defect |
+| Milestone 24 — bootstrap-safe trusted proxy configuration | Implementation complete locally; hosted re-verification pending | Trusted proxy values move to Laravel's request-time `trustedproxy` configuration, so package discovery and CLI boot do not resolve the config service early; production proxy validation and forwarding-header protection remain fail closed |
 
 ## Change control
 
