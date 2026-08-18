@@ -130,6 +130,12 @@ final class ProductionConfigurationPreflight
             }
         }
 
+        $stripeCaBundle = config('services.stripe.ca_bundle');
+        if (! $this->blank($stripeCaBundle)
+            && (! is_file($stripeCaBundle) || ! is_readable($stripeCaBundle))) {
+            $failures[] = 'STRIPE_CA_BUNDLE must reference a readable PEM trust bundle when configured.';
+        }
+
         if (config('mail.default') !== 'smtp' || ! $this->hasDeliveringSmtpConfiguration(config('mail.mailers.smtp'))) {
             $failures[] = 'MAIL_MAILER must use authenticated production SMTP rather than a local/log transport.';
         }

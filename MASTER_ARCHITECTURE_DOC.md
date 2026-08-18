@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.27.0 — Milestone 20 notification transport runtime gate |
+| MAD version | 0.28.0 — Milestone 21 Stripe transport runtime gate |
 | Last verified | 17 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 20 implementation complete locally; hosted notification runtime awaits the approved commit/push |
+| Active milestone | Milestone 21 implementation complete locally; hosted Stripe runtime awaits the approved commit/push |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -970,6 +970,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The hosted backend gate runs password recovery and tenant notification jobs through Redis against a disposable loopback-only SMTP/HTTPS transport. SMTP authentication, HTTPS bearer authorization, email/SMS/push payloads and provider IDs use synthetic CI-only values; no production provider or credential is contacted.
 - Notification adapters convert transport/provider exceptions into a stable generic exception without retaining the original exception chain. This prevents provider response bodies, endpoint details or destinations from entering failed-job evidence while preserving a retryable failure signal.
 - The credential-free transport gate proves IronCore's queue and protocol boundaries only. Selected transactional email, SMS and push providers still require their own sandbox delivery, sender/domain approval, suppression handling, rate-limit, observability and production credential evidence before enablement.
+- The hosted backend gate runs Stripe Connect and platform Billing operations against a disposable loopback-only HTTPS boundary using synthetic CI-only bearer and webhook-signing credentials. It proves the production request shapes, connected-account routing, idempotency headers, distinct money flows and signed webhook entry points without contacting Stripe or handling real payment data.
+- Connect webhooks must resolve a gym only from the signed opaque connected-account identifier; Billing webhooks must use the separate endpoint secret and signed opaque platform-customer identifier. Server-authored metadata must match the resolved tenant before payment or subscription state can change, and replayed provider event IDs must remain idempotent.
+- The credential-free Stripe gate proves IronCore's HTTP, signing and tenant-isolation boundaries only. Stripe test-mode onboarding, Checkout, refunds, customer portal, asynchronous event delivery, production webhook monitoring and live credentials remain explicit provider/deployment gates.
 
 ## Active feature status
 
@@ -1027,6 +1030,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Post-Milestone 18 deployed-release propagation hardening | Implemented; hosted re-verification pending | Push smokes timed out at former ten- and fifteen-minute ceilings before Vercel later served each exact release; the evidence-based bounded wait is now thirty minutes inside a 35-minute job |
 | Milestone 19 — production configuration preflight | Implementation complete; web/security/deployed checks passing; backend rerun required | The backend job reached a third-party package-download HTTP 429 before tests; no IronCore assertion failed. Fail-closed secret-safe Laravel and web preflights gate resolved production settings before migrations, traffic or a live web build |
 | Milestone 20 — notification transport runtime gate | Implementation complete; local quality passing; hosted runtime pending | Disposable authenticated SMTP and HTTPS boundaries exercise password recovery plus tenant email/SMS/push jobs through Redis, deny cross-tenant payloads and sanitize provider failures without production credentials |
+| Milestone 21 — Stripe transport runtime gate | Implementation complete; local quality passing; hosted runtime pending | Disposable HTTPS Stripe boundary exercises Connect and platform Billing requests, distinct signed webhooks, idempotency and tenant denial without provider credentials or real payment data |
 
 ## Change control
 

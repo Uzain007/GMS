@@ -211,3 +211,12 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Prove provider request shapes, returned provider IDs, tenant isolation and preference enforcement without production data or provider access
 - Sanitize transport/provider exceptions before retry and failed-job evidence can retain endpoint, response or destination details
 - Keep selected-provider sandbox delivery, sender/domain approval, suppression/rate-limit behaviour, monitoring and live credentials as explicit deployment gates
+
+## Milestone 21 — Stripe transport runtime gate
+
+**Status: implementation complete; local quality gate passing; hosted runtime pending approved push**
+- Exercise Stripe Connect onboarding, account refresh, direct-charge Checkout and refunds through a disposable loopback-only HTTPS boundary
+- Exercise platform product/price, customer, subscription Checkout and customer-portal requests without connected-account routing
+- Verify distinct Connect and Billing webhook signatures, opaque account/customer tenant resolution, server-authored metadata and replay idempotency
+- Prove cross-tenant metadata cannot mutate payment or subscription state and keep all evidence synthetic and credential-free
+- Keep real Stripe test-mode onboarding, Checkout, refunds, portal, event delivery, monitoring and production credentials as explicit provider/deployment gates

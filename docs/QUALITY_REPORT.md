@@ -292,3 +292,14 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - Local validation passes the clean production build, artifact/render contracts, production web preflight, TypeScript, ESLint, PHP syntax parsing, secret scan and all **84 portable contracts** with zero failures, skips or cancellations.
 - The production npm lockfile audit reports zero vulnerabilities. The Laravel/PostgreSQL/Redis provider-boundary tests require the existing hosted lane after the user approves a commit/push; all workflow credentials and provider values are synthetic and runner-only.
 - This credential-free protocol gate does not replace selected-provider sandbox delivery, sender/domain approval, suppression/rate-limit handling, alerting or production credentials.
+
+## Milestone 21 Stripe transport runtime checkpoint
+
+- The backend quality lane now starts a second loopback-only, certificate-verified HTTPS boundary with synthetic Stripe bearer and endpoint-signing values generated or supplied only inside the disposable runner.
+- Connect coverage exercises account onboarding/refresh, direct-charge member Checkout and refunds. Platform Billing coverage exercises product/price creation, customers, subscription Checkout, portal sessions and subscription retrieval without a connected-account header.
+- Request evidence verifies exact integer minor units, tenant metadata and server-authored idempotency headers while proving gym member funds and IronCore SaaS subscription funds remain separate.
+- Connect and Billing webhooks use different signing secrets, resolve tenants only through signed opaque account/customer identifiers, reject cross-tenant metadata and treat replayed event IDs as duplicates without repeating ledger changes.
+- Stripe HTTP exceptions are replaced with one generic exception that retains no provider body, endpoint, credential, payment reference or previous exception chain; ledger failure evidence stores only that bounded message.
+- The optional Stripe CA bundle never disables verification and production preflight rejects an unreadable configured file without printing its path.
+- Local validation passes the clean production build and artifact/render checks, TypeScript, ESLint, PHP syntax parsing, secret scan and all **89 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
+- The Laravel/PostgreSQL runtime tests require the existing hosted lane after the user approves a commit/push. This credential-free boundary does not replace real Stripe test-mode onboarding, Checkout, refunds, portal actions, asynchronous webhooks, monitoring or production credentials.

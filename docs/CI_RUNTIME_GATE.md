@@ -11,7 +11,7 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Audits production npm dependencies at high severity or above.
 - Builds and validates the deployable web artifact.
 
-### Laravel, PostgreSQL RLS, Redis, notification transport and S3-compatible storage
+### Laravel, PostgreSQL RLS, Redis, provider transports and S3-compatible storage
 
 - Installs PHP 8.3 and the extensions used by the production API.
 - Starts disposable PostgreSQL 17, Redis 8 and S3-compatible LocalStack services.
@@ -21,12 +21,13 @@ Milestone 11 moves the Laravel runtime evidence out of the build-only workspace 
 - Proves that every public table containing `gym_id` has both RLS and FORCE RLS enabled and that Redis-backed cache, session and queue configuration is active.
 - Executes the production member-export generation and expiry jobs over the real AWS SDK/Flysystem HTTP boundary, then verifies private tenant-prefixed bytes, integrity metadata and deletion.
 - Runs password recovery and tenant email/SMS/push jobs through Redis against disposable authenticated SMTP and HTTPS endpoints, including cross-tenant denial and secret-safe provider failure evidence.
+- Runs Stripe Connect onboarding, direct-charge Checkout/refunds and platform Billing catalogue/customer/Checkout/portal operations against a disposable authenticated HTTPS endpoint. The gate verifies connected-account separation, idempotency headers, distinct webhook secrets, replay handling and cross-tenant metadata denial.
 - Writes two synthetic tenants through `ironcore_app`, creates a PostgreSQL 17 custom-format archive and restores it into a fresh disposable database.
 - Reconnects to the restored database as `ironcore_app` and fails unless every `gym_id` table retains RLS plus FORCE RLS, no-context reads return no tenant rows, each selected tenant sees only its own fixture and an unrelated tenant sees none.
 - Creates a 500-member synthetic gym plus an isolated gym, distributes load across 16 ten-minute CI-only operator tokens, and runs pinned k6 against a 16-worker disposable Laravel server.
 - Warms the tenant-keyed Redis report cache, then requires 100% valid cached payloads, cross-tenant `403`, below 1% HTTP failures, p95 below 500 ms and p99 below 1,000 ms without weakening the real 30-per-minute user/gym throttle.
 
-The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, restore and load stages independently require their explicit gate markers. All credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification and load processes and removes restore artifacts on success or failure.
+The database bootstrap refuses to run unless both `CI=true` and `IRONCORE_RUNTIME_GATE=true`; storage, notification, Stripe, restore and load stages independently require their explicit gate markers. All credentials and tokens are disposable workflow-only values, expire or are destroyed with the runner, and the job never creates or modifies production infrastructure. Cleanup stops the notification, Stripe and load processes and removes generated certificates and restore artifacts on success or failure.
 
 ## GitHub handoff
 
@@ -41,7 +42,7 @@ Weekly Dependabot checks cover npm, Composer and GitHub Actions metadata. Depend
 
 ## Evidence boundary
 
-A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence, proves the S3 member-export lifecycle and credential-free notification transport, proves synthetic custom-archive restoration, and establishes a repeatable cached-report performance regression baseline. It does not replace production-sized capacity testing against the selected topology, bucket encryption/IAM/lifecycle evidence, provider encrypted backup/PITR/retention and measured RPO/RTO evidence, selected-provider sandbox tests, infrastructure monitoring, privacy approval or production user-acceptance testing.
+A green hosted run closes the generic PHP/PostgreSQL/Redis execution gate, provides forced-RLS evidence, proves the S3 member-export lifecycle plus credential-free notification and Stripe transports, proves synthetic custom-archive restoration, and establishes a repeatable cached-report performance regression baseline. It does not replace production-sized capacity testing against the selected topology, bucket encryption/IAM/lifecycle evidence, provider encrypted backup/PITR/retention and measured RPO/RTO evidence, selected-provider sandbox tests, infrastructure monitoring, privacy approval or production user-acceptance testing.
 
 Commit `79ed6ae` closed this gate on 12 August 2026: both `Web build and contracts` and `Laravel, PostgreSQL RLS and Redis` completed successfully. The backend lane passed all 44 Laravel tests and 335 assertions, dependency audit and production cache commands under the non-superuser forced-RLS configuration.
 

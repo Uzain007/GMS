@@ -12,7 +12,7 @@ php artisan config:cache
 php artisan ironcore:production-preflight
 ```
 
-A non-zero exit stops the release before migrations or traffic. The command checks production/debug mode, key strength, HTTPS browser/API origins, trusted proxies, CORS/Sanctum/session alignment, the `ironcore_app` PostgreSQL identity, encrypted PostgreSQL and Redis connections, Redis cache/session/queues, private S3-compatible storage, Stripe secrets and callback URLs, authenticated SMTP, a centrally collectable log stream, complete optional SMS/push adapter pairs and any configured readable notification-provider CA bundle.
+A non-zero exit stops the release before migrations or traffic. The command checks production/debug mode, key strength, HTTPS browser/API origins, trusted proxies, CORS/Sanctum/session alignment, the `ironcore_app` PostgreSQL identity, encrypted PostgreSQL and Redis connections, Redis cache/session/queues, private S3-compatible storage, Stripe secrets and callback URLs, authenticated SMTP, a centrally collectable log stream, complete optional SMS/push adapter pairs and any configured readable Stripe or notification-provider CA bundle.
 
 The preflight intentionally does not connect to PostgreSQL, Redis, S3, Stripe or notification providers. Connectivity and behaviour remain covered by readiness checks, hosted runtime tests and explicit provider/environment evidence.
 

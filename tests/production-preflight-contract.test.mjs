@@ -77,6 +77,7 @@ test("Laravel production preflight covers launch-critical resolved config withou
     "FILESYSTEM_DISK",
     "STRIPE_WEBHOOK_SECRET",
     "STRIPE_BILLING_WEBHOOK_SECRET",
+    "STRIPE_CA_BUNDLE",
     "MAIL_MAILER",
     "LOG_CHANNEL",
   ]) {

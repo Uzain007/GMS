@@ -9,6 +9,7 @@ use App\Models\SaasPlanPrice;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 class StripePlatformBillingService
 {
@@ -16,12 +17,15 @@ class StripePlatformBillingService
     public function createProductAndPrice(array $plan, array $price): array
     {
         $this->assertConfigured();
-        $product = $this->platformRequest('saas-product:'.hash('sha256', mb_strtolower($plan['code'])))
-            ->post('/v1/products', [
+        $product = $this->post(
+            $this->platformRequest('saas-product:'.hash('sha256', mb_strtolower($plan['code']))),
+            '/v1/products',
+            [
                 'name' => $plan['name'],
                 'description' => $plan['description'] ?? null,
                 'metadata' => ['ironcore_plan_code' => $plan['code']],
-            ])->throw()->json();
+            ],
+        );
 
         return [
             'product_id' => (string) $product['id'],
@@ -43,14 +47,17 @@ class StripePlatformBillingService
     public function createCustomer(Gym $gym, string $email, string $name): array
     {
         $this->assertConfigured();
-        return $this->platformRequest('saas-customer:gym:'.$gym->getKey())
-            ->post('/v1/customers', [
+        return $this->post(
+            $this->platformRequest('saas-customer:gym:'.$gym->getKey()),
+            '/v1/customers',
+            [
                 'email' => $email,
                 'name' => $name,
                 // Metadata is reconciliation evidence only. Signed webhook
                 // customer lookup + tenant RLS remains the authority boundary.
                 'metadata' => ['gym_id' => $gym->getKey()],
-            ])->throw()->json();
+            ],
+        );
     }
 
     /** @return array{session_id: string, checkout_url: string, expires_at: int|null} */
@@ -75,8 +82,10 @@ class StripePlatformBillingService
 
         // This request runs on the platform account without connected-account
         // routing, so IronCore subscription funds never enter a gym account.
-        $payload = $this->platformRequest('saas-checkout:'.$gym->getKey().':'.$idempotencyKey)
-            ->post('/v1/checkout/sessions', [
+        $payload = $this->post(
+            $this->platformRequest('saas-checkout:'.$gym->getKey().':'.$idempotencyKey),
+            '/v1/checkout/sessions',
+            [
                 'mode' => 'subscription',
                 'customer' => $customer->provider_customer_id,
                 'client_reference_id' => $gym->getKey(),
@@ -88,7 +97,8 @@ class StripePlatformBillingService
                 ]],
                 'metadata' => $metadata,
                 'subscription_data' => $subscriptionData,
-            ])->throw()->json();
+            ],
+        );
 
         return [
             'session_id' => (string) $payload['id'],
@@ -101,11 +111,14 @@ class StripePlatformBillingService
     public function createPortal(PlatformBillingCustomer $customer): array
     {
         $this->assertConfigured(['billing_portal_return_url']);
-        $payload = $this->platformRequest()
-            ->post('/v1/billing_portal/sessions', [
+        $payload = $this->post(
+            $this->platformRequest(),
+            '/v1/billing_portal/sessions',
+            [
                 'customer' => $customer->provider_customer_id,
                 'return_url' => config('services.stripe.billing_portal_return_url'),
-            ])->throw()->json();
+            ],
+        );
 
         return ['portal_url' => (string) $payload['url']];
     }
@@ -114,16 +127,16 @@ class StripePlatformBillingService
     public function retrieveCheckout(string $sessionId): array
     {
         $this->assertConfigured();
-        return $this->platformRequest()->get('/v1/checkout/sessions/'.$sessionId)->throw()->json();
+        return $this->get($this->platformRequest(), '/v1/checkout/sessions/'.$sessionId);
     }
 
     /** @return array<string, mixed> */
     public function retrieveSubscription(string $subscriptionId): array
     {
         $this->assertConfigured();
-        return $this->platformRequest()->get('/v1/subscriptions/'.$subscriptionId, [
+        return $this->get($this->platformRequest(), '/v1/subscriptions/'.$subscriptionId, [
             'expand' => ['items.data.price'],
-        ])->throw()->json();
+        ]);
     }
 
     public function verifyBillingWebhook(string $payload, string $signature): array
@@ -172,8 +185,10 @@ class StripePlatformBillingService
             $price['billing_interval'],
             $price['amount_minor'],
         ]);
-        $payload = $this->platformRequest('saas-price:'.hash('sha256', $fingerprint))
-            ->post('/v1/prices', [
+        $payload = $this->post(
+            $this->platformRequest('saas-price:'.hash('sha256', $fingerprint)),
+            '/v1/prices',
+            [
                 'product' => $productId,
                 'currency' => mb_strtolower((string) $price['currency']),
                 'unit_amount' => $price['amount_minor'],
@@ -182,7 +197,8 @@ class StripePlatformBillingService
                     'ironcore_plan_code' => $planCode,
                     'ironcore_billing_interval' => $price['billing_interval'],
                 ],
-            ])->throw()->json();
+            ],
+        );
         return (string) $payload['id'];
     }
 
@@ -193,7 +209,45 @@ class StripePlatformBillingService
             ->acceptJson()
             ->withToken((string) config('services.stripe.secret'))
             ->timeout(20);
+        $caBundle = config('services.stripe.ca_bundle');
+        if (is_string($caBundle) && trim($caBundle) !== '') {
+            $request = $request->withOptions(['verify' => $caBundle]);
+        }
         return $idempotencyKey ? $request->withHeader('Idempotency-Key', $idempotencyKey) : $request;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function post(PendingRequest $request, string $path, array $data): array
+    {
+        try {
+            $payload = $request->post($path, $data)->throw()->json();
+            if (! is_array($payload)) {
+                throw new RuntimeException('The Stripe Billing response was invalid.');
+            }
+            return $payload;
+        } catch (Throwable) {
+            throw StripeProviderException::rejected();
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    private function get(PendingRequest $request, string $path, array $query = []): array
+    {
+        try {
+            $payload = $request->get($path, $query)->throw()->json();
+            if (! is_array($payload)) {
+                throw new RuntimeException('The Stripe Billing response was invalid.');
+            }
+            return $payload;
+        } catch (Throwable) {
+            throw StripeProviderException::rejected();
+        }
     }
 
     /** @param list<string> $operationKeys */

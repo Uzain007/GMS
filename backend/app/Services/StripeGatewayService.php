@@ -12,6 +12,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
+use Throwable;
 
 class StripeGatewayService
 {
@@ -29,7 +30,7 @@ class StripeGatewayService
         );
 
         if (! $gateway->provider_account_id) {
-            $account = $this->platformRequest()->post('/v1/accounts', [
+            $account = $this->post($this->platformRequest(), '/v1/accounts', [
                 'type' => 'express',
                 'country' => $gym->country_code,
                 'email' => $email,
@@ -41,17 +42,17 @@ class StripeGatewayService
                 // it never replaces the account-to-tenant RLS lookup.
                 'metadata' => ['gym_id' => $gym->getKey()],
                 'business_profile' => ['product_description' => 'Gym membership and joining-fee payments'],
-            ])->throw()->json();
+            ]);
             $gateway->provider_account_id = (string) $account['id'];
             $this->syncFromProviderPayload($gateway, $account);
         }
 
-        $link = $this->platformRequest()->post('/v1/account_links', [
+        $link = $this->post($this->platformRequest(), '/v1/account_links', [
             'account' => $gateway->provider_account_id,
             'refresh_url' => config('services.stripe.connect_refresh_url'),
             'return_url' => config('services.stripe.connect_return_url'),
             'type' => 'account_onboarding',
-        ])->throw()->json();
+        ]);
 
         return ['gateway' => $gateway->fresh(), 'onboarding_url' => (string) $link['url']];
     }
@@ -63,7 +64,7 @@ class StripeGatewayService
             return $gateway;
         }
 
-        $payload = $this->platformRequest()->get('/v1/accounts/'.$gateway->provider_account_id)->throw()->json();
+        $payload = $this->get($this->platformRequest(), '/v1/accounts/'.$gateway->provider_account_id);
         $this->syncFromProviderPayload($gateway, $payload);
         return $gateway->fresh();
     }
@@ -93,8 +94,10 @@ class StripeGatewayService
 
         // Direct charges place the transaction and funds on the gym's connected
         // account. IronCore stores no card number, CVC or reusable payment token.
-        $payload = $this->connectedRequest($gateway, 'payment:'.$payment->getKey())
-            ->post('/v1/checkout/sessions', [
+        $payload = $this->post(
+            $this->connectedRequest($gateway, 'payment:'.$payment->getKey()),
+            '/v1/checkout/sessions',
+            [
                 'mode' => 'payment',
                 'success_url' => $successUrl,
                 'cancel_url' => $cancelUrl,
@@ -112,7 +115,8 @@ class StripeGatewayService
                     'metadata' => $metadata,
                     'description' => 'IronCore receipt '.$payment->receipt_number,
                 ],
-            ])->throw()->json();
+            ],
+        );
 
         return ['checkout_id' => (string) $payload['id'], 'checkout_url' => (string) $payload['url']];
     }
@@ -130,8 +134,10 @@ class StripeGatewayService
             throw ValidationException::withMessages(['payment' => ['The online payment has no settled provider reference.']]);
         }
 
-        $payload = $this->connectedRequest($gateway, 'refund:'.$refund->getKey())
-            ->post('/v1/refunds', [
+        $payload = $this->post(
+            $this->connectedRequest($gateway, 'refund:'.$refund->getKey()),
+            '/v1/refunds',
+            [
                 'payment_intent' => $payment->provider_payment_id,
                 'amount' => $refund->amount_minor,
                 'metadata' => [
@@ -139,7 +145,8 @@ class StripeGatewayService
                     'payment_id' => $payment->getKey(),
                     'refund_id' => $refund->getKey(),
                 ],
-            ])->throw()->json();
+            ],
+        );
 
         return ['refund_id' => (string) $payload['id']];
     }
@@ -200,11 +207,16 @@ class StripeGatewayService
 
     private function platformRequest(): PendingRequest
     {
-        return Http::baseUrl((string) config('services.stripe.api_url'))
+        $request = Http::baseUrl((string) config('services.stripe.api_url'))
             ->asForm()
             ->acceptJson()
             ->withToken((string) config('services.stripe.secret'))
             ->timeout(20);
+
+        $caBundle = config('services.stripe.ca_bundle');
+        return is_string($caBundle) && trim($caBundle) !== ''
+            ? $request->withOptions(['verify' => $caBundle])
+            : $request;
     }
 
     private function connectedRequest(PaymentGatewayAccount $gateway, string $idempotencyKey): PendingRequest
@@ -213,6 +225,37 @@ class StripeGatewayService
             'Stripe-Account' => $gateway->provider_account_id,
             'Idempotency-Key' => $idempotencyKey,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function post(PendingRequest $request, string $path, array $data): array
+    {
+        try {
+            $payload = $request->post($path, $data)->throw()->json();
+            if (! is_array($payload)) {
+                throw new RuntimeException('The Stripe response was invalid.');
+            }
+            return $payload;
+        } catch (Throwable) {
+            throw StripeProviderException::rejected();
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function get(PendingRequest $request, string $path): array
+    {
+        try {
+            $payload = $request->get($path)->throw()->json();
+            if (! is_array($payload)) {
+                throw new RuntimeException('The Stripe response was invalid.');
+            }
+            return $payload;
+        } catch (Throwable) {
+            throw StripeProviderException::rejected();
+        }
     }
 
     /**

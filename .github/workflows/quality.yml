@@ -72,6 +72,13 @@ jobs:
       IRONCORE_NOTIFICATION_RUNTIME_EVIDENCE_URL: https://127.0.0.1:8443
       IRONCORE_NOTIFICATION_RUNTIME_EVIDENCE_TOKEN: ironcore-ci-evidence-only
       IRONCORE_NOTIFICATION_RUNTIME_REJECTION_MARKER: ironcore-ci-provider-response-marker
+      IRONCORE_STRIPE_RUNTIME_GATE: "true"
+      IRONCORE_STRIPE_RUNTIME_HTTPS_PORT: "8444"
+      IRONCORE_STRIPE_RUNTIME_CERTIFICATE: /tmp/ironcore-stripe-runtime-cert.pem
+      IRONCORE_STRIPE_RUNTIME_PRIVATE_KEY: /tmp/ironcore-stripe-runtime-key.pem
+      IRONCORE_STRIPE_RUNTIME_EVIDENCE_URL: https://127.0.0.1:8444
+      IRONCORE_STRIPE_RUNTIME_EVIDENCE_TOKEN: ironcore-ci-stripe-evidence-only
+      IRONCORE_STRIPE_RUNTIME_REJECTION_MARKER: ironcore-ci-stripe-response-marker
       APP_NAME: IronCore API
       APP_ENV: testing
       APP_DEBUG: "false"
@@ -109,6 +116,18 @@ jobs:
       NOTIFICATION_PUSH_ENDPOINT: https://127.0.0.1:8443/push
       NOTIFICATION_PUSH_TOKEN: ironcore-ci-push-only
       NOTIFICATION_CA_BUNDLE: /tmp/ironcore-notification-runtime-cert.pem
+      STRIPE_SECRET_KEY: ironcore-ci-stripe-only
+      STRIPE_WEBHOOK_SECRET: ironcore-ci-connect-signing-only
+      STRIPE_BILLING_WEBHOOK_SECRET: ironcore-ci-billing-signing-only
+      STRIPE_API_URL: https://127.0.0.1:8444
+      STRIPE_CONNECT_REFRESH_URL: https://app.ironcore.test/payments?stripe=refresh
+      STRIPE_CONNECT_RETURN_URL: https://app.ironcore.test/payments?stripe=return
+      STRIPE_CHECKOUT_SUCCESS_URL: https://app.ironcore.test/payments?payment={PAYMENT_ID}&checkout=success
+      STRIPE_CHECKOUT_CANCEL_URL: https://app.ironcore.test/payments?payment={PAYMENT_ID}&checkout=cancelled
+      STRIPE_BILLING_CHECKOUT_SUCCESS_URL: https://app.ironcore.test/billing?gym={GYM_ID}&checkout=success
+      STRIPE_BILLING_CHECKOUT_CANCEL_URL: https://app.ironcore.test/billing?gym={GYM_ID}&checkout=cancelled
+      STRIPE_BILLING_PORTAL_RETURN_URL: https://app.ironcore.test/billing
+      STRIPE_CA_BUNDLE: /tmp/ironcore-stripe-runtime-cert.pem
       # These are disposable emulator credentials, never production secrets.
       FILESYSTEM_DISK: s3
       AWS_ACCESS_KEY_ID: ironcore-ci-s3
@@ -208,9 +227,47 @@ jobs:
           tail -100 /tmp/ironcore-notification-runtime.log
           exit 1
 
-      - name: Run Laravel, PostgreSQL RLS, Redis, notification and S3 tests
+      - name: Start disposable Stripe provider boundary
+        shell: bash
+        run: |
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$IRONCORE_STRIPE_RUNTIME_PRIVATE_KEY" \
+            -out "$IRONCORE_STRIPE_RUNTIME_CERTIFICATE" \
+            -days 1 -subj "/CN=127.0.0.1" \
+            -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" > /dev/null 2>&1
+          node scripts/ci/stripe-provider-sandbox.mjs > /tmp/ironcore-stripe-runtime.log 2>&1 &
+          echo "$!" > /tmp/ironcore-stripe-runtime.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              --cacert "$IRONCORE_STRIPE_RUNTIME_CERTIFICATE" \
+              "$IRONCORE_STRIPE_RUNTIME_EVIDENCE_URL/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -100 /tmp/ironcore-stripe-runtime.log
+          exit 1
+
+      - name: Run Laravel, PostgreSQL RLS, Redis, provider and S3 tests
         working-directory: backend
         run: php artisan test --fail-on-skipped --fail-on-risky
+
+      - name: Stop disposable Stripe provider boundary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/ironcore-stripe-runtime.pid ]]; then
+            provider_pid="$(tr -cd '0-9' < /tmp/ironcore-stripe-runtime.pid)"
+            if [[ -n "$provider_pid" ]]; then
+              kill -- "$provider_pid" 2>/dev/null || true
+            fi
+          fi
+          if [[ "${{ job.status }}" != "success" && -f /tmp/ironcore-stripe-runtime.log ]]; then
+            tail -100 /tmp/ironcore-stripe-runtime.log
+          fi
+          rm -f -- \
+            "$IRONCORE_STRIPE_RUNTIME_CERTIFICATE" \
+            "$IRONCORE_STRIPE_RUNTIME_PRIVATE_KEY"
 
       - name: Stop disposable notification provider boundary
         if: always()

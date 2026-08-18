@@ -14,6 +14,14 @@ return [
         'billing_checkout_success_url' => env('STRIPE_BILLING_CHECKOUT_SUCCESS_URL'),
         'billing_checkout_cancel_url' => env('STRIPE_BILLING_CHECKOUT_CANCEL_URL'),
         'billing_portal_return_url' => env('STRIPE_BILLING_PORTAL_RETURN_URL'),
+        // Verification stays enabled. The optional bundle supports private
+        // provider trust roots and the disposable CI transport boundary.
+        'ca_bundle' => env('STRIPE_CA_BUNDLE'),
+        'runtime_gate' => [
+            'evidence_url' => env('IRONCORE_STRIPE_RUNTIME_EVIDENCE_URL'),
+            'evidence_token' => env('IRONCORE_STRIPE_RUNTIME_EVIDENCE_TOKEN'),
+            'rejection_marker' => env('IRONCORE_STRIPE_RUNTIME_REJECTION_MARKER'),
+        ],
     ],
     'notifications' => [
         // Provider destinations and tokens remain environment-only.

@@ -95,6 +95,19 @@ class ProductionConfigurationPreflightTest extends TestCase
         $this->assertStringNotContainsString($marker, Artisan::output());
     }
 
+    public function test_stripe_ca_bundle_must_be_readable_without_echoing_its_path(): void
+    {
+        $this->configureSafeProductionShape();
+        $marker = '/deployment/private/stripe-ca-marker.pem';
+        config(['services.stripe.ca_bundle' => $marker]);
+
+        $exitCode = Artisan::call('ironcore:production-preflight');
+
+        $this->assertSame(1, $exitCode);
+        $this->assertStringContainsString('STRIPE_CA_BUNDLE must reference a readable PEM trust bundle', Artisan::output());
+        $this->assertStringNotContainsString($marker, Artisan::output());
+    }
+
     private function configureSafeProductionShape(): void
     {
         config([
@@ -146,6 +159,7 @@ class ProductionConfigurationPreflightTest extends TestCase
             'services.stripe.billing_checkout_success_url' => 'https://app.ironcore.co.uk/billing?checkout=success',
             'services.stripe.billing_checkout_cancel_url' => 'https://app.ironcore.co.uk/billing?checkout=cancelled',
             'services.stripe.billing_portal_return_url' => 'https://app.ironcore.co.uk/billing',
+            'services.stripe.ca_bundle' => null,
             'services.notifications.sms.endpoint' => null,
             'services.notifications.sms.token' => null,
             'services.notifications.push.endpoint' => null,
