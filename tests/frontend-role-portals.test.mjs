@@ -74,4 +74,5 @@ test("representative portals are explicit and read-only", async () => {
   assert.match(app, /canManageSetup: false/);
   assert.match(app, /canManageMemberships: false/);
   assert.doesNotMatch(app, /liveMembers=\{\{[^}]*onInvitePortal/);
+  assert.match(await read("app/ironcore-dashboard.tsx"), /m\.email && live\.onInvitePortal[\s\S]*Preview only/);
 });
