@@ -19,6 +19,7 @@ export type EngagementData = {
   branches: Option[];
   trainers: Option[];
   actorRole: IronCoreRole;
+  readOnly?: boolean;
   loading: boolean;
   error: string | null;
   onReload: () => void;
@@ -65,10 +66,10 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
   // deterministic and does not make access decisions from the browser clock.
   const upcoming = data.sessions.filter((row) => row.status === "scheduled");
   const waitlisted = data.bookings.filter((row) => row.status === "waitlisted");
-  const canCheckIn = ["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(data.actorRole);
-  const canManageClasses = ["super_admin", "gym_owner", "gym_manager"].includes(data.actorRole);
-  const canBookOthers = ["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(data.actorRole);
-  const canMarkAttendance = data.actorRole !== "member";
+  const canCheckIn = !data.readOnly && ["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(data.actorRole);
+  const canManageClasses = !data.readOnly && ["super_admin", "gym_owner", "gym_manager"].includes(data.actorRole);
+  const canBookOthers = !data.readOnly && ["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(data.actorRole);
+  const canMarkAttendance = !data.readOnly && data.actorRole !== "member";
   const defaultBranch = data.branches[0]?.id ?? "";
 
   useEffect(() => {
@@ -132,7 +133,7 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
   }, [data.bookings]);
 
   return <section className="engagement-workspace">
-    <div className="live-scope-banner"><ShieldCheck size={18} /><div><strong>Live tenant engagement workspace</strong><small>Every scan, roster and booking remains bound to the selected gym and branch. QR secrets are never stored in plaintext.</small></div><button className="icon-button" onClick={data.onReload} aria-label="Refresh engagement data"><RefreshCw size={16} /></button></div>
+    <div className="live-scope-banner"><ShieldCheck size={18} /><div><strong>{data.readOnly ? "Read-only engagement preview" : "Live tenant engagement workspace"}</strong><small>{data.readOnly ? "Representative attendance and class records do not call the API." : "Every scan, roster and booking remains bound to the selected gym and branch. QR secrets are never stored in plaintext."}</small></div>{!data.readOnly && <button className="icon-button" onClick={data.onReload} aria-label="Refresh engagement data"><RefreshCw size={16} /></button>}</div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {actionError && <div className="form-error" role="alert">{actionError}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
@@ -152,7 +153,7 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
 
     {tab === "classes" && <>
       <div className="module-heading"><div><p className="eyebrow">Capacity-controlled schedule</p><h2>Upcoming classes</h2><p>Confirmed places, FIFO waitlists and trainer attendance stay synchronized under database locks.</p></div>{canManageClasses && <button className="primary-button" onClick={() => setClassModal(true)}><CalendarPlus size={16} /> New class</button>}</div>
-      <div className="class-grid">{upcoming.map((session) => { const roster = bookingBySession.get(session.id) ?? []; const percent = Math.min(100, (session.booked_count / session.capacity) * 100); return <article className="panel class-card" key={session.id}><div className="class-card-head"><span className="engagement-icon violet"><Dumbbell size={19} /></span><span className={`status ${session.status}`}>{session.status}</span></div><p className="eyebrow">{session.branch?.name ?? "Gym class"}</p><h3>{session.title}</h3><p>{session.description ?? "Instructor-led member session."}</p><dl><div><Clock3 size={14} /><span>{dateTime(session.starts_at)}</span></div><div><UsersRound size={14} /><span>{session.booked_count}/{session.capacity} booked · {session.waitlist_count} waiting</span></div>{session.trainer?.name && <div><UserCheck size={14} /><span>{session.trainer.name}</span></div>}</dl><div className="capacity-track" aria-label={`${session.booked_count} of ${session.capacity} places booked`}><i style={{ width: `${percent}%` }} /></div><button className="primary-button class-book-button" onClick={() => setBookingSession(session)}>Book a place</button>{roster.length > 0 && <div className="mini-roster"><strong>Roster</strong>{roster.slice(0, 4).map((booking) => <div key={booking.id}><span>{booking.member?.name ?? "Member"}</span><span className={`status ${booking.status}`}>{booking.status}</span>{booking.status === "booked" && canMarkAttendance && <button aria-label="Mark attended" onClick={() => void act(() => data.onAttend(booking.id), "Class attendance recorded.")}><CheckCircle2 size={13} /></button>}{["booked", "waitlisted"].includes(booking.status) && <button aria-label="Cancel booking" onClick={() => void act(() => data.onCancel(booking.id, "Cancelled by authorised workspace user"), "Booking cancelled; the next waitlisted member was promoted when applicable.")}><X size={13} /></button>}</div>)}</div>}</article>; })}</div>
+      <div className="class-grid">{upcoming.map((session) => { const roster = bookingBySession.get(session.id) ?? []; const percent = Math.min(100, (session.booked_count / session.capacity) * 100); return <article className="panel class-card" key={session.id}><div className="class-card-head"><span className="engagement-icon violet"><Dumbbell size={19} /></span><span className={`status ${session.status}`}>{session.status}</span></div><p className="eyebrow">{session.branch?.name ?? "Gym class"}</p><h3>{session.title}</h3><p>{session.description ?? "Instructor-led member session."}</p><dl><div><Clock3 size={14} /><span>{dateTime(session.starts_at)}</span></div><div><UsersRound size={14} /><span>{session.booked_count}/{session.capacity} booked · {session.waitlist_count} waiting</span></div>{session.trainer?.name && <div><UserCheck size={14} /><span>{session.trainer.name}</span></div>}</dl><div className="capacity-track" aria-label={`${session.booked_count} of ${session.capacity} places booked`}><i style={{ width: `${percent}%` }} /></div>{!data.readOnly && <button className="primary-button class-book-button" onClick={() => setBookingSession(session)}>Book a place</button>}{roster.length > 0 && <div className="mini-roster"><strong>Roster</strong>{roster.slice(0, 4).map((booking) => <div key={booking.id}><span>{booking.member?.name ?? "Member"}</span><span className={`status ${booking.status}`}>{booking.status}</span>{booking.status === "booked" && canMarkAttendance && <button aria-label="Mark attended" onClick={() => void act(() => data.onAttend(booking.id), "Class attendance recorded.")}><CheckCircle2 size={13} /></button>}{!data.readOnly && ["booked", "waitlisted"].includes(booking.status) && <button aria-label="Cancel booking" onClick={() => void act(() => data.onCancel(booking.id, "Cancelled by authorised workspace user"), "Booking cancelled; the next waitlisted member was promoted when applicable.")}><X size={13} /></button>}</div>)}</div>}</article>; })}</div>
       {!upcoming.length && <div className="panel table-state">No upcoming classes in this schedule window.</div>}
     </>}
 

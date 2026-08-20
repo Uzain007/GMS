@@ -18,6 +18,7 @@ export type SaasBillingData = {
   invoices: SaasBillingInvoiceRecord[];
   baseCurrency: Currency;
   actorRole: IronCoreRole;
+  readOnly?: boolean;
   loading: boolean;
   error: string | null;
   onReload: () => void;
@@ -111,7 +112,7 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
-  const canManage = ["super_admin", "gym_owner"].includes(data.actorRole);
+  const canManage = !data.readOnly && ["super_admin", "gym_owner"].includes(data.actorRole);
   const current = data.subscription;
   const nextRenewal = current?.current_period_end ?? current?.trial_ends_at ?? null;
   const visiblePlans = useMemo(() => data.plans.filter((plan) => plan.status === "active"), [data.plans]);
@@ -137,7 +138,7 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   }
 
   return <section className="saas-workspace">
-    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>Manage the selected gym&apos;s plan, recurring invoices and payment recovery separately from member collections.</p></div><div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div></div>
+    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym&apos;s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
     <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym&apos;s connected account. This subscription is collected only by IronCore&apos;s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}

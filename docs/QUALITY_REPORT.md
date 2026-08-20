@@ -341,3 +341,13 @@ Commit `79ed6ae` passed both hosted jobs. The backend lane executed all 44 Larav
 - Executable coverage proves quoted-printable soft-line joining and Base64 decoding in the same multipart message, while the existing Redis, tenant-denial, suppression and sanitized-provider-failure contracts remain intact.
 - Local validation passes a clean production build, artifact/render contracts, TypeScript, ESLint, PHP syntax parsing, production web preflight, secret scan and all **95 portable contracts** with zero failures, skips or cancellations. The production dependency audit reports zero vulnerabilities.
 - The local workstation has no PHP/Composer/PostgreSQL runtime, so the complete Laravel/PostgreSQL/Redis/S3/provider/restore/load authority remains pending an approved commit/push. No commit or push is part of this milestone handoff.
+
+## Milestone 26 real role entry and frontend action audit checkpoint
+
+- The live Vercel release was inspected before implementation. It exposed only representative portal data, no account login, and its expected Laravel API hostname did not resolve.
+- The signed-out application now presents real Sanctum login first and routes the server-returned identity to the Super Admin, Gym Admin or linked Member portal.
+- A new Super Admin portal loads the real tenant registry and SaaS-plan catalogue, opens an explicit gym context, creates gyms through `POST /api/v1/gyms` and publishes plans through `POST /api/v1/platform/saas-plans`.
+- Permission-visible Gym Admin and Member forms remain connected to the existing tenant APIs. Placeholder controls were removed; representative portal writes, invitations and account-security controls are hidden or disabled.
+- Local validation passes the production build, TypeScript, ESLint, rendered-output checks and all **99 portable contracts** with zero failures, skips or cancellations.
+- The environment has no PHP, Composer or Docker, and browser safety blocked continued local interactive navigation after the initial rendered sign-in check. Existing Laravel feature coverage and the new role/action contracts pass, but production acceptance of all three real accounts remains blocked until the Laravel API is deployed and configured.
+- No commit, push or production deployment was performed.

@@ -4,7 +4,8 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 
 ## Included in this milestone
 
-- Super-admin dashboard and responsive navigation
+- Real session login and role routing for Super Admin, Gym Admin and Member accounts
+- API-backed Super Admin portal for tenant onboarding, explicit gym access and SaaS-plan publication
 - Dedicated gym-client portal with a selected-gym dashboard for members, live operations, collections, classes, team and subscription health
 - Role-separated platform/gym shells with a representative preview switch for product review
 - Gym, member, payment, SaaS billing, reporting, staff and settings views
@@ -49,7 +50,7 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 - Credential-free k6 gate for cached 500-member tenant reporting, latency thresholds and cross-tenant denial
 - Automated build, rendered-output and product-contract tests
 
-The signed-out preview uses representative in-browser data; authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. The GitHub-hosted Laravel/PostgreSQL/Redis/S3 gate passes. Credential-free synthetic restore and k6 report-load gates cover database portability, forced-RLS continuity, cached latency and tenant denial; production-sized capacity, provider PITR/encryption/RPO/RTO, Stripe, notification and monitored-deployment evidence remain separate.
+The signed-out entry is the real account login. When no API is configured, separately labelled Super Admin, Gym Admin and Member previews remain available as read-only representative data. Authenticated screens use the Laravel API. Tenant-owned models fail closed, PostgreSQL RLS is forced, tenant foreign keys are composite, and money is stored as integer minor units. Member payments use each gym's connected Stripe account; IronCore subscriptions use the separate platform Stripe account so the two money flows never mix. The GitHub-hosted Laravel/PostgreSQL/Redis/S3 gate passes. Credential-free synthetic restore and k6 report-load gates cover database portability, forced-RLS continuity, cached latency and tenant denial; production-sized capacity, provider PITR/encryption/RPO/RTO, Stripe, notification and monitored-deployment evidence remain separate.
 
 ## Run locally
 
@@ -74,6 +75,7 @@ GitHub pull requests and `main` pushes also run `.github/workflows/quality.yml`.
 ## Important files
 
 - `app/ironcore-dashboard.tsx` — product interface and interactions
+- `app/platform-portal.tsx` — authenticated Super Admin tenant and SaaS-plan workspace
 - `app/gym-client-overview.tsx` — gym owner/manager landing dashboard composed from selected-tenant responses
 - `app/engagement-management.tsx` — attendance, QR access, class scheduling and bookings
 - `app/coaching-management.tsx` — trainer assignments, workout plans, progress and notification evidence

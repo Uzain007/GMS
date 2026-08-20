@@ -35,10 +35,23 @@ export type GymSummary = {
   id: string;
   name: string;
   slug: string;
+  legal_name?: string | null;
   base_currency: "GBP" | "USD" | "PKR" | "AED" | "SAR";
   country_code: string;
   timezone: string;
   status: string;
+  trial_ends_at?: string | null;
+  created_at?: string | null;
+};
+
+export type NewGym = {
+  name: string;
+  legal_name?: string;
+  slug?: string;
+  base_currency: GymSummary["base_currency"];
+  country_code: string;
+  timezone: string;
+  owner: { name: string; email: string };
 };
 
 export type MemberRecord = {
@@ -323,6 +336,18 @@ export class IronCoreApi {
 
   async gyms(): Promise<GymSummary[]> {
     return (await this.request<Paginated<GymSummary>>("/api/v1/gyms?per_page=100")).data;
+  }
+
+  async createGym(input: NewGym): Promise<GymSummary> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<GymSummary>>("/api/v1/gyms", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })).data;
+  }
+
+  async platformSaasPlans(): Promise<SaasPlanRecord[]> {
+    return (await this.request<Paginated<SaasPlanRecord>>("/api/v1/platform/saas-plans?per_page=100")).data;
   }
 
   async members(gymId: string, search = ""): Promise<Paginated<MemberRecord>> {

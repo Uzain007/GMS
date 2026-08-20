@@ -43,8 +43,9 @@ test("renders development preview metadata", async () => {
   assert.match(html, developmentPreviewMeta);
   assert.match(html, releaseMeta);
   assert.match(html, /IRONCORE/i);
-  assert.match(html, /Good morning/i);
-  assert.match(html, /Total members/i);
+  assert.match(html, /Sign in to IronCore/i);
+  assert.match(html, /Sign in securely/i);
+  assert.match(html, /Explore read-only product previews/i);
 });
 
 test("uses deterministic compact currency labels for server hydration", async () => {

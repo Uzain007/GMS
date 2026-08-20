@@ -6,6 +6,7 @@ import { IronCoreDashboard, type DashboardMember, type NewDashboardMember, type 
 import { MemberPortal, type MemberPortalData } from "./member-portal";
 import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
+import { PlatformPortal } from "./platform-portal";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
 import type { SaasBillingData } from "./saas-billing-management";
 import type { EngagementData } from "./engagement-management";
@@ -54,6 +55,7 @@ import {
   type UpdateMemberSelf,
   type MemberAccountActivationPreview,
   type MfaChallenge,
+  type NewGym,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -104,8 +106,8 @@ const demoOperations: OperationData = {
   loading: false,
   error: null,
   baseCurrency: "GBP",
-  canManageSetup: true,
-  canManageMemberships: true,
+  canManageSetup: false,
+  canManageMemberships: false,
   preview: true,
   onReload: () => undefined,
   onCreateBranch: async () => undefined,
@@ -117,19 +119,8 @@ const demoMembers: DashboardMember[] = [
   { id: "demo-2", name: "Hassan Malik", gym: "Forge Fitness", membership: "MBR-1187", joined: "03 Aug 2026", status: "Active", email: "hassan@example.com", accountLinked: true },
   { id: "demo-3", name: "Omar Al-Farsi", gym: "Forge Fitness", membership: "MBR-1216", joined: "02 Aug 2026", status: "Paused", email: null, accountLinked: false },
 ];
-const demoMfaActions: MfaActions = {
-  status: async () => ({ enabled: false, setup_pending: false, confirmed_at: null, recovery_codes_remaining: 0 }),
-  beginSetup: async () => ({
-    secret: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
-    otpauth_uri: "otpauth://totp/IronCore%3Apreview%40ironcore.example?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=IronCore&algorithm=SHA1&digits=6&period=30",
-    issuer: "IronCore",
-    account: "preview@ironcore.example",
-  }),
-  confirmSetup: async () => ({ enabled: true, recovery_codes: ["ABCD-EFGH-IJKL-MNPQ", "BCDE-FGHI-JKLM-NPQR", "CDEF-GHIJ-KLMN-PQRS", "DEFG-HIJK-LMNP-QRST", "EFGH-IJKL-MNPQ-RSTU", "FGHI-JKLM-NPQR-STUV", "GHIJ-KLMN-PQRS-TUVW", "HIJK-LMNP-QRST-UVWX"], recovery_codes_remaining: 8 }),
-  regenerateRecoveryCodes: async () => ({ recovery_codes: ["JKLM-NPQR-STUV-WXYZ", "KLMN-PQRS-TUVW-XYZA", "LMNP-QRST-UVWX-YZAB", "MNPQ-RSTU-VWXY-ZABC", "NPQR-STUV-WXYZ-ABCD", "PQRS-TUVW-XYZA-BCDE", "QRST-UVWX-YZAB-CDEF", "RSTU-VWXY-ZABC-DEFG"], recovery_codes_remaining: 8 }),
-  disable: async () => undefined,
-};
 const demoStaff: StaffData = {
+  readOnly: true,
   rows: [
     { id: "demo-staff-1", name: "Aisha Khan", email: "aisha@forge.example", role: "gym_manager", branchId: "demo-branch-1", employeeNumber: "MGR-001", jobTitle: "General Manager", status: "active", hiredAt: "2025-04-12" },
     { id: "demo-staff-2", name: "Daniel Reed", email: "daniel@forge.example", role: "trainer", branchId: "demo-branch-1", employeeNumber: "TRN-014", jobTitle: "Strength Coach", status: "active", hiredAt: "2026-01-08" },
@@ -140,6 +131,7 @@ const demoStaff: StaffData = {
   onUpdate: async () => undefined,
 };
 const demoFinance: FinanceData = {
+  readOnly: true,
   payments: [
     { id: "demo-payment-1", memberId: "demo-1", invoiceId: "demo-invoice-1", branchId: "demo-branch-1", receipt: "PAY-01JZ8K3", provider: "stripe", method: "online_card", status: "succeeded", amountMinor: 8900, refundedMinor: 0, currency: "GBP", paidAt: "2026-08-07T09:42:00Z", notes: null },
     { id: "demo-payment-2", memberId: "demo-2", invoiceId: null, branchId: "demo-branch-1", receipt: "PAY-01JZ8GW", provider: "manual", method: "cash", status: "partially_refunded", amountMinor: 4200, refundedMinor: 1000, currency: "GBP", paidAt: "2026-08-07T08:18:00Z", notes: "Front desk payment" },
@@ -159,6 +151,7 @@ const demoFinance: FinanceData = {
   onConnectStripe: async () => "#demo-stripe", onRefreshStripe: async () => undefined,
 };
 const demoSaasBilling: SaasBillingData = {
+  readOnly: true,
   plans: [
     { id: "saas-starter", code: "starter", name: "Starter", description: "Simple operations for a new independent gym.", status: "active", sort_order: 10, feature_limits: { members: 500, branches: 1, staff: 8, advanced_reports: false, priority_support: false }, prices: [{ id: "starter-gbp-month", currency: "GBP", billing_interval: "monthly", amount_minor: 3900, trial_days: 14, active: true }, { id: "starter-gbp-year", currency: "GBP", billing_interval: "yearly", amount_minor: 39000, trial_days: 14, active: true }], created_at: "2026-08-07T10:00:00Z" },
     { id: "saas-growth", code: "growth", name: "Growth", description: "Automation, payments and reporting for growing gym teams.", status: "active", sort_order: 20, feature_limits: { members: 2500, branches: 3, staff: 30, advanced_reports: true, priority_support: false }, prices: [{ id: "growth-gbp-month", currency: "GBP", billing_interval: "monthly", amount_minor: 7900, trial_days: 14, active: true }, { id: "growth-gbp-year", currency: "GBP", billing_interval: "yearly", amount_minor: 79000, trial_days: 14, active: true }], created_at: "2026-08-07T10:00:00Z" },
@@ -173,6 +166,7 @@ const demoSaasBilling: SaasBillingData = {
   onReload: () => undefined, onCheckout: async () => "", onPortal: async () => "", onCreatePlan: async () => undefined,
 };
 const demoEngagement: EngagementData = {
+  readOnly: true,
   attendance: [
     { id: "attendance-1", gym_id: "demo-gym", member_id: "demo-1", membership_id: "demo-membership-1", branch_id: "demo-branch-1", member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, method: "qr", status: "checked_in", checked_in_at: "2026-08-07T13:42:00Z", checked_out_at: null },
     { id: "attendance-2", gym_id: "demo-gym", member_id: "demo-2", membership_id: "demo-membership-2", branch_id: "demo-branch-1", member: { id: "demo-2", member_number: "MBR-1187", name: "Hassan Malik" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, method: "member_code", status: "checked_out", checked_in_at: "2026-08-07T10:08:00Z", checked_out_at: "2026-08-07T11:34:00Z" },
@@ -194,6 +188,7 @@ const demoEngagement: EngagementData = {
   onIssueCredential: async () => "icqr_demo_7e11966a00e524d7921fe9c4a6572cd02d1ddf6ae72344967a0a522c4a72a103",
 };
 const demoCoaching: CoachingData = {
+  readOnly: true,
   assignments: [{ id: "assign-1", gym_id: "demo-gym", trainer_staff_profile_id: "demo-staff-2", member_id: "demo-1", trainer: { id: "demo-staff-2", name: "Daniel Reed" }, member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, status: "active", starts_on: "2026-08-01", ends_on: null, notes: "Strength coaching", created_at: "2026-08-01T09:00:00Z" }],
   plans: [{ id: "workout-plan-1", gym_id: "demo-gym", member_id: "demo-1", trainer_staff_profile_id: "demo-staff-2", member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, trainer: { id: "demo-staff-2", name: "Daniel Reed" }, title: "12-week strength foundation", goal: "Build confident compound movement and consistent weekly training.", notes: null, starts_on: "2026-08-01", ends_on: "2026-10-24", status: "active", exercises: [{ id: "exercise-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Back squat", instructions: "Controlled three-second descent with a stable brace.", day_number: 1, sort_order: 1, target_sets: 4, target_reps_min: 6, target_reps_max: 8, target_load_grams: 55000, target_duration_seconds: null, rest_seconds: 120 }, { id: "exercise-2", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Romanian deadlift", instructions: "Maintain a neutral spine and controlled hip hinge.", day_number: 1, sort_order: 2, target_sets: 3, target_reps_min: 8, target_reps_max: 10, target_load_grams: 45000, target_duration_seconds: null, rest_seconds: 90 }], created_at: "2026-08-01T10:00:00Z" }],
   sessions: [{ id: "workout-session-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", member_id: "demo-1", plan: { id: "workout-plan-1", title: "12-week strength foundation" }, member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, performed_at: "2026-08-06T17:30:00Z", duration_seconds: 3120, notes: "Strong technique throughout.", sets: [{ id: "set-1", gym_id: "demo-gym", workout_plan_exercise_id: "exercise-1", exercise_name: "Back squat", set_number: 1, reps: 8, load_grams: 52500, duration_seconds: null, distance_metres: null, rpe: 7 }], created_at: "2026-08-06T18:22:00Z" }],
@@ -228,13 +223,6 @@ const demoMemberPortal: MemberPortalData = {
   loading: false,
   error: null,
 };
-
-function demoCredential(): MemberSelfCredentialRecord {
-  const bytes = new Uint8Array(32);
-  globalThis.crypto?.getRandomValues(bytes);
-  const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return { credential_hint: value.slice(-4).toUpperCase(), status: "active", expires_at: null, last_used_at: null, created_at: new Date().toISOString(), credential: `icqr_demo_${value}` };
-}
 
 function isoDate(date: Date): string { return date.toISOString().slice(0, 10); }
 
@@ -328,7 +316,7 @@ function Brand() {
   return <div className="auth-brand"><span><i /><strong>IC</strong></span><b>IRONCORE</b></div>;
 }
 
-function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error }: {
+function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error, liveApiConfigured = true, onPreview }: {
   onLogin: (email: string, password: string) => Promise<void>;
   onRequestReset: (email: string) => Promise<void>;
   onReset: (secret: PasswordResetSecret, password: string) => Promise<void>;
@@ -339,6 +327,8 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
   onCancelMfa?: () => void;
   busy: boolean;
   error: string | null;
+  liveApiConfigured?: boolean;
+  onPreview?: (portal: "platform" | "gym" | "member") => void;
 }) {
   const [mode, setMode] = useState<"login" | "forgot" | "reset" | "mfa">(challenge ? "mfa" : resetSecret ? "reset" : "login");
   const [localBusy, setLocalBusy] = useState(false);
@@ -391,6 +381,7 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
         <div className="auth-mobile-brand"><Brand /></div>
         <p className="eyebrow">{mode === "login" ? "Welcome back" : mode === "mfa" ? "Multi-factor authentication" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
         {(mode === "login" || mode === "mfa" ? error : localError) && <div className="form-error" role="alert">{mode === "login" || mode === "mfa" ? error : localError}</div>}
+        {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Live account access is not configured on this deployment yet. The previews below remain separate from real tenant data.</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}
         {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
         {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="current-password" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
@@ -398,6 +389,7 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
         {mode === "mfa" && <div className="mfa-login-fields"><label>{useRecovery ? "Recovery code" : "6-digit code"}<input name="verification" inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" pattern={useRecovery ? undefined : "[0-9]{6}"} minLength={useRecovery ? 16 : 6} maxLength={useRecovery ? 64 : 6} required autoFocus /></label><button className="auth-forgot" type="button" onClick={() => setUseRecovery((current) => !current)}>Use {useRecovery ? "authenticator code" : "a recovery code"}</button></div>}
         <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : mode === "reset" ? "Reset password securely" : "Verify and continue"} <ArrowRight size={17} /></>}</button>
         {mode !== "login" && <button className="auth-back" type="button" onClick={() => { if (mode === "reset") onCancelReset?.(); if (mode === "mfa") onCancelMfa?.(); setMode("login"); setNotice(null); setLocalError(null); }}>Back to sign in</button>}
+        {mode === "login" && onPreview && <div className="auth-preview-launch"><span>Explore read-only product previews</span><div><button type="button" onClick={() => onPreview("platform")}>Super Admin</button><button type="button" onClick={() => onPreview("gym")}>Gym Admin</button><button type="button" onClick={() => onPreview("member")}>Member</button></div></div>}
         <small>{mode === "reset" ? "This one-time reset value was removed from the address and is held only in memory." : mode === "mfa" ? "This five-minute challenge is held only in memory and disappears if you leave or reload." : "IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser."}</small>
       </form>
     </section>
@@ -420,9 +412,13 @@ export function IronCoreApp() {
   }) : undefined, [api]);
   const defaultReportRange = useMemo(() => initialReportRange(), []);
   const [demoPortal, setDemoPortal] = useState<"platform" | "gym" | "member">("platform");
-  const [phase, setPhase] = useState<"booting" | "anonymous" | "authenticated">(demoMode ? "authenticated" : "booting");
+  const [previewActive, setPreviewActive] = useState(false);
+  const [phase, setPhase] = useState<"booting" | "anonymous" | "authenticated">(demoMode ? "anonymous" : "booting");
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [gyms, setGyms] = useState<GymAccess[]>([]);
+  const [platformPlans, setPlatformPlans] = useState<SaasPlanRecord[]>([]);
+  const [platformLoading, setPlatformLoading] = useState(false);
+  const [platformError, setPlatformError] = useState<string | null>(null);
   const [selectedGym, setSelectedGym] = useState<GymAccess | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -493,6 +489,8 @@ export function IronCoreApp() {
 
   const loadSession = useCallback(async () => {
     if (!api) return;
+    setPlatformLoading(true);
+    setPlatformError(null);
     try {
       let identity = await api.me();
       const invitation = pendingInvitation();
@@ -509,7 +507,10 @@ export function IronCoreApp() {
           window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
         }
       }
-      const available = await api.gyms();
+      const [available, availablePlans] = await Promise.all([
+        api.gyms(),
+        identity.platform_role === "super_admin" ? api.platformSaasPlans() : Promise.resolve([]),
+      ]);
       const access = available.map((gym): GymAccess => ({
         ...gym,
         // Super admins still select one explicit tenant; selection never
@@ -520,6 +521,7 @@ export function IronCoreApp() {
       }));
       setUser(identity);
       setGyms(access);
+      setPlatformPlans(availablePlans);
       setPhase("authenticated");
       if (identity.platform_role !== "super_admin" && access.length === 1) setSelectedGym(access[0]);
     } catch (error) {
@@ -529,6 +531,8 @@ export function IronCoreApp() {
       }
       setAuthError(apiMessage(error, "The IronCore API is unavailable."));
       setPhase("anonymous");
+    } finally {
+      setPlatformLoading(false);
     }
   }, [api]);
 
@@ -547,6 +551,7 @@ export function IronCoreApp() {
     if (!api) {
       setMemberActivation(null);
       setDemoPortal("member");
+      setPreviewActive(true);
       return;
     }
     const result = await api.acceptMemberAccountActivation(gymId, token, password);
@@ -747,7 +752,10 @@ export function IronCoreApp() {
   }, [api, reportRefresh, reports.currency, reports.from, reports.to, selectedGym]);
 
   async function login(email: string, password: string) {
-    if (!api) return;
+    if (!api) {
+      setAuthError("Live account access needs the Laravel API deployment to be configured first.");
+      return;
+    }
     setAuthBusy(true); setAuthError(null);
     try {
       const result = await api.login(email, password);
@@ -774,7 +782,7 @@ export function IronCoreApp() {
   }
 
   async function requestPasswordReset(email: string): Promise<void> {
-    if (!api) return;
+    if (!api) throw new Error("Live account recovery needs the Laravel API deployment to be configured first.");
     await api.requestPasswordReset(email);
   }
 
@@ -806,7 +814,7 @@ export function IronCoreApp() {
     reportSequence.current += 1;
     memberSelfSequence.current += 1;
     setMfaChallenge(null);
-    setUser(null); setGyms([]); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", loading: false, error: null }); setPhase("anonymous");
+    setUser(null); setGyms([]); setPlatformPlans([]); setPlatformError(null); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", loading: false, error: null }); setPhase("anonymous");
   }
 
   function selectGym(gym: GymAccess | null) {
@@ -824,6 +832,26 @@ export function IronCoreApp() {
     reportSequence.current += 1;
     setReports((current) => ({ ...current, report: null, currency: gym?.base_currency ?? "GBP", loading: false, error: null }));
     setSelectedGym(gym);
+  }
+
+  async function reloadPlatform(): Promise<void> {
+    if (!api || user?.platform_role !== "super_admin") return;
+    setPlatformLoading(true); setPlatformError(null);
+    try {
+      const [available, plans] = await Promise.all([api.gyms(), api.platformSaasPlans()]);
+      setGyms(available.map((gym) => ({ ...gym, role: "super_admin" })));
+      setPlatformPlans(plans);
+    } catch (error) {
+      setPlatformError(apiMessage(error, "Platform data could not be loaded."));
+    } finally {
+      setPlatformLoading(false);
+    }
+  }
+
+  async function createPlatformGym(input: NewGym): Promise<void> {
+    if (!api || user?.platform_role !== "super_admin") throw new Error("Only a super administrator can create a gym.");
+    const created = await api.createGym(input);
+    setGyms((current) => [...current, { ...created, role: "super_admin" as IronCoreRole }].sort((left, right) => left.name.localeCompare(right.name)));
   }
 
   async function createMember(input: NewDashboardMember) {
@@ -902,7 +930,8 @@ export function IronCoreApp() {
 
   async function createSaasPlan(input: NewSaasPlan): Promise<void> {
     if (!api || user?.platform_role !== "super_admin") throw new Error("Only a super administrator can publish platform plans.");
-    await api.createSaasPlan(input);
+    const created = await api.createSaasPlan(input);
+    setPlatformPlans((current) => [...current, created].sort((left, right) => left.sort_order - right.sort_order));
     setSaasRefresh((value) => value + 1);
   }
 
@@ -996,17 +1025,17 @@ export function IronCoreApp() {
   if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => { setMemberActivation(null); if (demoMode) setDemoPortal("platform"); }} />;
   if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
   if (mfaChallenge) return <LoginScreen key={mfaChallenge.challenge_token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} challenge={mfaChallenge} onVerifyMfa={verifyMfa} onCancelMfa={() => { setMfaChallenge(null); setAuthError(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
-  if (demoMode) {
+  if (demoMode && previewActive) {
     const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
     if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
+      readOnly: true,
       onReload: () => undefined,
-      onLogout: () => setDemoPortal("platform"),
+      onLogout: () => setPreviewActive(false),
       onChangePassword: async () => undefined,
-      mfa: demoMfaActions,
       onPortalSwitch: () => setDemoPortal("platform"),
       portalSwitchLabel: "Back to Super Admin",
       onUpdateProfile: async () => undefined,
-      onRotateCredential: async () => demoCredential(),
+      onRotateCredential: async () => ({ ...demoMemberPortal.credential!, credential: "preview-disabled" }),
       onBookClass: async () => undefined,
       onCancelBooking: async () => undefined,
       onLogWorkout: async () => undefined,
@@ -1019,13 +1048,12 @@ export function IronCoreApp() {
       operator={{ name: "Aisha Khan", role: "Gym Owner" }}
       activeGym={{ id: "demo-gym", name: "Forge Fitness" }}
       gymOptions={[{ id: "demo-gym", name: "Forge Fitness" }]}
-      liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined, onInvitePortal: async () => `${window.location.origin}${window.location.pathname}#activate_gym=demo-gym&activate_token=${"demo".padEnd(64, "x")}` }}
+      liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined }}
       liveSaasBilling={{ ...demoSaasBilling, actorRole: "gym_owner" }}
       tenantViews={["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", "coaching", "payments", "billing", "reports", "staff"]}
       onPortalSwitch={() => setDemoPortal("member")}
       portalSwitchLabel="Preview member portal"
-      onChangePassword={async () => undefined}
-      mfa={demoMfaActions}
+      onLogout={() => setPreviewActive(false)}
     />;
     return <IronCoreDashboard key="platform-preview"
       {...sharedPreview}
@@ -1033,12 +1061,25 @@ export function IronCoreApp() {
       liveSaasBilling={demoSaasBilling}
       onPortalSwitch={() => setDemoPortal("gym")}
       portalSwitchLabel="Preview gym portal"
-      onChangePassword={async () => undefined}
-      mfa={demoMfaActions}
+      onLogout={() => setPreviewActive(false)}
     />;
   }
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
-  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} />;
+  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} liveApiConfigured={Boolean(api)} onPreview={demoMode ? (portal) => { setDemoPortal(portal); setPreviewActive(true); setAuthError(null); } : undefined} />;
+  if (user.platform_role === "super_admin" && !selectedGym) return <PlatformPortal data={{
+    user,
+    gyms,
+    plans: platformPlans,
+    loading: platformLoading,
+    error: platformError,
+    onReload: () => void reloadPlatform(),
+    onOpenGym: (gym) => selectGym({ ...gym, role: "super_admin" }),
+    onCreateGym: createPlatformGym,
+    onCreatePlan: createSaasPlan,
+    onChangePassword: changePassword,
+    onLogout: logout,
+    mfa: mfaActions,
+  }} />;
   if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} onChangePassword={changePassword} mfa={mfaActions} />;
   if (selectedGym.role === "member") {
     const memberPortalData: MemberPortalData = {
@@ -1181,6 +1222,8 @@ export function IronCoreApp() {
     activeGym={{ id: selectedGym.id, name: selectedGym.name }}
     gymOptions={gyms.map((gym) => ({ id: gym.id, name: gym.name }))}
     onGymChange={(gymId) => selectGym(gyms.find((gym) => gym.id === gymId) ?? null)}
+    onPortalSwitch={user.platform_role === "super_admin" ? () => selectGym(null) : undefined}
+    portalSwitchLabel={user.platform_role === "super_admin" ? "Back to platform" : undefined}
     onLogout={logout}
     onChangePassword={changePassword}
     mfa={mfaActions}

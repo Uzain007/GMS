@@ -28,6 +28,8 @@ Password recovery is non-enumerating and queued before account lookup. Reset val
 
 Optional MFA belongs to the platform user rather than a gym. TOTP secrets use Laravel's encrypted cast, accepted 30-second counters advance under a user row lock, and recovery codes are retained only as application-keyed digests. Correct primary credentials for an enrolled user create a short-lived, attempt-bounded Redis challenge; login, password recovery and member activation cannot create a session until the second factor succeeds.
 
+The web always presents real Sanctum session login first. The API-returned identity routes Super Admins to the platform tenant catalogue, Gym Admins to an explicitly selected tenant workspace, and linked members to self-service; the browser has no trusted role selector. If a deployment has no API origin, its three representative portal previews are explicit and read-only.
+
 ## Currency rules
 
 Supported currencies are GBP, USD, PKR, AED and SAR. Each gym has one base currency. A user may change their display currency, but every financial record stores its original amount, ISO currency, provider amount, fees and settlement currency. Historical transactions are never silently recalculated when exchange rates change.

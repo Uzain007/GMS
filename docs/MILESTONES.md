@@ -258,3 +258,14 @@ Each milestone ends with build verification, focused logic tests and responsive 
 - Keep raw and decoded email evidence inside the authenticated in-memory CI provider and never write message bodies to provider logs
 - Use stable boolean Laravel assertions so a failure cannot echo a reset value or complete message body into hosted logs
 - Re-run the complete Laravel/PostgreSQL/Redis/S3/provider/restore/load authority only after an approved commit and push
+
+## Milestone 26 — Real role entry and frontend action audit
+
+**Status: implementation complete locally; commit and deployment pending approval**
+- Make real Sanctum login the signed-out entry for Super Admin, Gym Admin and Member identities; role routing comes only from `/auth/me`
+- Add an API-backed Super Admin workspace for the tenant registry, explicit gym selection, gym onboarding and SaaS-plan publication
+- Keep tenant-management and member-self-service writes connected to the existing route/header tenant APIs and hide controls that the current role cannot use
+- Remove placeholder controls and make the optional representative portal previews explicit and read-only
+- Add portable contracts for all three role entries, platform actions, tenant/member action wiring and preview boundaries
+- The 18 August 2026 audit found the public Vercel release still in preview-only mode and the expected API hostname unresolved. Production login acceptance requires a reviewed API deployment and frontend API-origin configuration
+- Local production build, TypeScript, ESLint and all **99 portable contracts** pass. No commit or push is part of this handoff

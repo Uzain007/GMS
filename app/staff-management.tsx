@@ -8,7 +8,7 @@ export type StaffRow = { id: string; name: string; email: string; role: StaffRol
 export type InvitationRow = { id: string; email: string; role: StaffRole; branchId: string | null; employeeNumber: string; jobTitle: string | null; status: string; expiresAt: string };
 export type NewStaffInvite = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days: number };
 export type StaffUpdate = { role: StaffRole; employee_number: string; job_title?: string | null; home_branch_id?: string | null; status: StaffRow["status"]; reason: string };
-export type StaffData = { rows: StaffRow[]; invitations: InvitationRow[]; branches: Array<{ id: string; name: string }>; loading: boolean; error: string | null; actorRole: string; onReload: () => void; onInvite: (input: NewStaffInvite) => Promise<string>; onUpdate: (id: string, input: StaffUpdate) => Promise<void> };
+export type StaffData = { rows: StaffRow[]; invitations: InvitationRow[]; branches: Array<{ id: string; name: string }>; loading: boolean; error: string | null; actorRole: string; readOnly?: boolean; onReload: () => void; onInvite: (input: NewStaffInvite) => Promise<string>; onUpdate: (id: string, input: StaffUpdate) => Promise<void> };
 
 const roleLabel = (role: string) => role.split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
 const displayDate = (value: string | null) => value ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)) : "Not set";
@@ -22,10 +22,10 @@ export function StaffManagement({ data, query }: { data: StaffData; query: strin
   const rows = data.rows.filter((row) => `${row.name} ${row.email} ${row.employeeNumber} ${row.jobTitle ?? ""}`.toLowerCase().includes(search));
   const invitations = data.invitations.filter((row) => `${row.email} ${row.employeeNumber}`.toLowerCase().includes(search));
   const manager = data.actorRole === "gym_manager";
-  const canEdit = (row: StaffRow) => !manager || operationalRoles.includes(row.role);
+  const canEdit = (row: StaffRow) => !data.readOnly && (!manager || operationalRoles.includes(row.role));
 
   return <>
-    <section className="module-heading"><div><p className="eyebrow">Access control</p><h2>Team & access</h2><p>Manage tenant staff, branch placement and time-limited invitations.</p></div><button className="primary-button" onClick={() => setInviteOpen(true)}><MailPlus size={18} /> Invite staff</button></section>
+    <section className="module-heading"><div><p className="eyebrow">Access control</p><h2>Team & access</h2><p>{data.readOnly ? "Representative team records for product review." : "Manage tenant staff, branch placement and time-limited invitations."}</p></div>{!data.readOnly && <button className="primary-button" onClick={() => setInviteOpen(true)}><MailPlus size={18} /> Invite staff</button>}</section>
     <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Tenant role boundary active</strong><small>Managers can administer operational staff only; all sensitive updates require an audit reason.</small></span></div>
     {data.loading && <div className="table-state"><RefreshCw className="spin" size={20} /> Loading tenant team…</div>}
     {data.error && <div className="table-state error" role="alert"><strong>Team data could not be loaded</strong><span>{data.error}</span><button className="secondary-button" onClick={data.onReload}>Try again</button></div>}
