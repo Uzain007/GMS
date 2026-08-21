@@ -82,13 +82,17 @@ export type NewMember = {
   phone?: string;
   status?: MemberRecord["status"];
 };
+export type UpdateMember = { first_name: string; last_name: string; email?: string | null; phone?: string | null; status: MemberRecord["status"]; reason: string };
 
 export type BranchRecord = { id: string; gym_id: string; name: string; code: string; email: string | null; phone: string | null; timezone: string; status: "active" | "inactive"; is_primary: boolean; created_at: string | null };
 export type NewBranch = { name: string; code: string; email?: string; phone?: string; is_primary?: boolean };
+export type UpdateBranch = { name: string; code: string; email?: string | null; phone?: string | null; status: BranchRecord["status"]; is_primary: boolean; reason: string };
 export type MembershipPlanRecord = { id: string; gym_id: string; branch_id: string | null; name: string; code: string; billing_interval: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor: number; status: "active" | "inactive"; created_at: string | null };
 export type NewMembershipPlan = { name: string; code: string; branch_id?: string; billing_interval: MembershipPlanRecord["billing_interval"]; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; status?: "active" };
+export type UpdateMembershipPlan = { name: string; code: string; branch_id?: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; status: MembershipPlanRecord["status"]; reason: string };
 export type MembershipRecord = { id: string; gym_id: string; member_id: string; plan_id: string; branch_id: string | null; status: "pending" | "active" | "paused" | "cancelled" | "expired"; starts_at: string; ends_at?: string | null; next_billing_at: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; billing_interval?: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count?: number; auto_renew: boolean; plan?: { id: string; name: string; code: string }; branch?: { id: string; name: string } | null; created_at: string | null };
 export type NewMembership = { member_id: string; plan_id: string; branch_id?: string; starts_at: string; status?: "pending" | "active"; auto_renew?: boolean };
+export type UpdateMembership = { status: MembershipRecord["status"]; ends_at?: string | null; next_billing_at?: string | null; auto_renew: boolean; cancellation_reason?: string | null; reason: string };
 export type UpdateMemberSelf = { first_name?: string; last_name?: string; email?: string | null; phone?: string | null; date_of_birth?: string | null };
 export type StaffRole = "gym_owner" | "gym_manager" | "receptionist" | "trainer";
 export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive"; hired_at: string | null; terminated_at: string | null; created_at: string | null };
@@ -369,6 +373,10 @@ export class IronCoreApi {
     )).data;
   }
 
+  updateMember(gymId: string, memberId: string, input: UpdateMember): Promise<MemberRecord> {
+    return this.updateTenantRecord<MemberRecord>(gymId, "members", memberId, input);
+  }
+
   async createMemberAccountInvitation(gymId: string, memberId: string): Promise<CreatedMemberAccountInvitation> {
     await this.csrf();
     const response = await this.request<{ data: MemberAccountInvitationRecord; meta: { activation_token: string } }>(
@@ -414,10 +422,13 @@ export class IronCoreApi {
 
   branches(gymId: string) { return this.tenantCollection<BranchRecord>(gymId, "branches"); }
   createBranch(gymId: string, input: NewBranch) { return this.createTenantRecord<BranchRecord>(gymId, "branches", input); }
+  updateBranch(gymId: string, branchId: string, input: UpdateBranch) { return this.updateTenantRecord<BranchRecord>(gymId, "branches", branchId, input); }
   membershipPlans(gymId: string) { return this.tenantCollection<MembershipPlanRecord>(gymId, "membership-plans"); }
   createMembershipPlan(gymId: string, input: NewMembershipPlan) { return this.createTenantRecord<MembershipPlanRecord>(gymId, "membership-plans", input); }
+  updateMembershipPlan(gymId: string, planId: string, input: UpdateMembershipPlan) { return this.updateTenantRecord<MembershipPlanRecord>(gymId, "membership-plans", planId, input); }
   memberships(gymId: string) { return this.tenantCollection<MembershipRecord>(gymId, "memberships"); }
   createMembership(gymId: string, input: NewMembership) { return this.createTenantRecord<MembershipRecord>(gymId, "memberships", input); }
+  updateMembership(gymId: string, membershipId: string, input: UpdateMembership) { return this.updateTenantRecord<MembershipRecord>(gymId, "memberships", membershipId, input); }
   staff(gymId: string) { return this.tenantCollection<StaffRecord>(gymId, "staff"); }
   staffInvitations(gymId: string) { return this.tenantCollection<StaffInvitationRecord>(gymId, "staff-invitations"); }
   updateStaff(gymId: string, staffId: string, input: UpdateStaff) { return this.updateTenantRecord<StaffRecord>(gymId, "staff", staffId, input); }

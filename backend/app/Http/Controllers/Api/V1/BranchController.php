@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\BranchStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreBranchRequest;
 use App\Http\Requests\UpdateBranchRequest;
@@ -28,6 +29,9 @@ class BranchController extends Controller
     {
         $branch = DB::transaction(function () use ($request, $audit): GymBranch {
             $data = $request->validated();
+            // Set the application default explicitly so the just-created model
+            // and its tenant-safe response agree with PostgreSQL immediately.
+            $data['status'] ??= BranchStatus::Active->value;
             if ($data['is_primary'] ?? false) {
                 GymBranch::query()->update(['is_primary' => false]);
             }

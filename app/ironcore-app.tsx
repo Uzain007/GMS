@@ -56,6 +56,7 @@ import {
   type MemberAccountActivationPreview,
   type MfaChallenge,
   type NewGym,
+  type UpdateMember,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -94,9 +95,9 @@ const demoOperations: OperationData = {
     { id: "demo-plan-3", branchId: null, name: "Day Pass", code: "DAY-PASS", interval: "one_time", intervalCount: 1, priceMinor: 1500, currency: "GBP", status: "active" },
   ],
   memberships: [
-    { id: "demo-membership-1", memberId: "demo-1", planId: "demo-plan-1", status: "active", startsAt: "2026-08-01", nextBillingAt: "2026-09-01", priceMinor: 8900, currency: "GBP" },
-    { id: "demo-membership-2", memberId: "demo-2", planId: "demo-plan-2", status: "active", startsAt: "2026-07-12", nextBillingAt: "2026-08-12", priceMinor: 5900, currency: "GBP" },
-    { id: "demo-membership-3", memberId: "demo-3", planId: "demo-plan-1", status: "paused", startsAt: "2026-06-20", nextBillingAt: null, priceMinor: 8900, currency: "GBP" },
+    { id: "demo-membership-1", memberId: "demo-1", planId: "demo-plan-1", status: "active", startsAt: "2026-08-01", endsAt: null, nextBillingAt: "2026-09-01", priceMinor: 8900, currency: "GBP", autoRenew: true },
+    { id: "demo-membership-2", memberId: "demo-2", planId: "demo-plan-2", status: "active", startsAt: "2026-07-12", endsAt: null, nextBillingAt: "2026-08-12", priceMinor: 5900, currency: "GBP", autoRenew: true },
+    { id: "demo-membership-3", memberId: "demo-3", planId: "demo-plan-1", status: "paused", startsAt: "2026-06-20", endsAt: null, nextBillingAt: null, priceMinor: 8900, currency: "GBP", autoRenew: false },
   ],
   members: [
     { id: "demo-1", name: "Amelia Hart" },
@@ -111,8 +112,11 @@ const demoOperations: OperationData = {
   preview: true,
   onReload: () => undefined,
   onCreateBranch: async () => undefined,
+  onUpdateBranch: async () => undefined,
   onCreatePlan: async () => undefined,
+  onUpdatePlan: async () => undefined,
   onCreateMembership: async () => undefined,
+  onUpdateMembership: async () => undefined,
 };
 const demoMembers: DashboardMember[] = [
   { id: "demo-1", name: "Amelia Hart", gym: "Forge Fitness", membership: "MBR-1042", joined: "04 Aug 2026", status: "Active", email: "amelia@example.com", accountLinked: false },
@@ -167,6 +171,7 @@ const demoSaasBilling: SaasBillingData = {
 };
 const demoEngagement: EngagementData = {
   readOnly: true,
+  timezone: "Europe/London",
   attendance: [
     { id: "attendance-1", gym_id: "demo-gym", member_id: "demo-1", membership_id: "demo-membership-1", branch_id: "demo-branch-1", member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, method: "qr", status: "checked_in", checked_in_at: "2026-08-07T13:42:00Z", checked_out_at: null },
     { id: "attendance-2", gym_id: "demo-gym", member_id: "demo-2", membership_id: "demo-membership-2", branch_id: "demo-branch-1", member: { id: "demo-2", member_number: "MBR-1187", name: "Hassan Malik" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, method: "member_code", status: "checked_out", checked_in_at: "2026-08-07T10:08:00Z", checked_out_at: "2026-08-07T11:34:00Z" },
@@ -189,6 +194,7 @@ const demoEngagement: EngagementData = {
 };
 const demoCoaching: CoachingData = {
   readOnly: true,
+  timezone: "Europe/London",
   assignments: [{ id: "assign-1", gym_id: "demo-gym", trainer_staff_profile_id: "demo-staff-2", member_id: "demo-1", trainer: { id: "demo-staff-2", name: "Daniel Reed" }, member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, status: "active", starts_on: "2026-08-01", ends_on: null, notes: "Strength coaching", created_at: "2026-08-01T09:00:00Z" }],
   plans: [{ id: "workout-plan-1", gym_id: "demo-gym", member_id: "demo-1", trainer_staff_profile_id: "demo-staff-2", member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, trainer: { id: "demo-staff-2", name: "Daniel Reed" }, title: "12-week strength foundation", goal: "Build confident compound movement and consistent weekly training.", notes: null, starts_on: "2026-08-01", ends_on: "2026-10-24", status: "active", exercises: [{ id: "exercise-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Back squat", instructions: "Controlled three-second descent with a stable brace.", day_number: 1, sort_order: 1, target_sets: 4, target_reps_min: 6, target_reps_max: 8, target_load_grams: 55000, target_duration_seconds: null, rest_seconds: 120 }, { id: "exercise-2", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Romanian deadlift", instructions: "Maintain a neutral spine and controlled hip hinge.", day_number: 1, sort_order: 2, target_sets: 3, target_reps_min: 8, target_reps_max: 10, target_load_grams: 45000, target_duration_seconds: null, rest_seconds: 90 }], created_at: "2026-08-01T10:00:00Z" }],
   sessions: [{ id: "workout-session-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", member_id: "demo-1", plan: { id: "workout-plan-1", title: "12-week strength foundation" }, member: { id: "demo-1", member_number: "MBR-1042", name: "Amelia Hart" }, performed_at: "2026-08-06T17:30:00Z", duration_seconds: 3120, notes: "Strong technique throughout.", sets: [{ id: "set-1", gym_id: "demo-gym", workout_plan_exercise_id: "exercise-1", exercise_name: "Back squat", set_number: 1, reps: 8, load_grams: 52500, duration_seconds: null, distance_metres: null, rpe: 7 }], created_at: "2026-08-06T18:22:00Z" }],
@@ -284,7 +290,11 @@ function dashboardMember(member: MemberRecord, gymName: string): DashboardMember
       ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(member.joined_at))
       : "Not set",
     status: member.status[0].toUpperCase() + member.status.slice(1),
+    statusValue: member.status,
+    firstName: member.first_name,
+    lastName: member.last_name,
     email: member.email,
+    phone: member.phone,
     accountLinked: member.user_id !== null,
   };
 }
@@ -860,6 +870,12 @@ export function IronCoreApp() {
     const refreshed = await api.members(selectedGym.id, memberSearch);
     setMembers({ rows: refreshed.data.map((member) => dashboardMember(member, selectedGym.name)), total: refreshed.meta.total, loading: false, error: null });
   }
+  async function updateMember(memberId: string, input: UpdateMember): Promise<void> {
+    if (!api || !selectedGym) throw new Error("Select a gym before updating a member.");
+    await api.updateMember(selectedGym.id, memberId, input);
+    const refreshed = await api.members(selectedGym.id, memberSearch);
+    setMembers({ rows: refreshed.data.map((member) => dashboardMember(member, selectedGym.name)), total: refreshed.meta.total, loading: false, error: null });
+  }
   async function inviteMemberPortal(memberId: string): Promise<string> {
     if (!api || !selectedGym) throw new Error("Select a gym before creating a member invitation.");
     const created = await api.createMemberAccountInvitation(selectedGym.id, memberId);
@@ -867,8 +883,11 @@ export function IronCoreApp() {
   }
 
   async function createBranch(input: NewOperationBranch) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createBranch(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
+  async function updateBranch(id: string, input: Parameters<IronCoreApi["updateBranch"]>[2]) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateBranch(selectedGym.id, id, input); setOperationsRefresh((v) => v + 1); }
   async function createPlan(input: NewOperationPlan) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createMembershipPlan(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
+  async function updatePlan(id: string, input: Parameters<IronCoreApi["updateMembershipPlan"]>[2]) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateMembershipPlan(selectedGym.id, id, input); setOperationsRefresh((v) => v + 1); }
   async function createMembership(input: NewOperationMembership) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createMembership(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
+  async function updateMembership(id: string, input: Parameters<IronCoreApi["updateMembership"]>[2]) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateMembership(selectedGym.id, id, input); setOperationsRefresh((v) => v + 1); }
   async function inviteStaff(input: NewStaffInvite): Promise<string> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     const created = await api.createStaffInvitation(selectedGym.id, input);
@@ -1114,10 +1133,10 @@ export function IronCoreApp() {
   const liveOperations: OperationData = {
     branches: operations.branches.map((v) => ({ id: v.id, name: v.name, code: v.code, email: v.email, phone: v.phone, status: v.status, isPrimary: v.is_primary })),
     plans: operations.plans.map((v) => ({ id: v.id, branchId: v.branch_id, name: v.name, code: v.code, interval: v.billing_interval, intervalCount: v.interval_count, priceMinor: v.price_amount_minor, currency: v.currency, status: v.status })),
-    memberships: operations.memberships.map((v) => ({ id: v.id, memberId: v.member_id, planId: v.plan_id, status: v.status, startsAt: v.starts_at, nextBillingAt: v.next_billing_at, priceMinor: v.price_amount_minor, currency: v.currency })),
+    memberships: operations.memberships.map((v) => ({ id: v.id, memberId: v.member_id, planId: v.plan_id, status: v.status, startsAt: v.starts_at, endsAt: v.ends_at ?? null, nextBillingAt: v.next_billing_at, priceMinor: v.price_amount_minor, currency: v.currency, autoRenew: v.auto_renew })),
     members: members.rows.map((v) => ({ id: v.id, name: v.name })), loading: operations.loading, error: operations.error,
     baseCurrency: selectedGym.base_currency, canManageSetup: setupRoles.includes(selectedGym.role), canManageMemberships: membershipRoles.includes(selectedGym.role),
-    onReload: () => setOperationsRefresh((v) => v + 1), onCreateBranch: createBranch, onCreatePlan: createPlan, onCreateMembership: createMembership,
+    onReload: () => setOperationsRefresh((v) => v + 1), onCreateBranch: createBranch, onUpdateBranch: updateBranch, onCreatePlan: createPlan, onUpdatePlan: updatePlan, onCreateMembership: createMembership, onUpdateMembership: updateMembership,
   };
   const liveStaff: StaffData = {
     rows: staff.rows.map((row) => ({ id: row.id, name: row.user.name, email: row.user.email, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, hiredAt: row.hired_at })),
@@ -1157,6 +1176,7 @@ export function IronCoreApp() {
     members: members.rows.map((row) => ({ id: row.id, name: row.name, number: row.membership })),
     branches: operations.branches.map((row) => ({ id: row.id, name: row.name })),
     trainers: staff.rows.filter((row) => row.role === "trainer" && row.status === "active").map((row) => ({ id: row.id, name: row.user.name })),
+    timezone: selectedGym.timezone,
     actorRole: selectedGym.role,
     loading: engagement.loading,
     error: engagement.error,
@@ -1188,6 +1208,7 @@ export function IronCoreApp() {
     if (row.trainer) coachingTrainers.set(row.trainer.id, { id: row.trainer.id, name: row.trainer.name ?? "Assigned trainer" });
   });
   const liveCoaching: CoachingData = {
+    timezone: selectedGym.timezone,
     assignments: coaching.assignments,
     plans: coaching.plans,
     sessions: coaching.sessions,
@@ -1227,7 +1248,7 @@ export function IronCoreApp() {
     onLogout={logout}
     onChangePassword={changePassword}
     mfa={mfaActions}
-    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onInvitePortal: inviteMemberPortal } : undefined}
+    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onInvitePortal: inviteMemberPortal, onUpdate: updateMember } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}
     liveFinance={canManageMembers ? liveFinance : undefined}

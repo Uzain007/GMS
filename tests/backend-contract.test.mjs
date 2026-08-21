@@ -261,6 +261,11 @@ test("check-ins hash QR secrets and class bookings lock capacity with FIFO promo
   assert.match(routes, /class-bookings\/\{booking\}\/attend/);
 });
 
+test("PostgreSQL sessions are pinned to UTC for timezone-aware records", async () => {
+  const database = await read("config/database.php");
+  assert.match(database, /'timezone' => env\('DB_TIMEZONE', '\+00:00'\)/);
+});
+
 test("training, progress and notification tables preserve tenant integrity and exact scale fields", async () => {
   const schema = await read("database/migrations/2026_08_07_000015_create_training_progress_notification_tables.php");
   const rls = await read("database/migrations/2026_08_07_000016_enable_training_progress_notification_rls.php");

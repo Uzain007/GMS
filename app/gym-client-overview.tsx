@@ -6,11 +6,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { View } from "./ironcore-dashboard";
+import { formatGymDateTime } from "./lib/gym-time";
 
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 
 export type GymOverviewData = {
   gymName: string;
+  timezone: string;
   actorRole: string;
   memberTotal: number;
   activeMembers: number | null;
@@ -53,12 +55,8 @@ const money = (minor: number, currency: Currency) => new Intl.NumberFormat("en-G
   style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 2,
 }).format(minor / 100);
 
-const shownDateTime = (value: string) => new Intl.DateTimeFormat("en-GB", {
-  weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-}).format(new Date(value));
-
-const shownDate = (value: string | null) => value ? new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit", month: "short", year: "numeric",
+const shownDate = (value: string | null, timeZone: string) => value ? new Intl.DateTimeFormat("en-GB", {
+  timeZone, day: "2-digit", month: "short", year: "numeric",
 }).format(new Date(value)) : "Not scheduled";
 
 const readable = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -101,19 +99,19 @@ export function GymClientOverview({ data, availableViews, onView }: Props) {
 
       <article className="panel gym-classes-panel">
         <div className="gym-panel-title"><div><p className="eyebrow">Schedule</p><h3>Upcoming classes</h3></div>{canOpen("attendance") && <button onClick={() => onView("attendance")}>View schedule</button>}</div>
-        <div className="gym-class-list">{data.upcomingClasses.length > 0 ? data.upcomingClasses.slice(0, 3).map((session) => <div key={session.id}><span className="gym-class-date"><CalendarDays size={16} /></span><span><strong>{session.title}</strong><small>{session.branch} · {shownDateTime(session.startsAt)}</small></span><span className="gym-capacity"><b>{session.booked}/{session.capacity}</b><small>booked</small></span></div>) : <div className="gym-inline-empty"><CalendarDays size={20} /><span><strong>No upcoming classes</strong><small>New scheduled sessions will appear here.</small></span></div>}</div>
+        <div className="gym-class-list">{data.upcomingClasses.length > 0 ? data.upcomingClasses.slice(0, 3).map((session) => <div key={session.id}><span className="gym-class-date"><CalendarDays size={16} /></span><span><strong>{session.title}</strong><small>{session.branch} · {formatGymDateTime(session.startsAt, data.timezone)}</small></span><span className="gym-capacity"><b>{session.booked}/{session.capacity}</b><small>booked</small></span></div>) : <div className="gym-inline-empty"><CalendarDays size={20} /><span><strong>No upcoming classes</strong><small>New scheduled sessions will appear here.</small></span></div>}</div>
       </article>
     </div>
 
     <div className="gym-overview-grid lower">
       <article className="panel gym-payments-panel">
         <div className="gym-panel-title"><div><p className="eyebrow">Collections</p><h3>Recent payments</h3></div>{canOpen("payments") && <button onClick={() => onView("payments")}>Open ledger</button>}</div>
-        <div className="gym-payment-list">{data.recentPayments.length > 0 ? data.recentPayments.slice(0, 4).map((payment) => <div key={payment.id}><span className="gym-payment-icon"><CreditCard size={16} /></span><span><strong>{payment.member}</strong><small>{readable(payment.method)} · {payment.paidAt ? shownDate(payment.paidAt) : "Pending"}</small></span><span><b>{money(payment.amountMinor, data.currency)}</b><small className={`gym-payment-status ${payment.status}`}>{readable(payment.status)}</small></span></div>) : <div className="gym-inline-empty"><WalletCards size={20} /><span><strong>No recent payments</strong><small>New collections will appear here.</small></span></div>}</div>
+        <div className="gym-payment-list">{data.recentPayments.length > 0 ? data.recentPayments.slice(0, 4).map((payment) => <div key={payment.id}><span className="gym-payment-icon"><CreditCard size={16} /></span><span><strong>{payment.member}</strong><small>{readable(payment.method)} · {payment.paidAt ? shownDate(payment.paidAt, data.timezone) : "Pending"}</small></span><span><b>{money(payment.amountMinor, data.currency)}</b><small className={`gym-payment-status ${payment.status}`}>{readable(payment.status)}</small></span></div>) : <div className="gym-inline-empty"><WalletCards size={20} /><span><strong>No recent payments</strong><small>New collections will appear here.</small></span></div>}</div>
       </article>
 
       <aside className="gym-side-stack">
         <article className="panel gym-health-card"><div className="gym-panel-title"><div><p className="eyebrow">Operations</p><h3>Today at a glance</h3></div><CheckCircle2 size={18} /></div><dl><div><dt><Building2 size={15} /> Loaded branches</dt><dd>{data.branchCount}</dd></div><div><dt><UsersRound size={15} /> Loaded active team</dt><dd>{data.activeStaff}</dd></div><div><dt><CalendarDays size={15} /> Scheduled classes</dt><dd>{data.upcomingClasses.length}</dd></div></dl></article>
-        <article className="panel gym-plan-card"><span><Sparkles size={17} /></span><div><small>IronCore subscription</small><strong>{data.subscription?.planName ?? "No active plan"}</strong><p>{data.subscription ? `${readable(data.subscription.status)} · renews ${shownDate(data.subscription.renewsAt)}` : "Ask the gym owner to review billing."}</p></div>{canOpen("billing") && <button onClick={() => onView("billing")} aria-label="Open SaaS billing"><ArrowUpRight size={16} /></button>}</article>
+        <article className="panel gym-plan-card"><span><Sparkles size={17} /></span><div><small>IronCore subscription</small><strong>{data.subscription?.planName ?? "No active plan"}</strong><p>{data.subscription ? `${readable(data.subscription.status)} · renews ${shownDate(data.subscription.renewsAt, data.timezone)}` : "Ask the gym owner to review billing."}</p></div>{canOpen("billing") && <button onClick={() => onView("billing")} aria-label="Open SaaS billing"><ArrowUpRight size={16} /></button>}</article>
       </aside>
     </div>
   </section>;

@@ -12,11 +12,13 @@ import type {
   ProgressMeasurementRecord, TrainerAssignmentRecord, UpdateNotificationPreference,
   WorkoutPlanRecord, WorkoutSessionRecord,
 } from "./lib/ironcore-api";
+import { zonedLocalDateTimeToIso } from "./lib/gym-time";
 
 type PersonOption = { id: string; name: string; number?: string };
 
 export type CoachingData = {
   readOnly?: boolean;
+  timezone: string;
   assignments: TrainerAssignmentRecord[];
   plans: WorkoutPlanRecord[];
   sessions: WorkoutSessionRecord[];
@@ -122,7 +124,7 @@ export function CoachingManagement({ data }: { data: CoachingData }) {
     await act(async () => {
       await data.onLogSession({
         workout_plan_id: logPlan.id, member_id: canRecordOthers ? logPlan.member_id : undefined,
-        performed_at: new Date(String(form.get("performed_at"))).toISOString(), duration_seconds: Number(form.get("duration_minutes")) * 60,
+        performed_at: zonedLocalDateTimeToIso(String(form.get("performed_at")), data.timezone), duration_seconds: Number(form.get("duration_minutes")) * 60,
         notes: String(form.get("notes")) || undefined,
         sets: [{ workout_plan_exercise_id: logPlan.exercises[0].id, set_number: 1, reps: Number(form.get("reps")), load_grams: loadKg > 0 ? Math.round(loadKg * 1000) : undefined, rpe: Number(form.get("rpe")) }],
       });

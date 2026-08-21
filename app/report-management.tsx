@@ -118,6 +118,7 @@ export function ReportManagement({ data }: { data: ReportData }) {
   const [draftTo, setDraftTo] = useState(data.to);
   const [draftCurrency, setDraftCurrency] = useState<Currency>(data.currency);
   const report = data.report;
+  const rangeError = draftFrom && draftTo && draftFrom > draftTo ? "The From date must be before or the same as the To date." : null;
   const totalStatuses = useMemo(() => report?.member_status.reduce((sum, row) => sum + row.count, 0) ?? 0, [report]);
 
   function apply(event: FormEvent<HTMLFormElement>) {
@@ -128,10 +129,11 @@ export function ReportManagement({ data }: { data: ReportData }) {
   return <section className="report-workspace">
     <div className="module-heading report-heading"><div><p className="eyebrow">Business intelligence</p><h2>Operational reports</h2><p>Revenue, member growth, attendance and class performance for this gym only.</p></div>
       <form className="report-filters" onSubmit={apply}>
-        <label>From<input type="date" value={draftFrom} max={draftTo} onChange={(event) => setDraftFrom(event.target.value)} required /></label>
-        <label>To<input type="date" value={draftTo} min={draftFrom} onChange={(event) => setDraftTo(event.target.value)} required /></label>
+        <label>From<input type="date" value={draftFrom} max={draftTo} aria-invalid={Boolean(rangeError)} onInput={(event) => setDraftFrom(event.currentTarget.value)} required /></label>
+        <label>To<input type="date" value={draftTo} min={draftFrom} aria-invalid={Boolean(rangeError)} onInput={(event) => setDraftTo(event.currentTarget.value)} required /></label>
         <label>Currency<select value={draftCurrency} onChange={(event) => setDraftCurrency(event.target.value as Currency)}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label>
-        <button className="primary-button" disabled={data.loading} type="submit"><CalendarRange size={16} /> Apply</button>
+        <button className="primary-button" disabled={data.loading || Boolean(rangeError)} type="submit"><CalendarRange size={16} /> Apply</button>
+        {rangeError && <span className="form-error" role="alert">{rangeError}</span>}
       </form>
     </div>
 

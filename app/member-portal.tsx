@@ -42,6 +42,7 @@ import type {
   WorkoutSessionRecord,
 } from "./lib/ironcore-api";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
+import { formatGymDateTime, formatGymDay, formatGymMonth } from "./lib/gym-time";
 
 type MemberView = "home" | "pass" | "classes" | "training" | "progress" | "account";
 
@@ -98,9 +99,9 @@ function shortDate(value: string | null | undefined): string {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
 }
 
-function dateTime(value: string | null | undefined): string {
+function dateTime(value: string | null | undefined, timeZone: string): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatGymDateTime(value, timeZone);
 }
 
 function money(amountMinor: number, currency: GymSummary["base_currency"]): string {
@@ -151,10 +152,10 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
   const lastVisit = data.attendance[0] ?? null;
   const latestMeasurement = data.measurements[0] ?? null;
 
-  async function act(key: string, success: string, task: () => Promise<void>) {
+  async function act(key: string, success: string, task: () => Promise<void>): Promise<boolean> {
     setBusy(key); setNotice(null); setActionError(null);
-    try { await task(); setNotice(success); }
-    catch (error) { setActionError(error instanceof Error ? error.message : "That action could not be completed."); }
+    try { await task(); setNotice(success); return true; }
+    catch (error) { setActionError(error instanceof Error ? error.message : "That action could not be completed."); return false; }
     finally { setBusy(null); }
   }
 
@@ -184,29 +185,31 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
 
   async function submitProgress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const value = Number(form.get("value"));
-    await act("progress", "Progress recorded.", async () => actions.onRecordProgress({
+    const saved = await act("progress", "Progress recorded.", async () => actions.onRecordProgress({
       metric: String(form.get("metric")) as NewProgressMeasurement["metric"],
       value_milli: Math.round(value * 1000),
       unit: String(form.get("unit")) as NewProgressMeasurement["unit"],
       measured_at: new Date().toISOString(),
       note: String(form.get("note") ?? "") || undefined,
     }));
-    event.currentTarget.reset();
+    if (saved) formElement.reset();
   }
 
   async function submitWorkout(event: FormEvent<HTMLFormElement>, plan: WorkoutPlanRecord) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    await act("workout", "Workout logged.", async () => actions.onLogWorkout({
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const saved = await act("workout", "Workout logged.", async () => actions.onLogWorkout({
       workout_plan_id: plan.id,
       performed_at: new Date().toISOString(),
       duration_seconds: Number(form.get("minutes")) * 60,
       notes: String(form.get("notes") ?? "") || undefined,
       sets: plan.exercises.map((exercise) => ({ workout_plan_exercise_id: exercise.id, set_number: 1, reps: exercise.target_reps_min ?? undefined })),
     }));
-    event.currentTarget.reset();
+    if (saved) formElement.reset();
   }
 
   function updatePreference(event: ChangeEvent<HTMLInputElement>) {
@@ -228,16 +231,16 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
           <section className="member-hero"><div><span className="member-kicker">Welcome back</span><h2>{data.profile?.first_name ?? "Member"}, you’re all set.</h2><p>Your membership, classes and training plan are together in one private space.</p><div><button className="member-primary" onClick={() => navigate("pass")}><QrCode size={18} /> Open gym pass</button><button className="member-secondary" onClick={() => navigate("classes")}><CalendarDays size={18} /> Find a class</button></div></div><Dumbbell size={94} /></section>
           <section className="member-stat-grid">
             <article><TicketCheck /><span><small>Membership</small><strong>{data.membership?.plan?.name ?? "No active plan"}</strong><em className={data.membership?.status === "active" ? "good" : ""}>{data.membership?.status ?? "unavailable"}</em></span></article>
-            <article><CalendarDays /><span><small>Next class</small><strong>{nextClass?.title ?? "Nothing booked"}</strong><em>{nextClass ? dateTime(nextClass.starts_at) : "Browse the schedule"}</em></span></article>
+            <article><CalendarDays /><span><small>Next class</small><strong>{nextClass?.title ?? "Nothing booked"}</strong><em>{nextClass ? dateTime(nextClass.starts_at, data.gym.timezone) : "Browse the schedule"}</em></span></article>
             <article><ShieldCheck /><span><small>Last visit</small><strong>{lastVisit ? shortDate(lastVisit.checked_in_at) : "No visits yet"}</strong><em>{lastVisit?.branch?.name ?? data.gym.name}</em></span></article>
             <article><ChartNoAxesCombined /><span><small>Latest progress</small><strong>{latestMeasurement ? `${latestMeasurement.value_milli / 1000} ${latestMeasurement.unit}` : "Start tracking"}</strong><em>{latestMeasurement ? shortDate(latestMeasurement.measured_at) : "Record a measurement"}</em></span></article>
           </section>
-          <section className="member-two-col"><article className="member-card"><div className="member-card-title"><div><small>Up next</small><h3>Your schedule</h3></div><CalendarDays /></div>{nextClass ? <div className="member-feature-row"><span className="member-date-tile"><b>{new Date(nextClass.starts_at).getDate()}</b><small>{new Date(nextClass.starts_at).toLocaleString("en-GB", { month: "short" })}</small></span><div><strong>{nextClass.title}</strong><small>{dateTime(nextClass.starts_at)} · {nextClass.branch?.name ?? "Main gym"}</small></div><button onClick={() => navigate("classes")}>View</button></div> : <Empty icon={CalendarDays} title="Your schedule is clear" copy="Browse classes and reserve a place." />}</article><article className="member-card"><div className="member-card-title"><div><small>Plan</small><h3>Training focus</h3></div><Dumbbell /></div>{activePlan ? <><h4>{activePlan.title}</h4><p>{activePlan.goal ?? "Your coach has prepared this programme for you."}</p><button className="member-text-button" onClick={() => navigate("training")}>View {activePlan.exercises.length} exercises</button></> : <Empty icon={Dumbbell} title="No training plan yet" copy="Your assigned coach can publish one here." />}</article></section>
+          <section className="member-two-col"><article className="member-card"><div className="member-card-title"><div><small>Up next</small><h3>Your schedule</h3></div><CalendarDays /></div>{nextClass ? <div className="member-feature-row"><span className="member-date-tile"><b>{formatGymDay(nextClass.starts_at, data.gym.timezone)}</b><small>{formatGymMonth(nextClass.starts_at, data.gym.timezone)}</small></span><div><strong>{nextClass.title}</strong><small>{dateTime(nextClass.starts_at, data.gym.timezone)} · {nextClass.branch?.name ?? "Main gym"}</small></div><button onClick={() => navigate("classes")}>View</button></div> : <Empty icon={CalendarDays} title="Your schedule is clear" copy="Browse classes and reserve a place." />}</article><article className="member-card"><div className="member-card-title"><div><small>Plan</small><h3>Training focus</h3></div><Dumbbell /></div>{activePlan ? <><h4>{activePlan.title}</h4><p>{activePlan.goal ?? "Your coach has prepared this programme for you."}</p><button className="member-text-button" onClick={() => navigate("training")}>View {activePlan.exercises.length} exercises</button></> : <Empty icon={Dumbbell} title="No training plan yet" copy="Your assigned coach can publish one here." />}</article></section>
         </>}
 
         {view === "pass" && <section className="member-pass-layout"><article className="member-pass-card"><div className="member-pass-head"><Brand /><span className={data.membership?.status === "active" ? "active" : ""}>{data.membership?.status ?? "Member"}</span></div><div className="member-pass-person"><span>{initials(data.profile)}</span><div><small>Member</small><h2>{data.profile?.first_name} {data.profile?.last_name}</h2><p>{data.profile?.member_number}</p></div></div><div className="member-qr-zone">{qrPlaintext ? <><canvas ref={qrCanvas} aria-label="One-time gym access QR code" /><strong>Save this pass now</strong><small>Shown once. It will disappear when you leave or reload.</small></> : <><QrCode size={62} /><strong>{data.credential ? `Active pass ••••${data.credential.credential_hint}` : "Create your gym pass"}</strong><small>Only a tenant-scoped SHA-256 digest is stored.</small></>}{!actions.readOnly && <button className="member-primary" disabled={busy === "pass"} onClick={() => void rotatePass()}><RefreshCw size={17} /> {data.credential ? "Replace pass" : "Create pass"}</button>}</div><div className="member-pass-foot"><span><ShieldCheck size={16} /> {data.gym.name}</span><span>Valid membership required</span></div></article><aside className="member-card member-pass-help"><small>How it works</small><h3>Private by design</h3><ol><li><span>1</span><div><strong>Create a pass</strong><small>The full code is returned once.</small></div></li><li><span>2</span><div><strong>Save it now</strong><small>Take a screenshot or add it to your wallet.</small></div></li><li><span>3</span><div><strong>Scan at reception</strong><small>Your gym verifies it within this tenant.</small></div></li></ol></aside></section>}
 
-        {view === "classes" && <section className="member-card-grid">{data.classes.map((session) => { const booking = bookingBySession.get(session.id); const full = session.booked_count >= session.capacity; return <article className="member-class-card" key={session.id}><div className="member-class-art"><CalendarDays size={32} /><span>{session.branch?.name ?? "Main gym"}</span></div><div className="member-class-body"><small>{dateTime(session.starts_at)}</small><h3>{session.title}</h3><p>{session.description ?? "Instructor-led session at your gym."}</p><div><span><UserRound size={14} /> {session.trainer?.name ?? "Gym team"}</span><span>{session.booked_count}/{session.capacity} places</span></div>{!actions.readOnly && (booking ? <button className="member-secondary" disabled={busy === booking.id} onClick={() => void act(booking.id, "Booking cancelled.", () => actions.onCancelBooking(booking.id, "Cancelled by member"))}>{booking.status === "waitlisted" ? "Leave waitlist" : "Cancel booking"}</button> : <button className="member-primary" disabled={busy === session.id || session.status !== "scheduled"} onClick={() => void act(session.id, full ? "You joined the waitlist." : "Class booked.", () => actions.onBookClass(session.id))}>{full && session.waitlist_enabled ? "Join waitlist" : "Book class"}</button>)}</div></article>; })}{data.classes.length === 0 && <Empty icon={CalendarDays} title="No classes available" copy="Your gym has not published an upcoming schedule." />}</section>}
+        {view === "classes" && <section className="member-card-grid">{data.classes.map((session) => { const booking = bookingBySession.get(session.id); const full = session.booked_count >= session.capacity; return <article className="member-class-card" key={session.id}><div className="member-class-art"><CalendarDays size={32} /><span>{session.branch?.name ?? "Main gym"}</span></div><div className="member-class-body"><small>{dateTime(session.starts_at, data.gym.timezone)}</small><h3>{session.title}</h3><p>{session.description ?? "Instructor-led session at your gym."}</p><div><span><UserRound size={14} /> {session.trainer?.name ?? "Gym team"}</span><span>{session.booked_count}/{session.capacity} places</span></div>{!actions.readOnly && (booking ? <button className="member-secondary" disabled={busy === booking.id} onClick={() => void act(booking.id, "Booking cancelled.", () => actions.onCancelBooking(booking.id, "Cancelled by member"))}>{booking.status === "waitlisted" ? "Leave waitlist" : "Cancel booking"}</button> : <button className="member-primary" disabled={busy === session.id || session.status !== "scheduled"} onClick={() => void act(session.id, full ? "You joined the waitlist." : "Class booked.", () => actions.onBookClass(session.id))}>{full && session.waitlist_enabled ? "Join waitlist" : "Book class"}</button>)}</div></article>; })}{data.classes.length === 0 && <Empty icon={CalendarDays} title="No classes available" copy="Your gym has not published an upcoming schedule." />}</section>}
 
         {view === "training" && <section className="member-training-layout">{data.workoutPlans.map((plan) => <article className="member-card member-plan" key={plan.id}><div className="member-card-title"><div><small>{plan.status} plan</small><h3>{plan.title}</h3></div><Dumbbell /></div><p>{plan.goal ?? "A programme prepared by your coach."}</p><div className="member-exercises">{plan.exercises.map((exercise, index) => <div key={exercise.id}><span>{index + 1}</span><div><strong>{exercise.name}</strong><small>{exercise.target_sets ?? "—"} sets · {exercise.target_reps_min ?? "—"}{exercise.target_reps_max ? `–${exercise.target_reps_max}` : ""} reps</small></div></div>)}</div>{!actions.readOnly && <form onSubmit={(event) => void submitWorkout(event, plan)}><label>Minutes<input name="minutes" type="number" min="1" max="600" required placeholder="45" /></label><label>Session notes<input name="notes" placeholder="Felt strong today" /></label><button className="member-primary" disabled={busy === "workout"}>Log workout</button></form>}</article>)}{data.workoutPlans.length === 0 && <Empty icon={Dumbbell} title="No workout plan" copy="Your coach can assign a plan that will appear here." />}</section>}
 

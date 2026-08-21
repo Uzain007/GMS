@@ -3,7 +3,7 @@
 import {
   Activity, ArrowDownRight, ArrowUpRight, BarChart3, Bell, Building2,
   CalendarDays, Check, ChevronDown, CircleDollarSign, Clock3, CreditCard,
-  Dumbbell, FileBarChart, Gauge, LayoutDashboard, Menu, MoreHorizontal, Plus,
+  Dumbbell, FileBarChart, Gauge, LayoutDashboard, Menu, MoreHorizontal, Pencil, Plus,
   HeartPulse, ReceiptText, RefreshCw, Search, Settings, ShieldCheck, Sparkles, TrendingUp, Users,
   UsersRound, WalletCards, X, type LucideIcon,
 } from "lucide-react";
@@ -21,9 +21,10 @@ import { AccountSecurityDialog, type MfaActions } from "./account-security";
 export type View = "overview" | "gym-dashboard" | "gyms" | "members" | "branches" | "plans" | "memberships" | "attendance" | "coaching" | "payments" | "billing" | "reports" | "staff" | "settings";
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 type Gym = { name: string; location: string; initials: string; members: number; plan: string; revenueGbp: number; status: "Healthy" | "Attention" | "Trial"; accent: string };
-export type DashboardMember = { id: string; name: string; gym: string; membership: string; joined: string; status: string; email?: string | null; accountLinked?: boolean };
+export type DashboardMember = { id: string; name: string; gym: string; membership: string; joined: string; status: string; statusValue?: "lead" | "active" | "paused" | "cancelled" | "archived"; firstName?: string; lastName?: string; email?: string | null; phone?: string | null; accountLinked?: boolean };
 export type NewDashboardMember = { first_name: string; last_name: string; email?: string; phone?: string; status?: "lead" | "active" };
-type LiveMembers = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null; onSearch: (query: string) => void; onReload: () => void; onInvitePortal?: (memberId: string) => Promise<string> };
+export type UpdateDashboardMember = { first_name: string; last_name: string; email?: string | null; phone?: string | null; status: NonNullable<DashboardMember["statusValue"]>; reason: string };
+type LiveMembers = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null; onSearch: (query: string) => void; onReload: () => void; onInvitePortal?: (memberId: string) => Promise<string>; onUpdate?: (memberId: string, member: UpdateDashboardMember) => Promise<void> };
 type DashboardProps = {
   portalMode?: "platform" | "gym";
   operator?: { name: string; role: string };
@@ -218,6 +219,7 @@ function MembersView({ query, live, onAdd }: { query: string; live?: LiveMembers
   const [activationLink, setActivationLink] = useState<string | null>(null);
   const [inviteBusy, setInviteBusy] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<DashboardMember | null>(null);
 
   async function invite(member: DashboardMember) {
     if (!live?.onInvitePortal) return;
@@ -232,8 +234,22 @@ function MembersView({ query, live, onAdd }: { query: string; live?: LiveMembers
     {inviteError && <div className="form-error member-invite-error" role="alert">{inviteError}</div>}
     {activationLink && <div className="member-activation-link" role="status"><ShieldCheck size={19} /><span><strong>One-time activation link ready</strong><small>Send this link to the member now. Creating another invitation revokes it.</small><input aria-label="Member activation link" readOnly value={activationLink} onFocus={(event) => event.currentTarget.select()} /></span><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(activationLink)}>Copy link</button><button className="icon-button" aria-label="Dismiss activation link" onClick={() => setActivationLink(null)}><X size={17} /></button></div>}
     <section className="mini-metrics"><MiniMetric label="Total members" value={total.toLocaleString()} detail={live ? "In selected gym" : "Across gym network"} /><MiniMetric label={live ? "Loaded securely" : "New this month"} value={live ? String(filtered.length) : "2,438"} detail={live ? "Capped page size: 25" : "12.4% increase"} /><MiniMetric label={live ? "Tenant boundary" : "At risk"} value={live ? "Enforced" : "1,284"} detail={live ? "Route + header verified" : "Action recommended"} /></section>
-    <section className="panel table-scroll">{live?.loading && <div className="table-state"><RefreshCw className="spin" size={20} /><span>Loading tenant members…</span></div>}{live?.error && <div className="table-state error" role="alert"><strong>Members could not be loaded</strong><span>{live.error}</span><button className="secondary-button" onClick={live.onReload}>Try again</button></div>}{!live?.loading && !live?.error && <><table className="data-table"><thead><tr><th>Member</th><th>Gym</th><th>{live ? "Member no." : "Membership"}</th><th>Joined</th><th>Status</th>{live && <th>Portal account</th>}</tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td><div className="person-cell"><span>{m.name.split(" ").map((p) => p[0]).join("")}</span><strong>{m.name}</strong></div></td><td>{m.gym}</td><td><span className="plan-pill">{m.membership}</span></td><td>{m.joined}</td><td><span className={`status ${m.status.toLowerCase()}`}><i />{m.status}</span></td>{live && <td>{m.accountLinked ? <span className="status active"><i />Linked</span> : m.email && live.onInvitePortal ? <button className="secondary-button member-invite-button" disabled={inviteBusy === m.id} onClick={() => void invite(m)}>{inviteBusy === m.id ? "Creating…" : "Invite portal"}</button> : <small className="member-email-needed">{m.email ? "Preview only" : "Email required"}</small>}</td>}</tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><Search size={24} /><strong>No members found</strong><span>{query ? "Try a different prefix or email address." : "Add the first member to this gym."}</span></div>}</>}</section>
+    <section className="panel table-scroll">{live?.loading && <div className="table-state"><RefreshCw className="spin" size={20} /><span>Loading tenant members…</span></div>}{live?.error && <div className="table-state error" role="alert"><strong>Members could not be loaded</strong><span>{live.error}</span><button className="secondary-button" onClick={live.onReload}>Try again</button></div>}{!live?.loading && !live?.error && <><table className="data-table"><thead><tr><th>Member</th><th>Gym</th><th>{live ? "Member no." : "Membership"}</th><th>Joined</th><th>Status</th>{live && <th>Portal account</th>}{live?.onUpdate && <th />}</tr></thead><tbody>{filtered.map((m) => <tr key={m.id}><td><div className="person-cell"><span>{m.name.split(" ").map((p) => p[0]).join("")}</span><strong>{m.name}</strong></div></td><td>{m.gym}</td><td><span className="plan-pill">{m.membership}</span></td><td>{m.joined}</td><td><span className={`status ${m.status.toLowerCase()}`}><i />{m.status}</span></td>{live && <td>{m.accountLinked ? <span className="status active"><i />Linked</span> : m.email && live.onInvitePortal ? <button className="secondary-button member-invite-button" disabled={inviteBusy === m.id} onClick={() => void invite(m)}>{inviteBusy === m.id ? "Creating…" : "Invite portal"}</button> : <small className="member-email-needed">{m.email ? "Preview only" : "Email required"}</small>}</td>}{live?.onUpdate && <td><button className="table-action" onClick={() => setEditing(m)} aria-label={`Edit ${m.name}`}><Pencil size={13} /> Edit</button></td>}</tr>)}</tbody></table>{filtered.length === 0 && <div className="empty-state"><Search size={24} /><strong>No members found</strong><span>{query ? "Try a different prefix or email address." : "Add the first member to this gym."}</span></div>}</>}</section>
+    {editing && live?.onUpdate && <EditMemberModal member={editing} onUpdate={live.onUpdate} onClose={() => setEditing(null)} />}
   </ModuleShell>;
+}
+
+function EditMemberModal({ member, onUpdate, onClose }: { member: DashboardMember; onUpdate: NonNullable<LiveMembers["onUpdate"]>; onClose: () => void }) {
+  const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); setError(null);
+    try {
+      await onUpdate(member.id, { first_name: String(form.get("first_name")), last_name: String(form.get("last_name")), email: String(form.get("email")) || null, phone: String(form.get("phone")) || null, status: String(form.get("status")) as UpdateDashboardMember["status"], reason: String(form.get("reason")) });
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The member could not be updated."); }
+    finally { setBusy(false); }
+  }
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="edit-member-title"><button className="modal-scrim" onClick={onClose} aria-label="Close dialog" /><form className="modal-card" onSubmit={submit}><div className="modal-heading"><span><Pencil size={21} /></span><div><p className="eyebrow">Audited tenant update</p><h2 id="edit-member-title">Edit {member.name}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{error && <div className="form-error" role="alert">{error}</div>}<div className="field-pair"><label>First name<input name="first_name" required maxLength={100} defaultValue={member.firstName ?? member.name.split(" ")[0]} /></label><label>Last name<input name="last_name" required maxLength={100} defaultValue={member.lastName ?? member.name.split(" ").slice(1).join(" ")} /></label></div><label>Email address<input name="email" type="email" maxLength={254} defaultValue={member.email ?? ""} /></label><label>Phone<input name="phone" type="tel" maxLength={40} defaultValue={member.phone ?? ""} /></label><label>Status<select name="status" defaultValue={member.statusValue ?? "lead"}><option value="lead">Lead</option><option value="active">Active</option><option value="paused">Paused</option><option value="cancelled">Cancelled</option><option value="archived">Archived</option></select></label><label>Audit reason<textarea name="reason" required maxLength={500} /></label><div className="modal-note"><ShieldCheck size={17} />The selected gym, actor and reason are written to the audit trail.</div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy} type="submit">{busy ? "Saving…" : "Save changes"}</button></div></form></div>;
 }
 
 function PaymentsView({ currency }: { currency: Currency }) {
@@ -286,6 +302,7 @@ export function IronCoreDashboard({ portalMode, operator = { name: "Servion Soft
     // decisions; Laravel policy checks and PostgreSQL RLS remain authoritative.
     return {
       gymName: activeGym.name,
+      timezone: liveEngagement?.timezone ?? "Europe/London",
       actorRole: operator.role,
       memberTotal: liveMembers?.total ?? liveOperations?.members.length ?? 0,
       // Active-member totals come from the bounded server aggregate rather

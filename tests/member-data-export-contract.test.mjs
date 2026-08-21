@@ -15,6 +15,7 @@ test("member export storage is tenant-owned and protected by forced RLS", async 
   assert.match(schema, /foreign\(\['gym_id', 'member_id'\]\)/);
   assert.match(schema, /index\(\['gym_id', 'member_id', 'created_at'\]\)/);
   assert.match(rls, /FORCE ROW LEVEL SECURITY/);
+  assert.match(rls, /getDriverName\(\) !== 'pgsql'/);
   assert.match(rls, /WITH CHECK \(gym_id = nullif\(current_setting\('ironcore\.current_gym_id'/);
   assert.doesNotMatch(rls, /app\.current_gym_id/);
   assert.match(model, /use BelongsToGym, HasUuids/);

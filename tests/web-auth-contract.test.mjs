@@ -230,10 +230,53 @@ test("reporting UI uses one guarded tenant aggregate and keeps currencies separa
   assert.match(reports, /Tenant-safe live report/);
   assert.match(reports, /currency only|currency\} only/);
   assert.match(reports, /type="date"/);
+  assert.match(reports, /From date must be before or the same as the To date/);
   for (const currency of ["GBP", "USD", "PKR", "AED", "SAR"]) {
     assert.match(reports, new RegExp(`"${currency}"`));
   }
   assert.doesNotMatch(reports, /localStorage|sessionStorage/);
   assert.match(styles, /@media\(max-width:620px\)\{\.report-filters/);
   assert.match(styles, /\.report-metrics,\.report-insight-grid\{grid-template-columns:1fr\}/);
+});
+
+test("class scheduling and member timetables use the selected gym timezone", async () => {
+  const app = await read("app/ironcore-app.tsx");
+  const engagement = await read("app/engagement-management.tsx");
+  const member = await read("app/member-portal.tsx");
+  const coaching = await read("app/coaching-management.tsx");
+  const overview = await read("app/gym-client-overview.tsx");
+  const gymTime = await read("app/lib/gym-time.ts");
+
+  assert.match(app, /timezone: selectedGym\.timezone/);
+  assert.match(engagement, /zonedLocalDateTimeToIso\(String\(form\.get\("starts_at"\)\), data\.timezone\)/);
+  assert.match(engagement, /formatGymDateTime\(session\.starts_at, data\.timezone\)/);
+  assert.match(member, /formatGymDateTime\(value, timeZone\)/);
+  assert.match(member, /if \(saved\) formElement\.reset\(\)/);
+  assert.doesNotMatch(member, /event\.currentTarget\.reset\(\)/);
+  assert.match(overview, /formatGymDateTime\(session\.startsAt, data\.timezone\)/);
+  assert.match(coaching, /zonedLocalDateTimeToIso\(String\(form\.get\("performed_at"\)\), data\.timezone\)/);
+  assert.match(gymTime, /formatToParts/);
+  assert.match(gymTime, /daylight-saving offsets settle correctly/);
+  assert.match(engagement, /canBookOthers && <button className="primary-button class-book-button"/);
+  assert.doesNotMatch(engagement, /new Date\(String\(form\.get\("starts_at"\)\)\)\.toISOString\(\)/);
+  assert.doesNotMatch(coaching, /new Date\(String\(form\.get\("performed_at"\)\)\)\.toISOString\(\)/);
+});
+
+test("tenant operation and member lifecycle edits use audited backend updates", async () => {
+  const client = await read("app/lib/ironcore-api.ts");
+  const app = await read("app/ironcore-app.tsx");
+  const dashboard = await read("app/ironcore-dashboard.tsx");
+  const operations = await read("app/tenant-operations.tsx");
+
+  for (const method of ["updateMember", "updateBranch", "updateMembershipPlan", "updateMembership"]) {
+    assert.match(client, new RegExp(`${method}\\(`));
+    assert.match(app, new RegExp(`api\\.${method}\\(`));
+  }
+  assert.match(dashboard, /EditMemberModal/);
+  assert.match(dashboard, /Audit reason/);
+  assert.match(operations, /EditBranchModal/);
+  assert.match(operations, /EditPlanModal/);
+  assert.match(operations, /EditMembershipModal/);
+  assert.match(operations, /Existing memberships keep their accepted price snapshot/);
+  assert.match(operations, /The selected gym, actor and reason are written to the audit trail/);
 });

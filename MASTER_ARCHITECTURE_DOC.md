@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.33.0 — Milestone 26 real role entry and frontend action audit |
-| Last verified | 18 August 2026 |
+| MAD version | 0.34.0 — Post-Milestone 26 local business acceptance audit |
+| Last verified | 20 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 26 implementation complete locally; frontend deployment and production API acceptance await approval |
+| Active milestone | Milestone 26 committed; post-milestone local business acceptance complete and production API acceptance remains pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -70,7 +70,7 @@ Before any source code is written, modified or suggested in a new session:
 
 ## Active database schema
 
-All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-aware (`timestampTz`).
+All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-aware (`timestampTz`). Laravel pins every PostgreSQL connection to UTC so host-level database timezone settings cannot shift Eloquent date casts; gym and branch IANA timezones are applied only at business/UI boundaries.
 
 ### `users` — platform identity
 
@@ -907,8 +907,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Online checkout opens only a provider-hosted URL returned for the current payment. Cash and terminal-card recording never request card details; refunds require an explicit amount and reason.
 - Gym subscription Checkout and customer-portal sessions open only Stripe-hosted URLs returned for the selected gym. Billing methods, tax IDs and card details never pass through or persist in IronCore.
 - Subscription collections, invoices and customer state use independent stale-response guards and are cleared immediately when the active gym changes.
-- Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage.
-- Training plans, workout sessions, progress measurements and notification preferences use independent stale-response guards and clear immediately on logout or tenant switch. The browser never decides trainer/member scope and never stores notification destinations or health/progress history in local storage.
+- Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. Class form wall-clock values are converted with the selected gym's IANA timezone, and staff/member schedules render in that gym timezone rather than the device timezone. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage.
+- Training plans, workout sessions, progress measurements and notification preferences use independent stale-response guards and clear immediately on logout or tenant switch. Staff-entered workout wall-clock values are converted with the selected gym's IANA timezone before persistence. The browser never decides trainer/member scope and never stores notification destinations or health/progress history in local storage.
 - Reports use one independently guarded tenant request and clear immediately on logout or tenant switch. Date and currency filters are sent to Laravel, while all aggregation and scope decisions remain server-authoritative.
 - `NEXT_PUBLIC_IRONCORE_DEMO_MODE=true` (or an absent public API origin) keeps the real login screen visible but disables account submission with a clear deployment notice. It also offers separately labelled representative previews; configured API mode exposes only authenticated live modules.
 - Preview mode supplies isolated representative records to the same operational views while labelling them as read-only samples. Write controls, security controls and invitation issuance are hidden or disabled there. Authenticated mode constructs collections exclusively from bounded API responses and exposes a control only when it has a permitted backend action.
@@ -990,9 +990,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Branches, members, staff, invitations, plans and memberships API | Implemented; core runtime passing | Tenant composite FKs, RLS, validation, audit and capped pagination are active |
 | Streaming member CSV imports | Implemented; PostgreSQL/Redis runtime passing | Private tenant paths, Redis job, 500-row inserts, bounded errors and progress counters |
 | Secure web authentication and tenant selection | Implemented; core runtime passing | Stateful Sanctum/CSRF flow, session rotation, explicit super-admin tenant selection and no browser bearer storage |
-| Real role entry and actionable frontend portals | Implemented locally; deployment acceptance pending | Login is primary for Super Admin, Gym Admin and Member accounts; Super Admin platform management and all permission-visible tenant/member writes use existing API methods; representative previews are explicit and read-only |
-| Members frontend/API integration | Implemented; core runtime passing | Tenant route/header agreement, capped server search, loading/error/empty states and member creation; demo preview remains isolated |
-| Branch, plan and membership frontend/API integration | Implemented; core runtime passing | Parallel bounded reads, role-aware writes, exact minor-unit prices and immutable snapshots; isolated preview navigation now renders representative rows instead of blank content |
+| Real role entry and actionable frontend portals | Local business acceptance complete; production acceptance pending | Login, logout and recovery work for Super Admin, Gym Admin and Member accounts; permission-visible tenant/member writes use existing API methods; representative previews are explicit and read-only |
+| Members frontend/API integration | Implemented; local acceptance passing | Tenant route/header agreement, capped server search, loading/error/empty states, creation, portal invitation and audited profile/lifecycle editing; demo preview remains isolated |
+| Branch, plan and membership frontend/API integration | Implemented; local acceptance passing | Parallel bounded reads, role-aware creation and audited edits/status transitions, exact minor-unit prices and immutable accepted snapshots; isolated preview navigation renders representative rows |
 | Staff and invitation frontend/API integration | Implemented; core runtime passing | Tenant directory, pending invitations, one-time acceptance links, hierarchy-safe edits and mandatory audit reasons |
 | Milestone 3 — gym, member and staff operations | Feature-complete; core runtime passing | Browser/API contracts and GitHub-hosted Laravel/PostgreSQL/Redis tests pass |
 | Tenant invoices and immutable payment/refund ledger | Implemented; core runtime passing | Server totals, cash/terminal/bank records, hosted online checkout, partial/full refunds and currency-specific summaries |
@@ -1041,7 +1041,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 23 — credential-isolated Composer prefetch | Complete; hosted prefetch passed | The read-only workflow token was isolated to bounded no-plugin/no-script package prefetches and stripped before normal Composer/Laravel activation; hosted package download completed, then package discovery exposed a separate early-bootstrap defect |
 | Milestone 24 — bootstrap-safe trusted proxy configuration | Complete; hosted package discovery passed | Trusted proxy values moved to Laravel's request-time `trustedproxy` configuration; hosted dependency activation and package discovery succeeded, then the suite exposed a separate raw-MIME notification assertion defect |
 | Milestone 25 — MIME-aware SMTP runtime evidence | Implementation complete locally; hosted re-verification pending | The disposable provider decodes quoted-printable/Base64 text parts independently in authenticated runner memory; reset-link and tenant-email assertions remain semantic and secret-safe without changing production mail behavior |
-| Milestone 26 — real role entry and frontend action audit | Implementation complete locally; commit/deployment pending approval | Added the API-backed Super Admin portal, made real login the signed-out entry, removed or gated placeholder controls, and added role/action contracts. Production acceptance still requires a reachable configured Laravel API |
+| Milestone 26 — real role entry and frontend action audit | Committed on `84c0b21`; invite preview fix committed on `fcf9a6c` | Added the API-backed Super Admin portal, made real login the signed-out entry, removed or gated placeholder controls, and added role/action contracts. Local end-to-end business acceptance is complete; production acceptance still requires a reachable configured Laravel API |
+| Post-Milestone 26 — local business acceptance | Complete locally; uncommitted | Exercised realistic Super Admin, Gym Admin, trainer and Member journeys with two isolated fake gyms. Fixed branch creation response defaults, UTC/IANA timezone handling, invalid report ranges, member workout/progress form resets, trainer booking visibility, core audited edit/status flows and SQLite test migration portability. Production provider/deployment acceptance remains separate. |
 
 ## Change control
 

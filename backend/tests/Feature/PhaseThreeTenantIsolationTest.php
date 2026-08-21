@@ -59,6 +59,25 @@ class PhaseThreeTenantIsolationTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_branch_creation_returns_the_active_default_inside_the_selected_tenant(): void
+    {
+        $owner = User::factory()->create();
+        $gym = Gym::factory()->create();
+        $this->attachRole($gym, $owner, UserRole::GymOwner, 'active');
+        Sanctum::actingAs($owner);
+
+        // Omitting status must still return the database default without
+        // weakening the route/header tenant agreement.
+        $this->postJson("/api/v1/gyms/{$gym->id}/branches", [
+            'name' => 'Camden Central',
+            'code' => 'CAMDEN',
+            'is_primary' => true,
+        ], ['X-Gym-ID' => $gym->id])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'active')
+            ->assertJsonPath('data.gym_id', $gym->id);
+    }
+
     public function test_tenant_models_fail_closed_without_context(): void
     {
         $gym = Gym::factory()->create();
