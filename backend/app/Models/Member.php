@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\MemberStatus;
 use App\Models\Concerns\BelongsToGym;
+use App\Services\MemberCodeService;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,9 +17,19 @@ class Member extends Model
     use BelongsToGym, HasFactory, HasUuids;
 
     protected $fillable = [
-        'home_branch_id', 'user_id', 'member_number', 'first_name', 'last_name',
+        'home_branch_id', 'user_id', 'member_number', 'member_code', 'first_name', 'last_name',
         'email', 'phone', 'date_of_birth', 'status', 'joined_at', 'archived_at', 'metadata',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Member $member): void {
+            // Direct model creation (seeders and controlled jobs) receives the
+            // same tenant-local code; API/import paths additionally serialize
+            // allocation inside their database transaction.
+            $member->member_code ??= app(MemberCodeService::class)->generate();
+        });
+    }
 
     protected function casts(): array
     {

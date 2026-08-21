@@ -70,6 +70,13 @@ test("preview navigation renders operations and attendance keeps readable column
   assert.match(styles, /\.engagement-data-table\{min-width:720px\}/);
 });
 
+test("shared section labels reserve vertical ink space inside scrollable panels", async () => {
+  const styles = await read("app/globals.css");
+
+  assert.match(styles, /\.eyebrow \{[^}]*padding-block:1px[^}]*overflow:visible[^}]*line-height:1\.4/);
+  assert.match(styles, /\.table-scroll>\.panel-heading \{ padding:18px 18px 14px; \}/);
+});
+
 test("gym-client portal has a distinct tenant dashboard without expanding browser authority", async () => {
   const app = await read("app/ironcore-app.tsx");
   const dashboard = await read("app/ironcore-dashboard.tsx");
@@ -180,7 +187,7 @@ test("engagement UI integrates tenant-safe QR attendance, classes and FIFO booki
   assert.match(app, /Promise\.all\(\[attendanceRequest, api\.classSessions/);
   assert.match(app, /setEngagement\(\{ attendance: \[\], sessions: \[\], bookings: \[\]/);
   assert.match(dashboard, /EngagementManagement data=\{liveEngagement\}/);
-  assert.match(engagement, /Scan QR or enter member code/);
+  assert.match(engagement, /Scan QR or enter Member Code/);
   assert.match(engagement, /QRCode\.toCanvas/);
   assert.match(engagement, /FIFO waitlist/);
   assert.match(engagement, /data\.actorRole === "member" \? "classes"/);

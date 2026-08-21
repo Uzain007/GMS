@@ -25,6 +25,7 @@ class PhaseSevenMemberSelfServiceIsolationTest extends TestCase
 
         $this->getJson("/api/v1/gyms/{$gym->id}/member/me", ['X-Gym-ID' => $gym->id])
             ->assertOk()->assertJsonPath('data.member_number', $member->member_number)
+            ->assertJsonPath('data.member_code', $member->member_code)
             ->assertJsonMissingPath('data.id')->assertJsonMissingPath('data.gym_id')
             ->assertJsonMissingPath('data.user_id')->assertJsonMissingPath('data.metadata');
 

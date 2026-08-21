@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateMemberRequest;
 use App\Http\Resources\MemberResource;
 use App\Models\Member;
 use App\Services\AuditService;
+use App\Services\MemberCodeService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -30,6 +31,7 @@ class MemberController extends Controller
             // Prefix searches can use tenant-leading member number/name indexes.
             $query->where(fn ($builder) => $builder
                 ->where('member_number', 'like', $prefix)
+                ->orWhere('member_code', '=', $search)
                 ->orWhere('last_name', 'like', $prefix)
                 ->orWhere('email', '=', mb_strtolower($search)));
         }
@@ -37,14 +39,15 @@ class MemberController extends Controller
         return MemberResource::collection($query->paginate($this->pageSize()));
     }
 
-    public function store(StoreMemberRequest $request, AuditService $audit): MemberResource
+    public function store(StoreMemberRequest $request, AuditService $audit, MemberCodeService $memberCodes): MemberResource
     {
         $data = $request->validated();
         $data['member_number'] ??= 'MBR-'.Str::upper((string) Str::ulid());
         $data['email'] = isset($data['email']) ? mb_strtolower($data['email']) : null;
         $data['status'] ??= MemberStatus::Lead->value;
 
-        $member = DB::transaction(function () use ($data, $request, $audit): Member {
+        $member = DB::transaction(function () use ($data, $request, $audit, $memberCodes): Member {
+            $data['member_code'] = $memberCodes->generate();
             $member = Member::query()->create($data);
             $audit->record('member.created', $member, $request->user(), after: $member->toArray(), request: $request);
             return $member;

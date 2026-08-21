@@ -15,6 +15,7 @@ class MemberResource extends JsonResource
             'home_branch_id' => $this->home_branch_id,
             'user_id' => $this->user_id,
             'member_number' => $this->member_number,
+            'member_code' => $this->member_code,
             'first_name' => $this->first_name,
             'last_name' => $this->last_name,
             'email' => $this->email,

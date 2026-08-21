@@ -214,7 +214,7 @@ const demoCoaching: CoachingData = {
 
 const demoMemberPortal: MemberPortalData = {
   gym: { id: "demo-gym", name: "Forge Fitness", base_currency: "GBP", timezone: "Europe/London" },
-  profile: { member_number: "MBR-1042", first_name: "Amelia", last_name: "Hart", email: "amelia@example.com", phone: "+44 7700 900142", date_of_birth: "1996-04-18", status: "active", joined_at: "2026-08-04" },
+  profile: { member_number: "MBR-1042", member_code: "104287", first_name: "Amelia", last_name: "Hart", email: "amelia@example.com", phone: "+44 7700 900142", date_of_birth: "1996-04-18", status: "active", joined_at: "2026-08-04" },
   membership: { id: "demo-membership-1", gym_id: "demo-gym", member_id: "demo-1", plan_id: "demo-plan-1", branch_id: "demo-branch-1", status: "active", starts_at: "2026-08-01", ends_at: null, next_billing_at: "2026-09-01", price_amount_minor: 8900, currency: "GBP", joining_fee_minor: 0, billing_interval: "monthly", interval_count: 1, auto_renew: true, plan: { id: "demo-plan-1", name: "Unlimited", code: "UNLIMITED" }, branch: { id: "demo-branch-1", name: "Manchester Central" }, created_at: "2026-08-01T09:00:00Z" },
   invoices: [],
   payments: [],
@@ -286,6 +286,7 @@ function dashboardMember(member: MemberRecord, gymName: string): DashboardMember
     name: `${member.first_name} ${member.last_name}`,
     gym: gymName,
     membership: member.member_number,
+    memberCode: member.member_code,
     joined: member.joined_at
       ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(member.joined_at))
       : "Not set",
@@ -954,11 +955,11 @@ export function IronCoreApp() {
     setSaasRefresh((value) => value + 1);
   }
 
-  async function checkInMember(input: { branchId: string; accessValue: string }): Promise<void> {
+  async function checkInMember(input: { branchId: string; method: "member_code" | "qr"; accessValue: string }): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
-    await api.checkIn(selectedGym.id, input.accessValue.startsWith("icqr_")
+    await api.checkIn(selectedGym.id, input.method === "qr"
       ? { branch_id: input.branchId, credential: input.accessValue }
-      : { branch_id: input.branchId, member_number: input.accessValue });
+      : { branch_id: input.branchId, member_code: input.accessValue });
     setEngagementRefresh((value) => value + 1);
   }
   async function checkOutMember(attendanceId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.checkOut(selectedGym.id, attendanceId); setEngagementRefresh((value) => value + 1); }
@@ -1173,7 +1174,7 @@ export function IronCoreApp() {
     attendance: engagement.attendance,
     sessions: engagement.sessions,
     bookings: engagement.bookings,
-    members: members.rows.map((row) => ({ id: row.id, name: row.name, number: row.membership })),
+    members: members.rows.map((row) => ({ id: row.id, name: row.name, number: row.memberCode ?? row.membership })),
     branches: operations.branches.map((row) => ({ id: row.id, name: row.name })),
     trainers: staff.rows.filter((row) => row.role === "trainer" && row.status === "active").map((row) => ({ id: row.id, name: row.user.name })),
     timezone: selectedGym.timezone,

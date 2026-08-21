@@ -7,6 +7,7 @@ use App\Enums\MemberStatus;
 use App\Models\Gym;
 use App\Models\GymBranch;
 use App\Models\MemberImport;
+use App\Services\MemberCodeService;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -198,9 +199,13 @@ class ProcessMemberImport implements ShouldQueue
     /** @param list<array<string, mixed>> $batch @return array{int, int} */
     private function flush(array $batch): array
     {
-        // Batches of 500 bound memory and round trips; RLS still checks each row.
-        $inserted = DB::table('members')->insertOrIgnore($batch);
-        return [$inserted, count($batch) - $inserted];
+        return DB::transaction(function () use ($batch): array {
+            // Batches of 500 bound memory and round trips; allocation is locked
+            // only for this gym and RLS still checks every inserted row.
+            $batch = app(MemberCodeService::class)->assignToImportRows($batch);
+            $inserted = DB::table('members')->insertOrIgnore($batch);
+            return [$inserted, count($batch) - $inserted];
+        });
     }
 
     private function saveProgress(

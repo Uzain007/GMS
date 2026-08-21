@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.34.0 — Post-Milestone 26 local business acceptance audit |
-| Last verified | 20 August 2026 |
+| MAD version | 0.35.0 — Member Code and secure camera QR check-in |
+| Last verified | 21 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Milestone 26 committed; post-milestone local business acceptance complete and production API acceptance remains pending |
+| Active milestone | Post-Milestone 26 Member Code and camera QR check-in implemented locally; approval and production API acceptance remain pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -208,6 +208,7 @@ Tenant events remain visible only through the selected gym. A separate FORCE-RLS
 | `home_branch_id` | uuid | yes | composite FK `(gym_id, home_branch_id)` to branch |
 | `user_id` | uuid | yes | FK `users.id`, null on delete; unique `(gym_id, user_id)` |
 | `member_number` | varchar(50) | no | unique `(gym_id, member_number)` |
+| `member_code` | char(6) | no | visible numeric reception lookup; unique `(gym_id, member_code)`; never a security identifier |
 | `first_name`, `last_name` | varchar(100) | no | index `(gym_id, last_name, first_name)` |
 | `email` | varchar(254) | yes | index `(gym_id, email)` |
 | `phone` | varchar(40) | yes | — |
@@ -798,7 +799,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/POST | `/gyms/{gym}/member/data-exports` | tenant; linked member self | List or queue an export for the server-resolved linked member; no member UUID is accepted |
 | GET | `/gyms/{gym}/member/data-exports/{export}[/download]` | tenant; linked member self | Read or download only the linked member's unexpired export |
 | GET | `/gyms/{gym}/attendance` | tenant; owner/manager/receptionist/trainer/super admin | Cursor-list a bounded, time-filtered branch attendance history |
-| POST | `/gyms/{gym}/attendance/check-ins` | tenant; owner/manager/receptionist/super admin | Admit an eligible member by QR credential, member code or selected member ID |
+| POST | `/gyms/{gym}/attendance/check-ins` | tenant; owner/manager/receptionist/super admin | Admit an eligible member by secure QR credential, 4–6 digit member code or selected member ID; validate membership, branch and duplicate presence server-side |
 | POST | `/gyms/{gym}/attendance/{attendance}/check-out` | tenant; owner/manager/receptionist/super admin | Close the selected tenant attendance row once |
 | GET | `/gyms/{gym}/class-sessions` | tenant; all tenant roles | List a bounded date-window class schedule without cross-tenant attendee data |
 | POST/PATCH | `/gyms/{gym}/class-sessions[/{session}]` | tenant; owner/manager/super admin | Create, update or reason-cancel a branch session |
@@ -873,7 +874,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Correct primary credentials, password reset and existing-member activation never bypass an enabled factor. They return an opaque five-minute MFA challenge and establish no authenticated session until the second factor succeeds.
 - Trainers may view rosters and mark attendance only for class sessions assigned to their tenant staff profile; they cannot create classes or book other members.
 - Member booking reads and writes resolve the `members.user_id` link server-side. A client-supplied `member_id` never expands member self-service access.
-- Check-in requires an active, in-date membership and branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values.
+- Check-in requires an active, in-date membership and branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values. The visible six-digit `member_code` is only a tenant-local manual lookup and never substitutes for secure QR validation.
 - Session capacity, counters, waitlist sequence and FIFO promotion are updated only inside a database transaction holding a row lock on the tenant-resolved class session.
 - Trainer training/progress access requires an active tenant assignment whose `trainer_staff_profile_id` belongs to the authenticated user. Owners/managers operate only inside the selected gym, and member access always resolves `members.user_id` server-side.
 - Workout session and progress records are append-only. Exact loads use integer grams and measurements use integer thousandths plus controlled units, avoiding floating-point drift.
@@ -907,7 +908,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Online checkout opens only a provider-hosted URL returned for the current payment. Cash and terminal-card recording never request card details; refunds require an explicit amount and reason.
 - Gym subscription Checkout and customer-portal sessions open only Stripe-hosted URLs returned for the selected gym. Billing methods, tax IDs and card details never pass through or persist in IronCore.
 - Subscription collections, invoices and customer state use independent stale-response guards and are cleared immediately when the active gym changes.
-- Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. Class form wall-clock values are converted with the selected gym's IANA timezone, and staff/member schedules render in that gym timezone rather than the device timezone. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage.
+- Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. Class form wall-clock values are converted with the selected gym's IANA timezone, and staff/member schedules render in that gym timezone rather than the device timezone. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage. Reception camera scanning prefers a rear mobile camera, permits webcam/USB-camera selection, stops every media track on close and retains the numeric Member Code fallback when permission or QR detection is unavailable.
 - Training plans, workout sessions, progress measurements and notification preferences use independent stale-response guards and clear immediately on logout or tenant switch. Staff-entered workout wall-clock values are converted with the selected gym's IANA timezone before persistence. The browser never decides trainer/member scope and never stores notification destinations or health/progress history in local storage.
 - Reports use one independently guarded tenant request and clear immediately on logout or tenant switch. Date and currency filters are sent to Laravel, while all aggregation and scope decisions remain server-authoritative.
 - `NEXT_PUBLIC_IRONCORE_DEMO_MODE=true` (or an absent public API origin) keeps the real login screen visible but disables account submission with a clear deployment notice. It also offers separately labelled representative previews; configured API mode exposes only authenticated live modules.
@@ -936,7 +937,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - UUID primary keys support distributed creation; high-volume list queries must use cursor pagination when offsets become expensive.
 - Every tenant-owned high-volume index begins with `gym_id` unless it supports an explicitly documented global lookup.
-- Member uniqueness is tenant-local, for example `(gym_id, member_number)`.
+- Member uniqueness is tenant-local, including `(gym_id, member_number)` and the reception lookup `(gym_id, member_code)`.
 - Foreign-key lookup paths must also have tenant-compatible composite indexes.
 - Search endpoints must cap page size and avoid unbounded wildcard scans.
 - Imports, notifications, scheduled/large reports and exports run through Redis queues. Member export generation and expiry jobs carry immutable gym/export IDs, and export objects use tenant-prefixed private paths. The bounded interactive report overview may execute synchronously behind role checks, a 366-day cap, rate limiting and a tenant-keyed Redis cache.
@@ -1003,7 +1004,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Stripe Billing signed webhook synchronization | Implemented; core runtime passing; provider gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
 | Platform SaaS subscription frontend/API integration | Implemented; core runtime passing; provider gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
 | Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |
-| Member QR credentials and branch attendance | Implemented; core runtime passing | One-time opaque issuance, hash-only storage, active-membership validation, one open presence row and cursor history |
+| Member QR credentials, Member Codes and branch attendance | Implemented locally; core runtime passing | Separate tenant-unique six-digit lookup, one-time opaque/hash-only QR security, camera scanning, active-membership/branch validation and one open presence row |
 | Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; core runtime passing | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |
 | Attendance and class-booking frontend/API integration | Implemented; core runtime passing | Check-in console, one-time QR rendering, live presence, schedule, rosters, booking and waitlist actions; attendance columns now use the responsive shared table contract |
 | Milestone 5A — attendance, classes and bookings | Feature-complete; core runtime passing | Static contracts, production build, type-check, browser QA and GitHub-hosted runtime pass |
@@ -1042,7 +1043,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 24 — bootstrap-safe trusted proxy configuration | Complete; hosted package discovery passed | Trusted proxy values moved to Laravel's request-time `trustedproxy` configuration; hosted dependency activation and package discovery succeeded, then the suite exposed a separate raw-MIME notification assertion defect |
 | Milestone 25 — MIME-aware SMTP runtime evidence | Implementation complete locally; hosted re-verification pending | The disposable provider decodes quoted-printable/Base64 text parts independently in authenticated runner memory; reset-link and tenant-email assertions remain semantic and secret-safe without changing production mail behavior |
 | Milestone 26 — real role entry and frontend action audit | Committed on `84c0b21`; invite preview fix committed on `fcf9a6c` | Added the API-backed Super Admin portal, made real login the signed-out entry, removed or gated placeholder controls, and added role/action contracts. Local end-to-end business acceptance is complete; production acceptance still requires a reachable configured Laravel API |
-| Post-Milestone 26 — local business acceptance | Complete locally; uncommitted | Exercised realistic Super Admin, Gym Admin, trainer and Member journeys with two isolated fake gyms. Fixed branch creation response defaults, UTC/IANA timezone handling, invalid report ranges, member workout/progress form resets, trainer booking visibility, core audited edit/status flows and SQLite test migration portability. Production provider/deployment acceptance remains separate. |
+| Post-Milestone 26 — local business acceptance | Complete on commit `3ddeda2` | Exercised realistic Super Admin, Gym Admin, trainer and Member journeys with two isolated fake gyms. Fixed branch creation response defaults, UTC/IANA timezone handling, invalid report ranges, member workout/progress form resets, trainer booking visibility, core audited edit/status flows and SQLite test migration portability. Production provider/deployment acceptance remains separate. |
+| Post-Milestone 26 — Member Code and camera QR check-in | Implemented locally; approval pending | Adds tenant-unique six-digit Member Codes, digital-card display, manual reception lookup, polished rear-camera/webcam/USB scanning with permission/fallback handling, and backend tests for valid, expired, wrong-gym, wrong-branch and duplicate check-ins. |
 
 ## Change control
 

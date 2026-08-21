@@ -173,11 +173,11 @@ class AttendanceService
 
         $member = isset($data['member_id'])
             ? Member::query()->lockForUpdate()->findOrFail($data['member_id'])
-            : Member::query()->where('member_number', $data['member_number'])->lockForUpdate()->first();
+            : Member::query()->where('member_code', $data['member_code'])->lockForUpdate()->first();
         if (! $member) {
-            throw ValidationException::withMessages(['member_number' => ['No member matches this code in the selected gym.']]);
+            throw ValidationException::withMessages(['member_code' => ['No member matches this code in the selected gym.']]);
         }
-        return [$member, null, isset($data['member_number']) ? AttendanceMethod::MemberCode : AttendanceMethod::Manual];
+        return [$member, null, isset($data['member_code']) ? AttendanceMethod::MemberCode : AttendanceMethod::Manual];
     }
 
     private function createPresence(

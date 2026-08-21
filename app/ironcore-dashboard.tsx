@@ -21,7 +21,7 @@ import { AccountSecurityDialog, type MfaActions } from "./account-security";
 export type View = "overview" | "gym-dashboard" | "gyms" | "members" | "branches" | "plans" | "memberships" | "attendance" | "coaching" | "payments" | "billing" | "reports" | "staff" | "settings";
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 type Gym = { name: string; location: string; initials: string; members: number; plan: string; revenueGbp: number; status: "Healthy" | "Attention" | "Trial"; accent: string };
-export type DashboardMember = { id: string; name: string; gym: string; membership: string; joined: string; status: string; statusValue?: "lead" | "active" | "paused" | "cancelled" | "archived"; firstName?: string; lastName?: string; email?: string | null; phone?: string | null; accountLinked?: boolean };
+export type DashboardMember = { id: string; name: string; gym: string; membership: string; memberCode?: string; joined: string; status: string; statusValue?: "lead" | "active" | "paused" | "cancelled" | "archived"; firstName?: string; lastName?: string; email?: string | null; phone?: string | null; accountLinked?: boolean };
 export type NewDashboardMember = { first_name: string; last_name: string; email?: string; phone?: string; status?: "lead" | "active" };
 export type UpdateDashboardMember = { first_name: string; last_name: string; email?: string | null; phone?: string | null; status: NonNullable<DashboardMember["statusValue"]>; reason: string };
 type LiveMembers = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null; onSearch: (query: string) => void; onReload: () => void; onInvitePortal?: (memberId: string) => Promise<string>; onUpdate?: (memberId: string, member: UpdateDashboardMember) => Promise<void> };

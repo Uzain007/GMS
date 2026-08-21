@@ -2,12 +2,13 @@
 
 import QRCode from "qrcode";
 import {
-  CalendarPlus, CheckCircle2, Clock3, DoorOpen, Dumbbell, ListOrdered,
+  CalendarPlus, Camera, CheckCircle2, Clock3, DoorOpen, Dumbbell, ListOrdered,
   LogOut, QrCode, RefreshCw, ShieldCheck, TicketCheck, UserCheck, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AttendanceRecord, ClassBookingRecord, ClassSessionRecord, IronCoreRole, NewClassSession } from "./lib/ironcore-api";
 import { formatGymDateTime, formatGymTime, zonedLocalDateTimeToIso } from "./lib/gym-time";
+import { QrCameraScanner } from "./qr-camera-scanner";
 
 type Option = { id: string; name: string };
 type MemberOption = Option & { number: string };
@@ -25,7 +26,7 @@ export type EngagementData = {
   loading: boolean;
   error: string | null;
   onReload: () => void;
-  onCheckIn: (input: { branchId: string; accessValue: string }) => Promise<void>;
+  onCheckIn: (input: { branchId: string; method: "member_code" | "qr"; accessValue: string }) => Promise<void>;
   onCheckOut: (attendanceId: string) => Promise<void>;
   onCreateSession: (input: NewClassSession) => Promise<void>;
   onBook: (sessionId: string, memberId?: string) => Promise<ClassBookingRecord>;
@@ -53,7 +54,10 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [checkInBranch, setCheckInBranch] = useState(data.branches[0]?.id ?? "");
   const qrCanvas = useRef<HTMLCanvasElement>(null);
+  const memberCodeInput = useRef<HTMLInputElement>(null);
 
   const present = data.attendance.filter((row) => row.status === "checked_in");
   // The API supplies a bounded current schedule window; rendering remains
@@ -65,6 +69,7 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
   const canBookOthers = !data.readOnly && ["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(data.actorRole);
   const canMarkAttendance = !data.readOnly && data.actorRole !== "member";
   const defaultBranch = data.branches[0]?.id ?? "";
+  const selectedCheckInBranch = data.branches.some((branch) => branch.id === checkInBranch) ? checkInBranch : defaultBranch;
 
   useEffect(() => {
     if (!credential || !qrCanvas.current) return;
@@ -83,7 +88,25 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
   async function checkIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const formElement = event.currentTarget; const form = new FormData(formElement);
     const accessValue = String(form.get("access_value")).trim();
-    await act(async () => { await data.onCheckIn({ branchId: String(form.get("branch_id")), accessValue }); formElement.reset(); }, "Member checked in successfully.");
+    if (!/^\d{4,6}$/.test(accessValue)) {
+      setNotice(null); setActionError("Enter the member's 4–6 digit Member Code."); memberCodeInput.current?.focus(); return;
+    }
+    await act(async () => { await data.onCheckIn({ branchId: String(form.get("branch_id")), method: "member_code", accessValue }); formElement.reset(); }, "Member checked in successfully.");
+  }
+
+  async function checkInFromCamera(credentialValue: string) {
+    if (!selectedCheckInBranch) throw new Error("Select a branch before scanning.");
+    setBusy(true); setActionError(null); setNotice(null);
+    try {
+      await data.onCheckIn({ branchId: selectedCheckInBranch, method: "qr", accessValue: credentialValue });
+      setNotice("Member checked in successfully by secure QR.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "This QR code could not be checked in.";
+      setActionError(message);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createClass(event: FormEvent<HTMLFormElement>) {
@@ -141,7 +164,7 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
     <div className="engagement-tabs" role="tablist"><button className={tab === "attendance" ? "active" : ""} onClick={() => setTab("attendance")}><UserCheck size={16} /> Attendance</button><button className={tab === "classes" ? "active" : ""} onClick={() => setTab("classes")}><CalendarPlus size={16} /> Classes & bookings</button></div>
 
     {tab === "attendance" && <>
-      {canCheckIn && <article className="panel checkin-console"><div className="checkin-copy"><span className="engagement-icon violet"><QrCode size={21} /></span><div><p className="eyebrow">Front desk admission</p><h2>Scan QR or enter member code</h2><p>USB/Bluetooth scanners can type the QR value directly. Eligibility and branch access are checked by the API before admission.</p></div></div><form onSubmit={checkIn}><label>Branch<select name="branch_id" defaultValue={defaultBranch} required>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><label>QR or member code<input name="access_value" required autoComplete="off" placeholder="Scan QR or enter MBR-…" /></label><button className="primary-button" disabled={busy} type="submit"><TicketCheck size={16} /> Check in</button><button className="secondary-button" type="button" onClick={() => { setCredential(null); setCredentialModal(true); }}><QrCode size={16} /> Issue member QR</button></form></article>}
+      {canCheckIn && <article className="panel checkin-console"><div className="checkin-copy"><span className="engagement-icon violet"><QrCode size={21} /></span><div><p className="eyebrow">Front desk admission</p><h2>Scan QR or enter Member Code</h2><p>Camera scans use the secure QR token. The visible Member Code is a separate manual fallback; the API checks membership and branch access before admission.</p></div></div><form onSubmit={checkIn}><label>Branch<select name="branch_id" value={selectedCheckInBranch} onChange={(event) => setCheckInBranch(event.target.value)} required>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><label>Member Code<input ref={memberCodeInput} name="access_value" required autoComplete="off" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} placeholder="e.g. 104287" /></label><button className="primary-button" disabled={busy} type="submit"><TicketCheck size={16} /> Check in with code</button><button className="secondary-button" disabled={busy || !selectedCheckInBranch} type="button" onClick={() => setScannerOpen(true)}><Camera size={16} /> Scan QR with Camera</button><button className="secondary-button" type="button" onClick={() => { setCredential(null); setCredentialModal(true); }}><QrCode size={16} /> Issue member QR</button></form></article>}
       <article className="panel engagement-table"><div className="panel-title"><div><p className="eyebrow">Live presence</p><h3>Today&apos;s attendance</h3></div><small>{data.attendance.length} records</small></div>{data.loading ? <div className="table-state">Loading attendance…</div> : <div className="table-scroll"><table className="data-table engagement-data-table"><thead><tr><th>Member</th><th>Branch</th><th>Method</th><th>Checked in</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>{data.attendance.map((row) => <tr key={row.id}><td><strong>{row.member?.name ?? row.member_id}</strong><small>{row.member?.member_number}</small></td><td>{row.branch?.name ?? row.branch_id}</td><td><span className="method-chip">{row.method.replace("_", " ")}</span></td><td>{formatGymTime(row.checked_in_at, data.timezone)}</td><td><span className={`status ${row.status}`}>{row.status.replace("_", " ")}</span></td><td>{row.status === "checked_in" && canCheckIn && <button className="table-action" disabled={busy} onClick={() => void act(() => data.onCheckOut(row.id), "Member checked out.")}><LogOut size={13} /> Check out</button>}</td></tr>)}</tbody></table>{!data.attendance.length && <div className="table-state">No attendance recorded today.</div>}</div>}</article>
     </>}
 
@@ -154,5 +177,6 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
     {classModal && <Modal title="Schedule a class" eyebrow="Tenant class session" icon={<CalendarPlus size={20} />} onClose={() => setClassModal(false)}><form onSubmit={createClass}><label>Class title<input name="title" required maxLength={160} autoFocus placeholder="Strength & conditioning" /></label><label>Description<textarea name="description" rows={2} maxLength={2000} /></label><div className="field-pair"><label>Branch<select name="branch_id" defaultValue={defaultBranch} required>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><label>Trainer<select name="trainer_id" defaultValue=""><option value="">Unassigned</option>{data.trainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{trainer.name}</option>)}</select></label></div><div className="field-pair"><label>Starts<input name="starts_at" type="datetime-local" required /></label><label>Ends<input name="ends_at" type="datetime-local" required /></label></div><label>Capacity<input name="capacity" type="number" min="1" max="1000" defaultValue="20" required /></label><label className="inline-check"><input name="waitlist_enabled" type="checkbox" defaultChecked /> Enable FIFO waitlist when full</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setClassModal(false)}>Cancel</button><button className="primary-button" disabled={busy} type="submit">Schedule class</button></div></form></Modal>}
     {bookingSession && <Modal title={`Book ${bookingSession.title}`} eyebrow="Capacity-safe booking" icon={<TicketCheck size={20} />} onClose={() => setBookingSession(null)}><form onSubmit={createBooking}><p className="booking-summary">{formatGymDateTime(bookingSession.starts_at, data.timezone)} · {bookingSession.booked_count}/{bookingSession.capacity} confirmed{bookingSession.booked_count >= bookingSession.capacity ? " · waitlist applies" : ""}</p>{canBookOthers && <label>Member<select name="member_id" required defaultValue=""><option value="" disabled>Select a member</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.number}</option>)}</select></label>}<div className="modal-note"><ListOrdered size={16} />The server locks this class before assigning a place or FIFO waitlist position.</div><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setBookingSession(null)}>Cancel</button><button className="primary-button" disabled={busy} type="submit">Confirm booking</button></div></form></Modal>}
     {credentialModal && <Modal title="Issue member QR" eyebrow="Revocable access credential" icon={<QrCode size={20} />} onClose={() => setCredentialModal(false)}>{credential ? <div className="credential-result"><canvas ref={qrCanvas} aria-label="New member QR credential" /><strong>Save this QR now</strong><p>It is shown only once. Issuing another QR immediately revokes this one.</p><button className="secondary-button" onClick={() => void navigator.clipboard?.writeText(credential)}>Copy encoded credential</button></div> : <form onSubmit={issueCredential}><label>Member<select name="member_id" required defaultValue=""><option value="" disabled>Select a member</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.number}</option>)}</select></label><div className="modal-note"><ShieldCheck size={16} />Only a SHA-256 digest is retained by IronCore; the QR plaintext appears in this response once.</div><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setCredentialModal(false)}>Cancel</button><button className="primary-button" disabled={busy} type="submit">Issue QR</button></div></form>}</Modal>}
+    {scannerOpen && <QrCameraScanner branchName={data.branches.find((branch) => branch.id === selectedCheckInBranch)?.name ?? ""} onScan={checkInFromCamera} onClose={() => setScannerOpen(false)} onManualFallback={() => { setScannerOpen(false); window.setTimeout(() => memberCodeInput.current?.focus(), 0); }} />}
   </section>;
 }

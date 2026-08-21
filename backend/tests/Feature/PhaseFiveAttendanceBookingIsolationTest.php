@@ -34,8 +34,90 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         Sanctum::actingAs($owner);
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
             'branch_id' => $branch->id,
-            'member_number' => $other->member_number,
+            'member_code' => $other->member_code,
         ], ['X-Gym-ID' => $gym->id])->assertUnprocessable();
+    }
+
+    public function test_every_member_receives_a_six_digit_code_unique_inside_the_gym(): void
+    {
+        [, $gym, $branch] = $this->tenant();
+        [$first, $second] = app(TenantContext::class)->run($gym, fn () => [
+            $this->memberWithMembership($branch, 'MBR-CODE-A'),
+            $this->memberWithMembership($branch, 'MBR-CODE-B'),
+        ]);
+
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $first->member_code);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $second->member_code);
+        $this->assertNotSame($first->member_code, $second->member_code);
+        $this->assertNotSame($first->id, $first->member_code);
+    }
+
+    public function test_manual_member_code_check_in_is_validated_by_the_backend(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-MANUAL'));
+
+        Sanctum::actingAs($owner);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $member->member_code,
+        ], ['X-Gym-ID' => $gym->id])
+            ->assertCreated()
+            ->assertJsonPath('data.member.member_code', $member->member_code)
+            ->assertJsonPath('data.method', 'member_code');
+    }
+
+    public function test_valid_secure_qr_checks_in_once_and_rejects_a_duplicate(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-QR'));
+
+        Sanctum::actingAs($owner);
+        $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], [
+            'X-Gym-ID' => $gym->id,
+        ])->assertCreated()->json('data.credential');
+
+        $payload = ['branch_id' => $branch->id, 'credential' => $credential];
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", $payload, ['X-Gym-ID' => $gym->id])
+            ->assertCreated()->assertJsonPath('data.method', 'qr');
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", $payload, ['X-Gym-ID' => $gym->id])
+            ->assertUnprocessable()->assertJsonValidationErrors('member');
+    }
+
+    public function test_secure_qr_rejects_expired_membership_wrong_gym_and_wrong_branch(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-RULES'));
+        $otherBranch = app(TenantContext::class)->run($gym, fn () => GymBranch::query()->create([
+            'name' => 'North', 'code' => 'NORTH', 'status' => 'active', 'is_primary' => false,
+        ]));
+
+        Sanctum::actingAs($owner);
+        $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], [
+            'X-Gym-ID' => $gym->id,
+        ])->assertCreated()->json('data.credential');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $otherBranch->id, 'credential' => $credential,
+        ], ['X-Gym-ID' => $gym->id])->assertUnprocessable()->assertJsonValidationErrors('branch_id');
+
+        app(TenantContext::class)->run($gym, fn () => Membership::query()
+            ->where('member_id', $member->id)->update(['ends_at' => today()->subDay()]));
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id, 'credential' => $credential,
+        ], ['X-Gym-ID' => $gym->id])->assertUnprocessable()->assertJsonValidationErrors('membership');
+
+        [$otherOwner, $otherGym, $otherGymBranch] = $this->tenant();
+        $otherMember = app(TenantContext::class)->run($otherGym, fn () => $this->memberWithMembership($otherGymBranch, 'MBR-OTHER-QR'));
+        Sanctum::actingAs($otherOwner);
+        $otherCredential = $this->postJson("/api/v1/gyms/{$otherGym->id}/members/{$otherMember->id}/access-credential", [], [
+            'X-Gym-ID' => $otherGym->id,
+        ])->assertCreated()->json('data.credential');
+
+        Sanctum::actingAs($owner);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id, 'credential' => $otherCredential,
+        ], ['X-Gym-ID' => $gym->id])->assertUnprocessable()->assertJsonValidationErrors('credential');
     }
 
     public function test_full_class_waitlists_and_cancellation_promotes_fifo_member(): void

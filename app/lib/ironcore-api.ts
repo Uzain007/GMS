@@ -60,6 +60,7 @@ export type MemberRecord = {
   home_branch_id: string | null;
   user_id: string | null;
   member_number: string;
+  member_code: string;
   first_name: string;
   last_name: string;
   email: string | null;
@@ -71,7 +72,7 @@ export type MemberRecord = {
 };
 
 export type MemberSelfRecord = Pick<MemberRecord,
-  "member_number" | "first_name" | "last_name" | "email" | "phone" |
+  "member_number" | "member_code" | "first_name" | "last_name" | "email" | "phone" |
   "date_of_birth" | "status" | "joined_at"
 >;
 
@@ -122,11 +123,11 @@ export type MemberAccessCredentialRecord = { id: string; gym_id: string; member_
 export type MemberSelfCredentialRecord = Pick<MemberAccessCredentialRecord,
   "credential_hint" | "status" | "expires_at" | "last_used_at" | "created_at"
 > & { credential?: string };
-export type AttendanceRecord = { id: string; gym_id: string; member_id: string; membership_id: string; branch_id: string; member?: { id: string; member_number: string; name: string }; branch?: { id: string; name: string }; method: "qr" | "member_code" | "manual"; status: "checked_in" | "checked_out"; checked_in_at: string; checked_out_at: string | null };
+export type AttendanceRecord = { id: string; gym_id: string; member_id: string; membership_id: string; branch_id: string; member?: { id: string; member_number: string; member_code?: string; name: string }; branch?: { id: string; name: string }; method: "qr" | "member_code" | "manual"; status: "checked_in" | "checked_out"; checked_in_at: string; checked_out_at: string | null };
 export type ClassSessionRecord = { id: string; gym_id: string; branch_id: string; trainer_staff_profile_id: string | null; branch?: { id: string; name: string }; trainer?: { id: string; name: string | null } | null; title: string; description: string | null; starts_at: string; ends_at: string; capacity: number; booked_count: number; waitlist_count: number; attended_count: number; waitlist_enabled: boolean; booking_opens_at: string | null; booking_closes_at: string | null; status: "scheduled" | "cancelled" | "completed"; cancellation_reason: string | null; created_at: string | null };
 export type ClassBookingRecord = { id: string; gym_id: string; class_session_id: string; member_id: string; membership_id: string; member?: { id: string; member_number: string; name: string }; session?: { id: string; title: string; starts_at: string }; status: "booked" | "waitlisted" | "cancelled" | "attended" | "no_show"; waitlist_sequence: number | null; booked_at: string; promoted_at: string | null; cancelled_at: string | null; checked_in_at: string | null; cancellation_reason: string | null };
 export type NewClassSession = { branch_id: string; trainer_staff_profile_id?: string; title: string; description?: string; starts_at: string; ends_at: string; capacity: number; waitlist_enabled?: boolean; booking_opens_at?: string; booking_closes_at?: string };
-export type AttendanceCheckIn = { branch_id: string; credential?: string; member_number?: string; member_id?: string };
+export type AttendanceCheckIn = { branch_id: string; credential?: string; member_code?: string; member_id?: string };
 export type TrainerAssignmentRecord = { id: string; gym_id: string; trainer_staff_profile_id: string; member_id: string; trainer?: { id: string; name: string | null }; member?: { id: string; member_number: string; name: string }; status: "active" | "inactive"; starts_on: string; ends_on: string | null; notes: string | null; created_at: string | null };
 export type WorkoutExerciseRecord = { id: string; gym_id: string; workout_plan_id: string; name: string; instructions: string | null; day_number: number; sort_order: number; target_sets: number | null; target_reps_min: number | null; target_reps_max: number | null; target_load_grams: number | null; target_duration_seconds: number | null; rest_seconds: number | null };
 export type WorkoutPlanRecord = { id: string; gym_id: string; member_id: string; trainer_staff_profile_id: string; member?: { id: string; member_number: string; name: string }; trainer?: { id: string; name: string | null }; title: string; goal: string | null; notes: string | null; starts_on: string; ends_on: string | null; status: "draft" | "active" | "completed" | "cancelled"; exercises: WorkoutExerciseRecord[]; created_at: string | null };
