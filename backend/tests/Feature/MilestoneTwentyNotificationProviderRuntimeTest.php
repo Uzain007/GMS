@@ -61,7 +61,7 @@ class MilestoneTwentyNotificationProviderRuntimeTest extends TestCase
         $this->assertIsArray($resetMessage);
         $decodedReset = $this->decodedSmtpText($resetMessage);
         $this->assertTrue(
-            str_contains($decodedReset, '#reset_email=runtime%40example.test'),
+            str_contains($decodedReset, '#reset_email=runtime-account%40example.test'),
             'The SMTP reset message must retain the encoded email in the URL fragment.',
         );
         $this->assertTrue(
