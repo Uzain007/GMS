@@ -16,8 +16,10 @@ class StaffProfile extends Model
     use BelongsToGym, HasFactory, HasUuids;
 
     protected $fillable = [
-        'user_id', 'home_branch_id', 'employee_number', 'job_title', 'status',
-        'hired_at', 'terminated_at', 'permissions',
+        'user_id', 'home_branch_id', 'display_name', 'contact_email', 'phone',
+        'employee_number', 'job_title', 'status', 'hired_at', 'terminated_at',
+        'permissions', 'profile_image_disk', 'profile_image_path',
+        'profile_image_mime', 'profile_image_size',
     ];
 
     protected function casts(): array
@@ -27,7 +29,18 @@ class StaffProfile extends Model
             'hired_at' => 'date',
             'terminated_at' => 'date',
             'permissions' => 'array',
+            'profile_image_size' => 'integer',
         ];
+    }
+
+    public function professionalName(): string
+    {
+        return $this->display_name ?: (string) $this->user?->name;
+    }
+
+    public function professionalEmail(): string
+    {
+        return $this->contact_email ?: (string) $this->user?->email;
     }
 
     public function user(): BelongsTo

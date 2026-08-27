@@ -8,11 +8,35 @@ use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Throwable;
 
 class StripePlatformBillingService
 {
+    public function checkoutConfigured(): bool
+    {
+        foreach ([
+            'secret', 'api_url', 'billing_webhook_secret',
+            'billing_checkout_success_url', 'billing_checkout_cancel_url',
+        ] as $key) {
+            if (blank(config('services.stripe.'.$key))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function assertCheckoutAvailable(): void
+    {
+        if (! $this->checkoutConfigured()) {
+            throw ValidationException::withMessages([
+                'payment_method' => ['Stripe is not configured. Choose bank transfer or cash.'],
+            ]);
+        }
+    }
+
     /** @return array{product_id: string, price_id: string} */
     public function createProductAndPrice(array $plan, array $price): array
     {

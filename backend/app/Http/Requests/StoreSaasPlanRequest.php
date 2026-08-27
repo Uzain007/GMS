@@ -26,6 +26,8 @@ class StoreSaasPlanRequest extends FormRequest
             'feature_limits.staff' => ['required', 'integer', 'between:1,100000'],
             'feature_limits.advanced_reports' => ['required', 'boolean'],
             'feature_limits.priority_support' => ['required', 'boolean'],
+            'payment_methods' => ['required', 'array', 'min:1', 'max:3'],
+            'payment_methods.*' => ['required', 'distinct', Rule::in(['cash', 'bank_transfer', 'stripe'])],
             'currency' => ['required', Rule::enum(Currency::class)],
             'billing_interval' => ['required', Rule::in(['monthly', 'yearly'])],
             'amount_minor' => ['required', 'integer', 'between:1,999999999999'],

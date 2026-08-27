@@ -16,6 +16,7 @@ class SaasPlanResource extends JsonResource
             'description' => $this->description,
             'status' => $this->status->value,
             'feature_limits' => $this->feature_limits,
+            'payment_methods' => $this->payment_methods,
             'sort_order' => $this->sort_order,
             // Provider catalogue identifiers remain server-only.
             'prices' => SaasPlanPriceResource::collection($this->whenLoaded('prices')),

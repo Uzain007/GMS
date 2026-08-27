@@ -16,6 +16,43 @@ use Throwable;
 
 class StripeGatewayService
 {
+    public function memberPaymentsConfigured(): bool
+    {
+        foreach ([
+            'secret', 'webhook_secret', 'api_url', 'connect_refresh_url',
+            'connect_return_url', 'checkout_success_url', 'checkout_cancel_url',
+        ] as $key) {
+            if (blank(config('services.stripe.'.$key))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function checkoutAvailable(): bool
+    {
+        if (! $this->memberPaymentsConfigured()) {
+            return false;
+        }
+
+        $gateway = PaymentGatewayAccount::query()
+            ->where('provider', PaymentProvider::Stripe->value)
+            ->first();
+
+        return $gateway?->status === PaymentGatewayStatus::Active
+            && $gateway->charges_enabled;
+    }
+
+    public function assertCheckoutAvailable(): void
+    {
+        if (! $this->checkoutAvailable()) {
+            throw ValidationException::withMessages([
+                'method' => ['Stripe is not configured and active for this gym. Use cash or bank transfer instead.'],
+            ]);
+        }
+    }
+
     /** @return array{gateway: PaymentGatewayAccount, onboarding_url: string} */
     public function startOnboarding(Gym $gym, string $email): array
     {
@@ -77,11 +114,7 @@ class StripeGatewayService
             ->where('provider', PaymentProvider::Stripe->value)
             ->first();
 
-        if (! $gateway || $gateway->status !== PaymentGatewayStatus::Active || ! $gateway->charges_enabled) {
-            throw ValidationException::withMessages([
-                'method' => ['Connect and activate Stripe before creating an online card checkout.'],
-            ]);
-        }
+        $this->assertCheckoutAvailable();
 
         $payment->loadMissing('member');
         $successUrl = str_replace('{PAYMENT_ID}', $payment->getKey(), (string) config('services.stripe.checkout_success_url'));

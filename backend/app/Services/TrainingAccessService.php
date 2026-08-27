@@ -101,7 +101,7 @@ class TrainingAccessService
             ->exists();
     }
 
-    private function assertActiveTrainer(StaffProfile $trainer): void
+    public function assertActiveTrainer(StaffProfile $trainer): void
     {
         abort_unless(
             $trainer->status === StaffStatus::Active
@@ -109,5 +109,26 @@ class TrainingAccessService
             403,
             'Training access requires an active trainer profile and tenant role.',
         );
+    }
+
+    public function assertTrainerBranchAccess(StaffProfile $trainer, string $branchId): void
+    {
+        $assignedBranches = $trainer->branches()
+            ->wherePivot('gym_id', $this->tenant->id());
+
+        // A legacy profile without branch rows remains gym-wide. Once a branch
+        // is assigned, every class/member match is checked server-side.
+        if ($assignedBranches->exists() && ! (clone $assignedBranches)->whereKey($branchId)->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'trainer_staff_profile_id' => ['The selected trainer is not assigned to this branch.'],
+            ]);
+        }
+    }
+
+    public function assertTrainerMemberBranchAccess(StaffProfile $trainer, Member $member): void
+    {
+        if ($member->home_branch_id) {
+            $this->assertTrainerBranchAccess($trainer, $member->home_branch_id);
+        }
     }
 }

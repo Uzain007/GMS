@@ -51,7 +51,7 @@ class PhaseFourPaymentIsolationTest extends TestCase
             'idempotency_key' => 'cash-test-001',
         ], ['X-Gym-ID' => $gym->id])
             ->assertCreated()
-            ->assertJsonPath('data.status', PaymentStatus::Succeeded->value);
+            ->assertJsonPath('data.status', PaymentStatus::Paid->value);
 
         app(TenantContext::class)->run($gym, function () use ($invoiceId): void {
             $invoice = Invoice::query()->findOrFail($invoiceId);
@@ -70,7 +70,7 @@ class PhaseFourPaymentIsolationTest extends TestCase
             'receipt_number' => 'PAY-BLOCKED',
             'provider' => 'manual',
             'method' => 'cash',
-            'status' => 'succeeded',
+            'status' => 'paid',
             'amount_minor' => 1000,
             'currency' => Currency::GBP,
             'idempotency_key' => 'blocked-payment',
@@ -91,7 +91,7 @@ class PhaseFourPaymentIsolationTest extends TestCase
             'receipt_number' => 'PAY-ALLOWED',
             'provider' => 'manual',
             'method' => 'cash',
-            'status' => 'succeeded',
+            'status' => 'paid',
             'amount_minor' => 1000,
             'currency' => Currency::GBP,
             'idempotency_key' => 'allowed-payment',

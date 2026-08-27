@@ -213,6 +213,9 @@ test("coaching UI integrates assignment-scoped plans, exact progress and private
   assert.match(dashboard, /Coaching & progress/);
   assert.match(coaching, /Math\.round\(loadKg \* 1000\)/);
   assert.match(coaching, /Math\.round\(value \* 1000\)/);
+  assert.match(coaching, /onUpdateProgress/);
+  assert.match(coaching, /onDeleteProgress/);
+  assert.match(coaching, /Measurement details/);
   assert.match(coaching, /Assignment-bound coaching workspace/);
   assert.match(coaching, /End trainer access/);
   assert.match(coaching, /This assignment cannot be reactivated/);
@@ -264,7 +267,7 @@ test("class scheduling and member timetables use the selected gym timezone", asy
   assert.match(coaching, /zonedLocalDateTimeToIso\(String\(form\.get\("performed_at"\)\), data\.timezone\)/);
   assert.match(gymTime, /formatToParts/);
   assert.match(gymTime, /daylight-saving offsets settle correctly/);
-  assert.match(engagement, /canBookOthers && <button className="primary-button class-book-button"/);
+  assert.match(engagement, /canBookOthers && session\.status === "scheduled" && <button className="primary-button class-book-button"/);
   assert.doesNotMatch(engagement, /new Date\(String\(form\.get\("starts_at"\)\)\)\.toISOString\(\)/);
   assert.doesNotMatch(coaching, /new Date\(String\(form\.get\("performed_at"\)\)\)\.toISOString\(\)/);
 });
@@ -286,4 +289,17 @@ test("tenant operation and member lifecycle edits use audited backend updates", 
   assert.match(operations, /EditMembershipModal/);
   assert.match(operations, /Existing memberships keep their accepted price snapshot/);
   assert.match(operations, /The selected gym, actor and reason are written to the audit trail/);
+});
+
+test("gym settings keep labels and controls separated without horizontal overflow", async () => {
+  const dashboard = await read("app/ironcore-dashboard.tsx");
+  const css = await read("app/globals.css");
+
+  assert.match(dashboard, /Gym business settings/);
+  assert.match(dashboard, /Current currency<select/);
+  assert.match(dashboard, /Audit reason<textarea/);
+  assert.match(css, /\.settings-card form label\{display:grid;min-width:0;gap:6px/);
+  assert.match(css, /\.settings-card form input,\.settings-card form select,\.settings-card form textarea\{display:block;width:100%;min-width:0/);
+  assert.match(css, /\.settings-card\{min-width:0;padding:20px\}/);
+  assert.match(css, /\.settings-card \.field-pair,\.settings-card \.field-trio,\.platform-detail-grid\{grid-template-columns:1fr\}/);
 });

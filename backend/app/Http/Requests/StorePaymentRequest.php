@@ -22,6 +22,14 @@ class StorePaymentRequest extends TenantFormRequest
             'paid_at' => ['nullable', 'date', 'before_or_equal:now'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'metadata' => ['nullable', 'array'],
+            'bank_reference' => ['nullable', 'string', 'max:160'],
+            'receipt' => [
+                'required_if:method,'.PaymentMethod::BankTransfer->value,
+                'file',
+                'mimes:pdf,jpg,jpeg,png,webp',
+                'mimetypes:application/pdf,image/jpeg,image/png,image/webp',
+                'max:10240',
+            ],
         ];
     }
 }

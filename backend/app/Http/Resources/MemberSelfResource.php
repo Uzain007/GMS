@@ -12,7 +12,6 @@ class MemberSelfResource extends JsonResource
         // The member portal receives only fields it can display or edit.
         // Tenant/user UUIDs and private staff metadata stay server-side.
         return [
-            'member_number' => $this->member_number,
             'member_code' => $this->member_code,
             'first_name' => $this->first_name,
             'last_name' => $this->last_name,

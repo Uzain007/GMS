@@ -136,12 +136,25 @@ class StaffInvitationService
                     ['user_id' => $user->getKey()],
                     [
                         'home_branch_id' => $invitation->home_branch_id,
+                        'display_name' => $user->name,
+                        'contact_email' => $user->email,
                         'employee_number' => $invitation->employee_number,
                         'job_title' => $invitation->job_title,
                         'status' => StaffStatus::Active,
                         'hired_at' => now()->toDateString(),
                     ],
                 );
+
+                if ($invitation->home_branch_id) {
+                    // Invitation acceptance creates the same tenant-owned branch
+                    // boundary used by immediately created trainer profiles.
+                    $profile->branches()->sync([
+                        $invitation->home_branch_id => [
+                            'gym_id' => $gym->getKey(),
+                            'is_primary' => true,
+                        ],
+                    ]);
+                }
 
                 $invitation->update([
                     'status' => InvitationStatus::Accepted,

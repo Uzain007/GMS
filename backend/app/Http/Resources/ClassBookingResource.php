@@ -18,6 +18,7 @@ class ClassBookingResource extends JsonResource
             'member' => $this->whenLoaded('member', fn () => [
                 'id' => $this->member->id,
                 'member_number' => $this->member->member_number,
+                'member_code' => $this->member->member_code,
                 'name' => trim($this->member->first_name.' '.$this->member->last_name),
             ]),
             'session' => $this->whenLoaded('session', fn () => [

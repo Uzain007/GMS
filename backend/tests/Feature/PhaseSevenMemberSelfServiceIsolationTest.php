@@ -3,10 +3,14 @@
 namespace Tests\Feature;
 
 use App\Enums\MemberStatus;
+use App\Enums\MembershipStatus;
+use App\Enums\PlanStatus;
 use App\Enums\UserRole;
 use App\Models\Gym;
 use App\Models\Member;
 use App\Models\MemberAccessCredential;
+use App\Models\Membership;
+use App\Models\MembershipPlan;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -24,8 +28,8 @@ class PhaseSevenMemberSelfServiceIsolationTest extends TestCase
         Sanctum::actingAs($user);
 
         $this->getJson("/api/v1/gyms/{$gym->id}/member/me", ['X-Gym-ID' => $gym->id])
-            ->assertOk()->assertJsonPath('data.member_number', $member->member_number)
-            ->assertJsonPath('data.member_code', $member->member_code)
+            ->assertOk()->assertJsonPath('data.member_code', $member->member_code)
+            ->assertJsonMissingPath('data.member_number')
             ->assertJsonMissingPath('data.id')->assertJsonMissingPath('data.gym_id')
             ->assertJsonMissingPath('data.user_id')->assertJsonMissingPath('data.metadata');
 
@@ -53,7 +57,7 @@ class PhaseSevenMemberSelfServiceIsolationTest extends TestCase
         $this->getJson("/api/v1/gyms/{$gym->id}/members/{$blockedMember->id}", ['X-Gym-ID' => $gym->id])->assertForbidden();
     }
 
-    public function test_qr_plaintext_is_returned_once_and_only_its_digest_persists(): void
+    public function test_qr_is_persistent_across_authorised_reads_while_only_its_digest_persists(): void
     {
         [$user, $gym, $member] = $this->memberTenant('PASS');
         Sanctum::actingAs($user);
@@ -61,14 +65,20 @@ class PhaseSevenMemberSelfServiceIsolationTest extends TestCase
             ->assertCreated()->assertJsonMissingPath('data.id')->assertJsonMissingPath('data.member_id')
             ->assertJsonMissingPath('data.gym_id')->json('data.credential');
         $this->assertIsString($plaintext);
-        $this->assertStringStartsWith('icqr_', $plaintext);
+        $this->assertStringStartsWith('icqr1_', $plaintext);
         app(TenantContext::class)->run($gym, function () use ($member, $plaintext): void {
             $credential = MemberAccessCredential::query()->where('member_id', $member->id)->firstOrFail();
             $this->assertSame(hash('sha256', $plaintext), $credential->getRawOriginal('credential_hash'));
             $this->assertNotSame($plaintext, $credential->getRawOriginal('credential_hash'));
         });
         $this->getJson("/api/v1/gyms/{$gym->id}/member/access-credential", ['X-Gym-ID' => $gym->id])
-            ->assertOk()->assertJsonMissingPath('data.credential')->assertJsonMissingPath('data.credential_hash');
+            ->assertOk()->assertJsonPath('data.credential', $plaintext)
+            ->assertJsonMissingPath('data.credential_hash');
+        $this->postJson("/api/v1/gyms/{$gym->id}/member/access-credential", [], ['X-Gym-ID' => $gym->id])
+            ->assertOk()->assertJsonPath('data.credential', $plaintext);
+        $replacement = $this->postJson("/api/v1/gyms/{$gym->id}/member/access-credential/rotate", [], ['X-Gym-ID' => $gym->id])
+            ->assertCreated()->json('data.credential');
+        $this->assertNotSame($plaintext, $replacement);
     }
 
     /** @return array{User, Gym, Member} */
@@ -78,12 +88,23 @@ class PhaseSevenMemberSelfServiceIsolationTest extends TestCase
         $gym = Gym::factory()->create();
         $member = app(TenantContext::class)->run($gym, function () use ($gym, $user, $suffix): Member {
             $gym->users()->attach($user, ['role' => UserRole::Member->value, 'status' => 'active']);
-            return Member::query()->create([
+            $member = Member::query()->create([
                 'user_id' => $user->id, 'member_number' => 'MBR-'.$suffix,
                 'first_name' => 'Member', 'last_name' => $suffix,
                 'email' => strtolower($suffix).'@example.test', 'status' => MemberStatus::Active,
                 'joined_at' => now()->subMonth(),
             ]);
+            $plan = MembershipPlan::query()->create([
+                'name' => 'Member portal plan', 'code' => 'PORTAL-'.$suffix,
+                'billing_interval' => 'monthly', 'price_amount_minor' => 5000,
+                'currency' => 'GBP', 'status' => PlanStatus::Active,
+            ]);
+            Membership::query()->create([
+                'member_id' => $member->id, 'plan_id' => $plan->id, 'created_by' => $user->id,
+                'status' => MembershipStatus::Active, 'starts_at' => today()->subMonth(),
+                'price_amount_minor' => 5000, 'currency' => 'GBP', 'billing_interval' => 'monthly',
+            ]);
+            return $member;
         });
         return [$user, $gym, $member];
     }

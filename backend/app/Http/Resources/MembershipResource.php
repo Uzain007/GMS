@@ -18,6 +18,8 @@ class MembershipResource extends JsonResource
             'status' => $this->status->value,
             'starts_at' => $this->starts_at?->toDateString(),
             'ends_at' => $this->ends_at?->toDateString(),
+            'is_in_date' => $this->starts_at?->lte(today())
+                && (! $this->ends_at || $this->ends_at->gte(today())),
             'next_billing_at' => $this->next_billing_at?->toDateString(),
             // These values are immutable snapshots of the accepted plan contract.
             'price_amount_minor' => $this->price_amount_minor,

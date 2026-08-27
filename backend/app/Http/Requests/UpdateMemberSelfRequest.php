@@ -9,10 +9,10 @@ class UpdateMemberSelfRequest extends TenantFormRequest
         return [
             // Self-service can update contact/profile fields only. Tenant,
             // identity links, membership state and member number stay staff-owned.
-            'first_name' => ['sometimes', 'string', 'max:100'],
-            'last_name' => ['sometimes', 'string', 'max:100'],
-            'email' => ['sometimes', 'nullable', 'email:rfc', 'max:254'],
-            'phone' => ['sometimes', 'nullable', 'string', 'max:40'],
+            'first_name' => ['sometimes', 'required', 'string', 'max:100'],
+            'last_name' => ['sometimes', 'required', 'string', 'max:100'],
+            'email' => ['sometimes', 'required', 'email:rfc', 'max:254'],
+            'phone' => ['sometimes', 'required', 'string', 'max:40'],
             'date_of_birth' => ['sometimes', 'nullable', 'date', 'before:today'],
         ];
     }

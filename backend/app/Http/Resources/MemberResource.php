@@ -26,6 +26,12 @@ class MemberResource extends JsonResource
             'archived_at' => $this->archived_at?->toIso8601String(),
             // Metadata is already selected through a tenant-scoped model query.
             'metadata' => $this->metadata,
+            'current_membership' => $this->when(
+                $this->relationLoaded('currentMembership'),
+                fn () => $this->currentMembership
+                    ? (new MembershipResource($this->currentMembership))->resolve($request)
+                    : null,
+            ),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

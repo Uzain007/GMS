@@ -3,6 +3,9 @@
 namespace App\Services;
 
 use App\Enums\PaymentProvider;
+use App\Enums\PaymentMethod;
+use App\Enums\PaymentStatus;
+use App\Enums\SaasInvoiceStatus;
 use App\Enums\SaasPlanStatus;
 use App\Enums\SaasSubscriptionStatus;
 use App\Enums\SubscriptionCheckoutStatus;
@@ -11,12 +14,18 @@ use App\Models\GymSubscription;
 use App\Models\PlatformBillingCustomer;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
+use App\Models\SaasBillingInvoice;
+use App\Models\SaasSubscriptionPayment;
 use App\Models\SubscriptionCheckoutSession;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class SaasBillingService
 {
@@ -27,17 +36,17 @@ class SaasBillingService
 
     public function createPlan(array $data, User $actor, Request $request): SaasPlan
     {
-        $provider = $this->stripe->createProductAndPrice($data, $data);
-        return DB::transaction(function () use ($data, $actor, $request, $provider): SaasPlan {
+        return DB::transaction(function () use ($data, $actor, $request): SaasPlan {
             $plan = SaasPlan::query()->create([
                 'code' => mb_strtolower($data['code']),
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
                 'status' => SaasPlanStatus::Active,
                 'feature_limits' => $data['feature_limits'],
+                'payment_methods' => array_values($data['payment_methods']),
                 'sort_order' => $data['sort_order'] ?? 100,
                 'provider' => PaymentProvider::Stripe,
-                'provider_product_id' => $provider['product_id'],
+                'provider_product_id' => null,
             ]);
             $plan->prices()->create([
                 'currency' => $data['currency'],
@@ -46,7 +55,7 @@ class SaasBillingService
                 'trial_days' => $data['trial_days'] ?? 0,
                 'active' => true,
                 'provider' => PaymentProvider::Stripe,
-                'provider_price_id' => $provider['price_id'],
+                'provider_price_id' => null,
             ]);
             $this->audit->record('platform.saas_plan.created', $plan, $actor, after: $plan->load('prices')->toArray(), reason: 'Initial SaaS plan publication', request: $request);
             return $plan->fresh('prices');
@@ -55,9 +64,24 @@ class SaasBillingService
 
     public function updatePlan(SaasPlan $plan, array $data, User $actor, Request $request): SaasPlan
     {
-        $before = $plan->toArray();
+        $before = $plan->load('prices')->toArray();
         return DB::transaction(function () use ($plan, $data, $actor, $request, $before): SaasPlan {
-            $plan->update(collect($data)->except('reason')->all());
+            $priceData = $data['price'] ?? null;
+            $plan->update(collect($data)->except(['reason', 'price'])->all());
+            if ($priceData) {
+                $plan->prices()->where('currency', $priceData['currency'])
+                    ->where('billing_interval', $priceData['billing_interval'])
+                    ->where('active', true)
+                    ->update(['active' => false]);
+                $price = $plan->prices()->create([
+                    ...$priceData,
+                    'trial_days' => $priceData['trial_days'] ?? 0,
+                    'active' => true,
+                    'provider' => PaymentProvider::Stripe,
+                    'provider_price_id' => null,
+                ]);
+                $this->audit->record('platform.saas_price.created', $price, $actor, after: $price->toArray(), reason: $data['reason'], request: $request);
+            }
             $fresh = $plan->fresh('prices');
             $this->audit->record('platform.saas_plan.updated', $fresh, $actor, $before, $fresh->toArray(), $data['reason'], $request);
             return $fresh;
@@ -66,8 +90,7 @@ class SaasBillingService
 
     public function addPrice(SaasPlan $plan, array $data, User $actor, Request $request): SaasPlanPrice
     {
-        $providerPriceId = $this->stripe->createPriceForPlan($plan, $data);
-        return DB::transaction(function () use ($plan, $data, $actor, $request, $providerPriceId): SaasPlanPrice {
+        return DB::transaction(function () use ($plan, $data, $actor, $request): SaasPlanPrice {
             // Prices are append-only. The previous catalogue choice becomes
             // inactive but remains attached to historical subscriptions.
             $plan->prices()->where('currency', $data['currency'])
@@ -81,7 +104,7 @@ class SaasBillingService
                 'trial_days' => $data['trial_days'] ?? 0,
                 'active' => true,
                 'provider' => PaymentProvider::Stripe,
-                'provider_price_id' => $providerPriceId,
+                'provider_price_id' => null,
             ]);
             $this->audit->record('platform.saas_price.created', $price, $actor, after: $price->toArray(), reason: $data['reason'], request: $request);
             return $price;
@@ -98,6 +121,12 @@ class SaasBillingService
         if ($price->currency->value !== $gym->base_currency->value) {
             throw ValidationException::withMessages(['saas_plan_price_id' => ['Select a price in the gym base currency.']]);
         }
+        if (! in_array(PaymentProvider::Stripe->value, $price->plan->payment_methods ?? [], true)) {
+            throw ValidationException::withMessages(['payment_method' => ['This SaaS plan does not accept card payments.']]);
+        }
+        // Provider configuration is checked only after the gym explicitly
+        // selects card checkout; catalogue publication never reaches Stripe.
+        $this->stripe->assertCheckoutAvailable();
 
         $current = GymSubscription::query()->whereIn('status', [
             SaasSubscriptionStatus::Incomplete->value,
@@ -109,6 +138,9 @@ class SaasBillingService
         ])->latest()->first();
         if ($current) {
             throw ValidationException::withMessages(['subscription' => ['Use the billing portal to manage the existing subscription.']]);
+        }
+        if (SaasSubscriptionPayment::query()->where('status', PaymentStatus::Pending->value)->exists()) {
+            throw ValidationException::withMessages(['subscription' => ['Review or cancel the pending manual payment before starting card checkout.']]);
         }
 
         $existing = SubscriptionCheckoutSession::query()->where('idempotency_key', $idempotencyKey)->first();
@@ -128,9 +160,10 @@ class SaasBillingService
             return ['checkout_url' => (string) $session['url'], 'idempotency_reused' => true];
         }
 
+        $price = $this->ensureStripePrice($price);
         $customer = $this->customer($gym, $actor);
         $checkout = $this->stripe->createCheckout($gym, $customer, $price, $idempotencyKey);
-        SubscriptionCheckoutSession::query()->create([
+        $session = SubscriptionCheckoutSession::query()->create([
             'created_by' => $actor->getKey(),
             'saas_plan_price_id' => $price->getKey(),
             'idempotency_key' => $idempotencyKey,
@@ -138,13 +171,202 @@ class SaasBillingService
             'status' => SubscriptionCheckoutStatus::Open,
             'expires_at' => $checkout['expires_at'] ? Carbon::createFromTimestampUTC($checkout['expires_at']) : null,
         ]);
+        $this->audit->record(
+            'saas.subscription_checkout.started',
+            $session,
+            $actor,
+            after: [
+                'saas_plan_price_id' => $price->getKey(),
+                'provider' => PaymentProvider::Stripe->value,
+                'status' => SubscriptionCheckoutStatus::Open->value,
+            ],
+        );
         return ['checkout_url' => $checkout['checkout_url'], 'idempotency_reused' => false];
+    }
+
+    /** @return array{payment: SaasSubscriptionPayment, reused: bool} */
+    public function createManualPayment(
+        Gym $gym,
+        SaasPlanPrice $price,
+        array $data,
+        User $actor,
+        Request $request,
+        ?UploadedFile $receipt = null,
+    ): array {
+        $existing = SaasSubscriptionPayment::query()
+            ->where('idempotency_key', $data['idempotency_key'])
+            ->with('price.plan')
+            ->first();
+        if ($existing) {
+            return ['payment' => $existing, 'reused' => true];
+        }
+
+        $price->loadMissing('plan');
+        $this->assertSelectablePrice($gym, $price);
+        $method = PaymentMethod::from($data['method']);
+        if (! in_array($method->value, $price->plan->payment_methods ?? [], true)) {
+            throw ValidationException::withMessages(['method' => ['This payment method is not available for the selected SaaS plan.']]);
+        }
+        if ($method === PaymentMethod::BankTransfer && ! $receipt) {
+            throw ValidationException::withMessages(['receipt' => ['A bank-transfer receipt is required.']]);
+        }
+        if ($this->currentSubscription()) {
+            throw ValidationException::withMessages(['subscription' => ['Use billing management for the existing subscription.']]);
+        }
+        if (SaasSubscriptionPayment::query()->where('status', PaymentStatus::Pending->value)->exists()) {
+            throw ValidationException::withMessages(['subscription' => ['A manual SaaS payment is already awaiting review.']]);
+        }
+
+        $stored = null;
+        try {
+            $payment = DB::transaction(function () use ($price, $data, $actor, $request, $method, $receipt, &$stored): SaasSubscriptionPayment {
+                $payment = SaasSubscriptionPayment::query()->create([
+                    'saas_plan_price_id' => $price->getKey(),
+                    'submitted_by' => $actor->getKey(),
+                    'method' => $method,
+                    'status' => PaymentStatus::Pending,
+                    'amount_minor' => $price->amount_minor,
+                    'currency' => $price->currency,
+                    'idempotency_key' => $data['idempotency_key'],
+                    'reference' => trim((string) $data['reference']),
+                ]);
+
+                if ($receipt) {
+                    $stored = $this->storeManualReceipt($payment, $receipt);
+                    $payment->update($stored['attributes']);
+                }
+
+                $this->audit->record(
+                    'saas.subscription_payment.submitted',
+                    $payment,
+                    $actor,
+                    after: [
+                        'payment_id' => $payment->getKey(),
+                        'saas_plan_price_id' => $price->getKey(),
+                        'method' => $method->value,
+                        'status' => PaymentStatus::Pending->value,
+                        'amount_minor' => $price->amount_minor,
+                        'currency' => $price->currency->value,
+                        'has_receipt' => (bool) $receipt,
+                    ],
+                    request: $request,
+                );
+
+                return $payment->fresh()->load('price.plan');
+            });
+        } catch (Throwable $exception) {
+            if ($stored) {
+                Storage::disk($stored['disk'])->delete($stored['path']);
+            }
+            throw $exception;
+        }
+
+        return ['payment' => $payment, 'reused' => false];
+    }
+
+    public function reviewManualPayment(
+        Gym $gym,
+        SaasSubscriptionPayment $payment,
+        array $data,
+        User $actor,
+        Request $request,
+    ): SaasSubscriptionPayment {
+        return DB::transaction(function () use ($gym, $payment, $data, $actor, $request): SaasSubscriptionPayment {
+            $locked = SaasSubscriptionPayment::query()
+                ->with(['price.plan', 'submittedBy'])
+                ->lockForUpdate()
+                ->findOrFail($payment->getKey());
+            if ($locked->status !== PaymentStatus::Pending) {
+                throw ValidationException::withMessages(['payment' => ['Only a pending SaaS payment can be reviewed.']]);
+            }
+
+            $approved = $data['decision'] === 'approve';
+            $before = ['status' => $locked->status->value];
+            if (! $approved) {
+                $locked->update([
+                    'status' => PaymentStatus::Rejected,
+                    'reviewed_by' => $actor->getKey(),
+                    'reviewed_at' => now(),
+                    'review_reason' => $data['reason'],
+                ]);
+            } else {
+                if ($this->currentSubscription()) {
+                    throw ValidationException::withMessages(['subscription' => ['This gym already has a current SaaS subscription.']]);
+                }
+
+                $customer = $this->manualCustomer($gym, $locked->submittedBy ?? $actor);
+                $periodStart = now();
+                $periodEnd = $locked->price->billing_interval === 'yearly'
+                    ? $periodStart->copy()->addYearNoOverflow()
+                    : $periodStart->copy()->addMonthNoOverflow();
+                $subscription = GymSubscription::query()->create([
+                    'billing_customer_id' => $customer->getKey(),
+                    'saas_plan_id' => $locked->price->plan->getKey(),
+                    'saas_plan_price_id' => $locked->price->getKey(),
+                    'provider' => PaymentProvider::Manual,
+                    'provider_subscription_id' => 'manual_'.$locked->getKey(),
+                    'status' => SaasSubscriptionStatus::Active,
+                    'plan_code_snapshot' => $locked->price->plan->code,
+                    'plan_name_snapshot' => $locked->price->plan->name,
+                    'feature_limits_snapshot' => $locked->price->plan->feature_limits,
+                    'currency' => $locked->currency,
+                    'amount_minor' => $locked->amount_minor,
+                    'billing_interval' => $locked->price->billing_interval,
+                    'current_period_start' => $periodStart,
+                    'current_period_end' => $periodEnd,
+                ]);
+                $providerInvoiceId = 'manual_invoice_'.$locked->getKey();
+                $invoice = SaasBillingInvoice::query()->create([
+                    'billing_customer_id' => $customer->getKey(),
+                    'gym_subscription_id' => $subscription->getKey(),
+                    'provider_invoice_id' => $providerInvoiceId,
+                    'number' => 'IC-MAN-'.Str::upper((string) Str::ulid()),
+                    'status' => SaasInvoiceStatus::Paid,
+                    'currency' => $locked->currency,
+                    'amount_due_minor' => $locked->amount_minor,
+                    'amount_paid_minor' => $locked->amount_minor,
+                    'amount_remaining_minor' => 0,
+                    'period_start' => $periodStart,
+                    'period_end' => $periodEnd,
+                    'paid_at' => $periodStart,
+                ]);
+                $subscription->update(['latest_invoice_id' => $providerInvoiceId]);
+                $locked->update([
+                    'gym_subscription_id' => $subscription->getKey(),
+                    'saas_billing_invoice_id' => $invoice->getKey(),
+                    'status' => PaymentStatus::Paid,
+                    'reviewed_by' => $actor->getKey(),
+                    'reviewed_at' => now(),
+                    'review_reason' => $data['reason'],
+                    'paid_at' => $periodStart,
+                ]);
+            }
+
+            $fresh = $locked->fresh()->load('price.plan');
+            $this->audit->record(
+                $approved ? 'saas.subscription_payment.approved' : 'saas.subscription_payment.rejected',
+                $fresh,
+                $actor,
+                before: $before,
+                after: [
+                    'status' => $fresh->status->value,
+                    'gym_subscription_id' => $fresh->gym_subscription_id,
+                    'saas_billing_invoice_id' => $fresh->saas_billing_invoice_id,
+                ],
+                reason: $data['reason'],
+                request: $request,
+            );
+
+            return $fresh;
+        });
     }
 
     /** @return array{portal_url: string} */
     public function createPortal(): array
     {
-        $customer = PlatformBillingCustomer::query()->first();
+        $customer = PlatformBillingCustomer::query()
+            ->where('provider', PaymentProvider::Stripe->value)
+            ->first();
         if (! $customer) {
             throw ValidationException::withMessages(['subscription' => ['Start a subscription before opening the billing portal.']]);
         }
@@ -153,7 +375,9 @@ class SaasBillingService
 
     private function customer(Gym $gym, User $actor): PlatformBillingCustomer
     {
-        $existing = PlatformBillingCustomer::query()->first();
+        $existing = PlatformBillingCustomer::query()
+            ->where('provider', PaymentProvider::Stripe->value)
+            ->first();
         if ($existing) {
             return $existing;
         }
@@ -169,5 +393,119 @@ class SaasBillingService
                 'default_currency' => $gym->base_currency,
             ],
         );
+    }
+
+    private function ensureStripePrice(SaasPlanPrice $price): SaasPlanPrice
+    {
+        $price->loadMissing('plan');
+        if (filled($price->provider_price_id)) {
+            return $price;
+        }
+
+        $priceData = [
+            'currency' => $price->currency->value,
+            'billing_interval' => $price->billing_interval,
+            'amount_minor' => $price->amount_minor,
+            'trial_days' => $price->trial_days,
+        ];
+        if (blank($price->plan->provider_product_id)) {
+            $provider = $this->stripe->createProductAndPrice([
+                'code' => $price->plan->code,
+                'name' => $price->plan->name,
+                'description' => $price->plan->description,
+            ], $priceData);
+            $productId = $provider['product_id'];
+            $priceId = $provider['price_id'];
+        } else {
+            $productId = $price->plan->provider_product_id;
+            $priceId = $this->stripe->createPriceForPlan($price->plan, $priceData);
+        }
+
+        // Stripe idempotency keys make repeated provider synchronization safe;
+        // row locks ensure only the authoritative IDs become catalogue state.
+        return DB::transaction(function () use ($price, $productId, $priceId): SaasPlanPrice {
+            $plan = SaasPlan::query()->lockForUpdate()->findOrFail($price->saas_plan_id);
+            $lockedPrice = SaasPlanPrice::query()->lockForUpdate()->findOrFail($price->getKey());
+            if (blank($plan->provider_product_id)) {
+                $plan->update([
+                    'provider' => PaymentProvider::Stripe,
+                    'provider_product_id' => $productId,
+                ]);
+            }
+            if (blank($lockedPrice->provider_price_id)) {
+                $lockedPrice->update([
+                    'provider' => PaymentProvider::Stripe,
+                    'provider_price_id' => $priceId,
+                ]);
+            }
+
+            return $lockedPrice->fresh('plan');
+        });
+    }
+
+    private function assertSelectablePrice(Gym $gym, SaasPlanPrice $price): void
+    {
+        if (! $price->active || $price->plan->status !== SaasPlanStatus::Active) {
+            throw ValidationException::withMessages(['saas_plan_price_id' => ['The selected SaaS price is not active.']]);
+        }
+        if ($price->currency->value !== $gym->base_currency->value) {
+            throw ValidationException::withMessages(['saas_plan_price_id' => ['Select a price in the gym base currency.']]);
+        }
+    }
+
+    private function currentSubscription(): ?GymSubscription
+    {
+        return GymSubscription::query()->whereIn('status', [
+            SaasSubscriptionStatus::Incomplete->value,
+            SaasSubscriptionStatus::Trialing->value,
+            SaasSubscriptionStatus::Active->value,
+            SaasSubscriptionStatus::PastDue->value,
+            SaasSubscriptionStatus::Unpaid->value,
+            SaasSubscriptionStatus::Paused->value,
+        ])->latest()->first();
+    }
+
+    private function manualCustomer(Gym $gym, User $billingContact): PlatformBillingCustomer
+    {
+        return PlatformBillingCustomer::query()->firstOrCreate(
+            ['provider' => PaymentProvider::Manual->value],
+            [
+                'provider_customer_id' => 'manual_'.Str::uuid(),
+                'billing_email' => $billingContact->email,
+                'billing_name' => $gym->legal_name ?: $gym->name,
+                'country_code' => $gym->country_code,
+                'default_currency' => $gym->base_currency,
+            ],
+        );
+    }
+
+    /** @return array{disk: string, path: string, attributes: array<string, mixed>} */
+    private function storeManualReceipt(SaasSubscriptionPayment $payment, UploadedFile $receipt): array
+    {
+        $disk = (string) config('filesystems.default');
+        $extension = $receipt->guessExtension() ?: 'bin';
+        $directory = "gyms/{$payment->gym_id}/saas-billing/{$payment->getKey()}/bank-transfer";
+        $path = Storage::disk($disk)->putFileAs(
+            $directory,
+            $receipt,
+            Str::uuid().'.'.$extension,
+            ['visibility' => 'private'],
+        );
+        if (! $path) {
+            throw ValidationException::withMessages(['receipt' => ['The SaaS bank-transfer receipt could not be stored.']]);
+        }
+
+        return [
+            'disk' => $disk,
+            'path' => $path,
+            'attributes' => [
+                'receipt_disk' => $disk,
+                'receipt_path' => $path,
+                'receipt_original_name' => Str::limit(basename($receipt->getClientOriginalName()), 240, ''),
+                'receipt_mime_type' => (string) $receipt->getMimeType(),
+                'receipt_size_bytes' => (int) $receipt->getSize(),
+                'receipt_sha256' => hash_file('sha256', $receipt->getRealPath()),
+            ],
+        ];
     }
 }

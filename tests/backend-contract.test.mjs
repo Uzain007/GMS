@@ -159,6 +159,24 @@ test("finance services calculate money server-side and keep the ledger append-or
   assert.doesNotMatch(resource, /card_number|\bcvc\b|secret_key/);
 });
 
+test("bank-transfer receipts are private tenant records with review and audit boundaries", async () => {
+  const schema = await read("database/migrations/2026_08_24_000028_create_bank_transfer_receipts_and_normalize_payment_statuses.php");
+  const rls = await read("database/migrations/2026_08_24_000029_enable_bank_transfer_receipt_rls.php");
+  const service = await read("app/Services/PaymentService.php");
+  const controller = await read("app/Http/Controllers/Api/V1/PaymentController.php");
+  const request = await read("app/Http/Requests/StoreMemberPaymentRequest.php");
+
+  assert.match(schema, /Schema::create\('bank_transfer_receipts'/);
+  assert.match(schema, /foreign\(\['gym_id', 'payment_id'\]\)/);
+  assert.match(schema, /index\(\['gym_id', 'reviewed_at', 'created_at'\]\)/);
+  assert.match(rls, /FORCE ROW LEVEL SECURITY/);
+  assert.match(rls, /current_gym_id/);
+  assert.match(service, /payment\.bank_transfer_approved/);
+  assert.match(service, /payment\.bank_transfer_rejected/);
+  assert.match(controller, /Cache-Control.*private, no-store/s);
+  assert.match(request, /mimetypes:application\/pdf,image\/jpeg,image\/png,image\/webp/);
+});
+
 test("Stripe webhooks verify signatures before narrow tenant resolution and deduplicate events", async () => {
   const gateway = await read("app/Services/StripeGatewayService.php");
   const webhooks = await read("app/Services/StripeWebhookService.php");

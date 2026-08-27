@@ -2,7 +2,7 @@
 
 import {
   Activity, CalendarRange, CircleDollarSign, CreditCard, RefreshCw,
-  ShieldCheck, TicketCheck, TrendingDown, TrendingUp, UserMinus, UsersRound,
+  ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, Download, ShieldCheck, TicketCheck, TrendingDown, TrendingUp, UserMinus, UsersRound,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import type { GymSummary, ReportOverviewRecord } from "./lib/ironcore-api";
@@ -120,10 +120,33 @@ export function ReportManagement({ data }: { data: ReportData }) {
   const report = data.report;
   const rangeError = draftFrom && draftTo && draftFrom > draftTo ? "The From date must be before or the same as the To date." : null;
   const totalStatuses = useMemo(() => report?.member_status.reduce((sum, row) => sum + row.count, 0) ?? 0, [report]);
+  const [dailySort, setDailySort] = useState<{ key: "date" | "new_members" | "attendance_visits" | "net_revenue_minor"; direction: "asc" | "desc" }>({ key: "date", direction: "desc" });
+  const [dailyPage, setDailyPage] = useState(1);
+  const pageSize = 14;
+  const sortedDaily = useMemo(() => [...(report?.daily ?? [])].sort((left, right) => {
+    const comparison = left[dailySort.key] < right[dailySort.key] ? -1 : left[dailySort.key] > right[dailySort.key] ? 1 : 0;
+    return dailySort.direction === "asc" ? comparison : -comparison;
+  }), [dailySort, report]);
+  const dailyPages = Math.max(1, Math.ceil(sortedDaily.length / pageSize));
+  const visibleDaily = sortedDaily.slice((Math.min(dailyPage, dailyPages) - 1) * pageSize, Math.min(dailyPage, dailyPages) * pageSize);
 
   function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     data.onApply(draftFrom, draftTo, draftCurrency);
+  }
+
+  function sortDaily(key: typeof dailySort.key) {
+    setDailyPage(1);
+    setDailySort((current) => ({ key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" }));
+  }
+
+  function exportDaily() {
+    if (!report) return;
+    const escape = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+    const rows = [["Date", "New members", "Attendance visits", `Gross (${report.period.currency} minor units)`, `Refunded (${report.period.currency} minor units)`, `Net (${report.period.currency} minor units)`], ...sortedDaily.map((row) => [row.date, row.new_members, row.attendance_visits, row.gross_revenue_minor, row.refunded_minor, row.net_revenue_minor])];
+    const blob = new Blob([rows.map((row) => row.map(escape).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const link = document.createElement("a");
+    link.href = url; link.download = `ironcore-report-${report.period.from}-to-${report.period.to}-${report.period.currency}.csv`; link.click(); URL.revokeObjectURL(url);
   }
 
   return <section className="report-workspace">
@@ -180,6 +203,8 @@ export function ReportManagement({ data }: { data: ReportData }) {
           <div className="report-callout"><TicketCheck size={17} /><span><strong>{report.class_performance.waitlisted} waitlisted</strong><small>{(report.class_performance.utilization_bps / 100).toFixed(1)}% capacity attended</small></span></div>
         </article>
       </div>
+
+      <article className="panel report-detail-table"><div className="report-panel-heading"><div><p className="eyebrow">Auditable detail</p><h3>Daily report data</h3></div><button className="secondary-button" type="button" onClick={exportDaily}><Download size={15} /> Export CSV</button></div><div className="table-scroll"><table className="data-table"><thead><tr><th><button onClick={() => sortDaily("date")}>Date {dailySort.key === "date" && (dailySort.direction === "asc" ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}</button></th><th><button onClick={() => sortDaily("new_members")}>New members {dailySort.key === "new_members" && (dailySort.direction === "asc" ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}</button></th><th><button onClick={() => sortDaily("attendance_visits")}>Attendance {dailySort.key === "attendance_visits" && (dailySort.direction === "asc" ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}</button></th><th><button onClick={() => sortDaily("net_revenue_minor")}>Net revenue {dailySort.key === "net_revenue_minor" && (dailySort.direction === "asc" ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}</button></th></tr></thead><tbody>{visibleDaily.map((row) => <tr key={row.date}><td>{row.date}</td><td>{row.new_members.toLocaleString()}</td><td>{row.attendance_visits.toLocaleString()}</td><td>{money(row.net_revenue_minor, report.period.currency)}</td></tr>)}</tbody></table></div><div className="table-pagination"><span>Page {Math.min(dailyPage, dailyPages)} of {dailyPages} · {sortedDaily.length} days</span><div><button className="icon-button" disabled={dailyPage <= 1} onClick={() => setDailyPage((page) => Math.max(1, page - 1))} aria-label="Previous report page"><ChevronLeft size={16} /></button><button className="icon-button" disabled={dailyPage >= dailyPages} onClick={() => setDailyPage((page) => Math.min(dailyPages, page + 1))} aria-label="Next report page"><ChevronRight size={16} /></button></div></div></article>
 
       <p className="report-generated">Generated {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(report.meta.generated_at))} · {report.period.timezone} · {report.period.currency} only</p>
     </>}

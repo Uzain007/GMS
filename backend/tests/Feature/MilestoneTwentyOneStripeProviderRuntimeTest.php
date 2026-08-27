@@ -96,7 +96,7 @@ class MilestoneTwentyOneStripeProviderRuntimeTest extends TestCase
 
         $refund = $context->run($gym, function () use ($payment, $owner): PaymentRefund {
             $settled = $payment->fresh();
-            $this->assertSame(PaymentStatus::Succeeded, $settled->status);
+            $this->assertSame(PaymentStatus::Paid, $settled->status);
             $this->assertSame('pi_ci_payment_1', $settled->provider_payment_id);
             return app(PaymentService::class)->refund($settled, [
                 'amount_minor' => 500,
@@ -295,7 +295,7 @@ class MilestoneTwentyOneStripeProviderRuntimeTest extends TestCase
                 'receipt_number' => 'PAY-RUNTIME-REJECT',
                 'provider' => PaymentProvider::Stripe,
                 'method' => PaymentMethod::OnlineCard,
-                'status' => PaymentStatus::Succeeded,
+                'status' => PaymentStatus::Paid,
                 'amount_minor' => 20000,
                 'currency' => Currency::GBP,
                 'idempotency_key' => 'runtime-rejected-refund',

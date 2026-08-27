@@ -27,20 +27,21 @@ test("member self-service resolves the authenticated link and returns least-priv
   assert.doesNotMatch(credentialResource, /'id'\s*=>|'credential_hash'\s*=>/);
 });
 
-test("member portal is role-routed, mobile installable and keeps one-time QR plaintext in memory", async () => {
+test("member portal is role-routed, mobile installable and restores the persistent QR only in memory", async () => {
   const api = await read("app/lib/ironcore-api.ts");
   const app = await read("app/ironcore-app.tsx");
   const portal = await read("app/member-portal.tsx");
   const manifest = await read("app/manifest.ts");
 
-  for (const method of ["memberSelfProfile", "memberSelfMembership", "memberSelfInvoices", "memberSelfPayments", "memberSelfAttendance", "memberSelfCredential", "rotateMemberSelfCredential"]) {
+  for (const method of ["memberSelfProfile", "memberSelfMembership", "memberSelfInvoices", "memberSelfPayments", "memberSelfAttendance", "memberSelfCredential", "ensureMemberSelfCredential", "rotateMemberSelfCredential"]) {
     assert.match(api, new RegExp(`${method}\\(gymId: string`));
   }
   assert.match(app, /selectedGym\.role === "member"/);
   assert.match(app, /return <MemberPortal data=/);
-  assert.match(portal, /const \[qrPlaintext, setQrPlaintext\] = useState<string \| null>\(null\)/);
+  assert.match(portal, /const qrPlaintext = renderedCredential \?\? data\.credential\?\.credential \?\? null/);
+  assert.match(portal, /setRenderedCredential\(result\.credential\)/);
   assert.match(portal, /QRCode\.toCanvas/);
-  assert.match(portal, /if \(nextView !== "pass"\) setQrPlaintext\(null\)/);
+  assert.match(portal, /This QR remains available after reload and sign-in/);
   assert.doesNotMatch(portal, /localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(app, /randomUUID/);
   assert.match(manifest, /display: "standalone"/);

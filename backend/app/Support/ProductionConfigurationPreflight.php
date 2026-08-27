@@ -113,29 +113,58 @@ final class ProductionConfigurationPreflight
             $failures[] = 'AWS_ENDPOINT must use HTTPS when a custom object-storage endpoint is configured.';
         }
 
-        foreach (['services.stripe.secret' => 'STRIPE_SECRET_KEY', 'services.stripe.webhook_secret' => 'STRIPE_WEBHOOK_SECRET', 'services.stripe.billing_webhook_secret' => 'STRIPE_BILLING_WEBHOOK_SECRET'] as $key => $environmentName) {
-            if ($this->blank(config($key))) {
-                $failures[] = "{$environmentName} is required.";
-            }
-        }
-
-        foreach ([
-            'services.stripe.api_url' => 'STRIPE_API_URL',
+        $memberStripe = [
+            'services.stripe.webhook_secret' => 'STRIPE_WEBHOOK_SECRET',
             'services.stripe.connect_refresh_url' => 'STRIPE_CONNECT_REFRESH_URL',
             'services.stripe.connect_return_url' => 'STRIPE_CONNECT_RETURN_URL',
             'services.stripe.checkout_success_url' => 'STRIPE_CHECKOUT_SUCCESS_URL',
             'services.stripe.checkout_cancel_url' => 'STRIPE_CHECKOUT_CANCEL_URL',
+        ];
+        $billingStripe = [
+            'services.stripe.billing_webhook_secret' => 'STRIPE_BILLING_WEBHOOK_SECRET',
             'services.stripe.billing_checkout_success_url' => 'STRIPE_BILLING_CHECKOUT_SUCCESS_URL',
             'services.stripe.billing_checkout_cancel_url' => 'STRIPE_BILLING_CHECKOUT_CANCEL_URL',
             'services.stripe.billing_portal_return_url' => 'STRIPE_BILLING_PORTAL_RETURN_URL',
-        ] as $key => $environmentName) {
-            if (! $this->httpsUrl(config($key), requirePublicHost: true)) {
-                $failures[] = "{$environmentName} must be a public HTTPS URL.";
+        ];
+        $memberStripeEnabled = ! $this->arrayAllBlank(array_keys($memberStripe));
+        $billingStripeEnabled = ! $this->arrayAllBlank(array_keys($billingStripe));
+        $stripeEnabled = ! $this->blank(config('services.stripe.secret')) || $memberStripeEnabled || $billingStripeEnabled;
+
+        // Stripe is an optional adapter. Once any Stripe setting is supplied,
+        // only the enabled flow must be complete and transport-safe.
+        if ($stripeEnabled) {
+            if ($this->blank(config('services.stripe.secret'))) {
+                $failures[] = 'STRIPE_SECRET_KEY is required when Stripe is enabled.';
+            }
+            if (! $memberStripeEnabled && ! $billingStripeEnabled) {
+                $failures[] = 'At least one Stripe payment flow must be fully configured when STRIPE_SECRET_KEY is supplied.';
+            }
+            if (! $this->httpsUrl(config('services.stripe.api_url'), requirePublicHost: true)) {
+                $failures[] = 'STRIPE_API_URL must be a public HTTPS URL when Stripe is enabled.';
+            }
+
+            foreach ($memberStripeEnabled ? $memberStripe : [] as $key => $environmentName) {
+                if ($key === 'services.stripe.webhook_secret') {
+                    if ($this->blank(config($key))) {
+                        $failures[] = "{$environmentName} is required when member Stripe payments are enabled.";
+                    }
+                } elseif (! $this->httpsUrl(config($key), requirePublicHost: true)) {
+                    $failures[] = "{$environmentName} must be a public HTTPS URL.";
+                }
+            }
+            foreach ($billingStripeEnabled ? $billingStripe : [] as $key => $environmentName) {
+                if ($key === 'services.stripe.billing_webhook_secret') {
+                    if ($this->blank(config($key))) {
+                        $failures[] = "{$environmentName} is required when Stripe Billing is enabled.";
+                    }
+                } elseif (! $this->httpsUrl(config($key), requirePublicHost: true)) {
+                    $failures[] = "{$environmentName} must be a public HTTPS URL.";
+                }
             }
         }
 
         $stripeCaBundle = config('services.stripe.ca_bundle');
-        if (! $this->blank($stripeCaBundle)
+        if ($stripeEnabled && ! $this->blank($stripeCaBundle)
             && (! is_file($stripeCaBundle) || ! is_readable($stripeCaBundle))) {
             $failures[] = 'STRIPE_CA_BUNDLE must reference a readable PEM trust bundle when configured.';
         }
@@ -400,5 +429,17 @@ final class ProductionConfigurationPreflight
         }
 
         return false;
+    }
+
+    /** @param list<string> $configKeys */
+    private function arrayAllBlank(array $configKeys): bool
+    {
+        foreach ($configKeys as $key) {
+            if (! $this->blank(config($key))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

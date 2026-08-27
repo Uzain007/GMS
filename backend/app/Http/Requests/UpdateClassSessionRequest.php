@@ -21,7 +21,7 @@ class UpdateClassSessionRequest extends TenantFormRequest
             'booking_opens_at' => ['sometimes', 'nullable', 'date'],
             'booking_closes_at' => ['sometimes', 'nullable', 'date'],
             'status' => ['sometimes', Rule::enum(ClassSessionStatus::class)],
-            'reason' => ['required_if:status,'.ClassSessionStatus::Cancelled->value, 'nullable', 'string', 'max:500'],
+            'reason' => ['required', 'string', 'min:5', 'max:500'],
         ];
     }
 }

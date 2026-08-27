@@ -11,6 +11,9 @@ class UpdateStaffProfileRequest extends TenantFormRequest
     public function rules(): array
     {
         return [
+            'display_name' => ['sometimes', 'required', 'string', 'max:160'],
+            'contact_email' => ['sometimes', 'required', 'email:rfc', 'max:254'],
+            'phone' => ['sometimes', 'required', 'string', 'max:40'],
             'role' => ['sometimes', Rule::in([
                 UserRole::GymOwner->value,
                 UserRole::GymManager->value,

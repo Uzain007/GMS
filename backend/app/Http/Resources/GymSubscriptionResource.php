@@ -13,6 +13,7 @@ class GymSubscriptionResource extends JsonResource
             'id' => $this->id,
             'gym_id' => $this->gym_id,
             'status' => $this->status->value,
+            'provider' => $this->provider->value,
             'plan_code' => $this->plan_code_snapshot,
             'plan_name' => $this->plan_name_snapshot,
             'feature_limits' => $this->feature_limits_snapshot,

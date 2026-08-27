@@ -13,7 +13,7 @@ class WorkoutSessionResource extends JsonResource
             'id' => $this->id, 'gym_id' => $this->gym_id, 'workout_plan_id' => $this->workout_plan_id,
             'member_id' => $this->member_id,
             'plan' => $this->whenLoaded('plan', fn () => ['id' => $this->plan->id, 'title' => $this->plan->title]),
-            'member' => $this->whenLoaded('member', fn () => ['id' => $this->member->id, 'member_number' => $this->member->member_number, 'name' => trim($this->member->first_name.' '.$this->member->last_name)]),
+            'member' => $this->whenLoaded('member', fn () => ['id' => $this->member->id, 'member_number' => $this->member->member_number, 'member_code' => $this->member->member_code, 'name' => trim($this->member->first_name.' '.$this->member->last_name)]),
             'performed_at' => $this->performed_at?->toIso8601String(), 'duration_seconds' => $this->duration_seconds,
             'notes' => $this->notes, 'sets' => WorkoutSetLogResource::collection($this->whenLoaded('sets')),
             'created_at' => $this->created_at?->toIso8601String(),

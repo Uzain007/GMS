@@ -14,10 +14,18 @@ use Illuminate\Http\Request;
 
 class PaymentGatewayController extends Controller
 {
-    public function show(): JsonResponse
+    public function show(StripeGatewayService $stripe): JsonResponse
     {
         $gateway = PaymentGatewayAccount::query()->where('provider', PaymentProvider::Stripe->value)->first();
-        return response()->json(['data' => $gateway ? (new PaymentGatewayAccountResource($gateway))->resolve() : null]);
+        return response()->json([
+            'data' => $gateway ? (new PaymentGatewayAccountResource($gateway))->resolve() : null,
+            'meta' => [
+                // This capability flag exposes no secret. It lets the web app
+                // offer cash/bank transfer without treating Stripe as required.
+                'provider_configured' => $stripe->memberPaymentsConfigured(),
+                'checkout_available' => $stripe->checkoutAvailable(),
+            ],
+        ]);
     }
 
     public function onboard(Request $request, TenantContext $context, StripeGatewayService $stripe, AuditService $audit): JsonResponse

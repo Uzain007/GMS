@@ -29,6 +29,12 @@ class PaymentResource extends JsonResource
             // Provider IDs are operational references, never secret keys or card data.
             'provider_checkout_id' => $this->provider_checkout_id,
             'refunds' => PaymentRefundResource::collection($this->whenLoaded('refunds')),
+            'bank_transfer_receipt' => $this->whenLoaded(
+                'bankTransferReceipt',
+                fn () => $this->bankTransferReceipt
+                    ? (new BankTransferReceiptResource($this->bankTransferReceipt))->resolve($request)
+                    : null,
+            ),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

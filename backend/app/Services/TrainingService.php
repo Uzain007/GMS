@@ -33,6 +33,7 @@ class TrainingService
             if ($trainer->status !== StaffStatus::Active || $trainer->user?->roleForGym($trainer->gym_id) !== UserRole::Trainer) {
                 throw ValidationException::withMessages(['trainer_staff_profile_id' => ['The selected staff profile is not an active trainer role.']]);
             }
+            $this->access->assertTrainerMemberBranchAccess($trainer, $member);
             if ($this->access->hasCurrentAssignment($trainer->getKey(), $member->getKey())) {
                 throw ValidationException::withMessages(['member_id' => ['This trainer already has an active assignment to the member.']]);
             }
@@ -116,18 +117,65 @@ class TrainingService
             $plan = WorkoutPlan::query()->with(['member', 'trainer.user', 'exercises'])->lockForUpdate()->findOrFail($planId);
             $this->access->assertPlanAccess($actor, $plan, true);
             $before = $plan->toArray();
-            $reason = $data['reason'] ?? null;
+            $reason = $data['reason'];
             unset($data['reason']);
 
-            if (($data['status'] ?? null) === WorkoutPlanStatus::Active->value && $plan->status !== WorkoutPlanStatus::Active) {
-                $this->assertNoOtherActivePlan($plan->member_id, $plan->getKey());
+            $exercises = $data['exercises'] ?? null;
+            unset($data['exercises']);
+            $structuralFields = ['member_id', 'trainer_staff_profile_id', 'starts_on'];
+            $changesStructure = $exercises !== null || count(array_intersect($structuralFields, array_keys($data))) > 0;
+            if ($changesStructure && $plan->status !== WorkoutPlanStatus::Draft) {
+                throw ValidationException::withMessages([
+                    'plan' => ['Member, trainer, start date and exercises can be changed only while a plan is draft. Archive the live plan and create a replacement to preserve workout history.'],
+                ]);
+            }
+
+            $targetStatus = isset($data['status']) ? WorkoutPlanStatus::from((string) $data['status']) : $plan->status;
+            $allowedTransitions = [
+                WorkoutPlanStatus::Draft->value => [WorkoutPlanStatus::Draft, WorkoutPlanStatus::Active, WorkoutPlanStatus::Cancelled],
+                WorkoutPlanStatus::Active->value => [WorkoutPlanStatus::Active, WorkoutPlanStatus::Completed, WorkoutPlanStatus::Cancelled],
+                WorkoutPlanStatus::Completed->value => [WorkoutPlanStatus::Completed],
+                WorkoutPlanStatus::Cancelled->value => [WorkoutPlanStatus::Cancelled],
+            ];
+            if (! in_array($targetStatus, $allowedTransitions[$plan->status->value], true)) {
+                throw ValidationException::withMessages(['status' => ['That workout plan status transition is not allowed.']]);
+            }
+
+            $memberId = (string) ($data['member_id'] ?? $plan->member_id);
+            $trainerId = (string) ($data['trainer_staff_profile_id'] ?? $plan->trainer_staff_profile_id);
+            if ($changesStructure) {
+                $member = $this->access->memberForActor($actor, $memberId, true);
+                $trainer = $this->access->trainerForActor($actor, $trainerId);
+                if (! $this->access->hasCurrentAssignment($trainer->getKey(), $member->getKey())) {
+                    throw ValidationException::withMessages(['member_id' => ['Create an active trainer assignment before prescribing this plan.']]);
+                }
+                $data['member_id'] = $member->getKey();
+                $data['trainer_staff_profile_id'] = $trainer->getKey();
+            }
+
+            if ($targetStatus === WorkoutPlanStatus::Active && $plan->status !== WorkoutPlanStatus::Active) {
+                $this->assertNoOtherActivePlan($memberId, $plan->getKey());
                 $activated = true;
             }
-            if (isset($data['ends_on']) && $data['ends_on'] < $plan->starts_on->toDateString()) {
+            $startsOn = (string) ($data['starts_on'] ?? $plan->starts_on->toDateString());
+            if (isset($data['ends_on']) && $data['ends_on'] < $startsOn) {
                 throw ValidationException::withMessages(['ends_on' => ['The plan end cannot precede its start.']]);
             }
 
+            if ($exercises !== null) {
+                $this->validateExerciseOrder($exercises);
+            }
+
             $plan->update($data);
+            if ($exercises !== null) {
+                // Draft exercises have no workout evidence yet. Replacing them
+                // as one transaction keeps ordering exact without rewriting a
+                // completed set or historical active prescription.
+                $plan->exercises()->delete();
+                foreach ($exercises as $exercise) {
+                    $plan->exercises()->create($exercise);
+                }
+            }
             $fresh = $plan->fresh(['member', 'trainer.user', 'exercises']);
             $this->audit->record('workout_plan.updated', $fresh, $actor, $before, $fresh->toArray(), $reason, $request);
             return $fresh;

@@ -3,11 +3,12 @@
 import { useMemo, useState, type FormEvent } from "react";
 import {
   ArrowUpRight, Building2, CalendarDays, Check, CircleDollarSign,
-  CreditCard, FileText, LoaderCircle, Plus, RefreshCw, ShieldCheck, Sparkles, X,
+  Banknote, CreditCard, Download, FileText, FileUp, LoaderCircle, Plus,
+  RefreshCw, ShieldCheck, Sparkles, X,
 } from "lucide-react";
 import type {
   GymSubscriptionRecord, IronCoreRole, NewSaasPlan, SaasBillingInvoiceRecord,
-  SaasPlanRecord,
+  SaasPaymentOptions, SaasPlanRecord, SaasSubscriptionPaymentRecord,
 } from "./lib/ironcore-api";
 
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
@@ -16,6 +17,8 @@ export type SaasBillingData = {
   plans: SaasPlanRecord[];
   subscription: GymSubscriptionRecord | null;
   invoices: SaasBillingInvoiceRecord[];
+  payments: SaasSubscriptionPaymentRecord[];
+  paymentOptions: SaasPaymentOptions;
   baseCurrency: Currency;
   actorRole: IronCoreRole;
   readOnly?: boolean;
@@ -23,6 +26,9 @@ export type SaasBillingData = {
   error: string | null;
   onReload: () => void;
   onCheckout: (priceId: string, idempotencyKey: string) => Promise<string>;
+  onManualPayment: (priceId: string, method: "cash" | "bank_transfer", reference: string, idempotencyKey: string, receipt?: File) => Promise<void>;
+  onReviewManualPayment: (paymentId: string, decision: "approve" | "reject", reason: string) => Promise<void>;
+  onLoadManualReceipt: (paymentId: string) => Promise<Blob>;
   onPortal: () => Promise<string>;
   onCreatePlan?: (input: NewSaasPlan) => Promise<void>;
 };
@@ -83,6 +89,11 @@ function PlanModal({ currency, onClose, onCreate }: { currency: Currency; onClos
           staff: Number(data.get("staff")), advanced_reports: data.get("advanced_reports") === "on",
           priority_support: data.get("priority_support") === "on",
         },
+        payment_methods: [
+          data.get("bank_transfer") === "on" ? "bank_transfer" : null,
+          data.get("cash") === "on" ? "cash" : null,
+          data.get("stripe") === "on" ? "stripe" : null,
+        ].filter((method): method is "bank_transfer" | "cash" | "stripe" => method !== null),
       });
       onClose();
     } catch (reason) {
@@ -100,9 +111,87 @@ function PlanModal({ currency, onClose, onCreate }: { currency: Currency; onClos
       <div className="field-pair"><label>Billing interval<select name="billing_interval" defaultValue="monthly"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label>Trial days<input name="trial_days" type="number" min="0" max="90" defaultValue="14" /></label></div>
       <div className="field-triple"><label>Members<input name="members" required type="number" min="1" defaultValue="2500" /></label><label>Branches<input name="branches" required type="number" min="1" defaultValue="3" /></label><label>Staff<input name="staff" required type="number" min="1" defaultValue="25" /></label></div>
       <div className="check-row"><label><input name="advanced_reports" type="checkbox" /> Advanced reports</label><label><input name="priority_support" type="checkbox" /> Priority support</label></div>
+      <div className="check-row payment-method-checks"><label><input name="bank_transfer" type="checkbox" defaultChecked /> Bank transfer</label><label><input name="cash" type="checkbox" defaultChecked /> Cash</label><label><input name="stripe" type="checkbox" /> Debit/Credit Card · Stripe</label></div>
       <input name="sort_order" type="hidden" value="100" />
-      <div className="modal-safety"><ShieldCheck size={17} /><span><strong>Immutable pricing</strong><small>Publishing creates platform Stripe Product and Price records. Future amount changes create a new price.</small></span></div>
+      <div className="modal-safety"><ShieldCheck size={17} /><span><strong>Immutable pricing</strong><small>Publishing stores the plan in IronCore. Stripe is synchronized only when a gym chooses card payment.</small></span></div>
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy} type="submit">{busy ? "Publishing…" : "Publish plan"} <ArrowUpRight size={16} /></button></div>
+    </form>
+  </div>;
+}
+
+type ManualChoice = {
+  priceId: string;
+  planName: string;
+  method: "cash" | "bank_transfer";
+};
+
+function ManualPaymentModal({ choice, onClose, onSubmit }: {
+  choice: ManualChoice;
+  onClose: () => void;
+  onSubmit: SaasBillingData["onManualPayment"];
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const receipt = form.get("receipt");
+    setBusy(true); setError(null);
+    try {
+      await onSubmit(
+        choice.priceId,
+        choice.method,
+        String(form.get("reference")).trim(),
+        requestKey(),
+        receipt instanceof File && receipt.size > 0 ? receipt : undefined,
+      );
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The payment could not be submitted.");
+    } finally { setBusy(false); }
+  }
+
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="saas-manual-payment-title">
+    <button className="modal-scrim" onClick={onClose} aria-label="Close payment dialog" />
+    <form className="modal-card" onSubmit={submit}>
+      <div className="modal-heading"><span>{choice.method === "cash" ? <Banknote size={21} /> : <FileUp size={21} />}</span><div><p className="eyebrow">Platform subscription</p><h2 id="saas-manual-payment-title">{readable(choice.method)} · {choice.planName}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <label>{choice.method === "cash" ? "Cash receipt/reference" : "Bank transfer reference"}<input name="reference" required minLength={2} maxLength={160} autoFocus /></label>
+      {choice.method === "bank_transfer" && <label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label>}
+      <div className="modal-safety"><ShieldCheck size={17} /><span><strong>Platform review required</strong><small>The subscription activates only after a Super Admin verifies this payment. Member-payment records remain separate.</small></span></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Submitting…" : "Submit for review"}</button></div>
+    </form>
+  </div>;
+}
+
+function ManualReviewModal({ payment, onClose, onSubmit }: {
+  payment: SaasSubscriptionPaymentRecord;
+  onClose: () => void;
+  onSubmit: SaasBillingData["onReviewManualPayment"];
+}) {
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function review(formElement: HTMLFormElement, decision: "approve" | "reject") {
+    const form = new FormData(formElement);
+    setBusy(decision); setError(null);
+    try {
+      await onSubmit(payment.id, decision, String(form.get("reason")).trim());
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The review could not be saved.");
+    } finally { setBusy(null); }
+  }
+
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="saas-payment-review-title">
+    <button className="modal-scrim" onClick={onClose} aria-label="Close review dialog" />
+    <form className="modal-card" onSubmit={(event) => { event.preventDefault(); void review(event.currentTarget, "approve"); }}>
+      <div className="modal-heading"><span><ShieldCheck size={21} /></span><div><p className="eyebrow">Super Admin review</p><h2 id="saas-payment-review-title">Review {readable(payment.method)} payment</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <p>{payment.plan?.name ?? "SaaS plan"} · {money(payment.amount_minor, payment.currency)}</p>
+      <label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} rows={3} autoFocus /></label>
+      <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy !== null} onClick={(event) => { if (event.currentTarget.form) void review(event.currentTarget.form, "reject"); }}>{busy === "reject" ? "Rejecting…" : "Reject"}</button><button className="primary-button" disabled={busy !== null}>{busy === "approve" ? "Approving…" : "Approve and activate"}</button></div>
     </form>
   </div>;
 }
@@ -112,6 +201,8 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
+  const [manualChoice, setManualChoice] = useState<ManualChoice | null>(null);
+  const [reviewing, setReviewing] = useState<SaasSubscriptionPaymentRecord | null>(null);
   const canManage = !data.readOnly && ["super_admin", "gym_owner"].includes(data.actorRole);
   const current = data.subscription;
   const nextRenewal = current?.current_period_end ?? current?.trial_ends_at ?? null;
@@ -137,16 +228,31 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     finally { setBusy(null); }
   }
 
+  async function downloadReceipt(payment: SaasSubscriptionPaymentRecord) {
+    setBusy(`receipt-${payment.id}`); setNotice(null);
+    try {
+      const blob = await data.onLoadManualReceipt(payment.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = payment.receipt_original_name ?? "saas-bank-transfer-receipt";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "The receipt could not be downloaded.");
+    } finally { setBusy(null); }
+  }
+
   return <section className="saas-workspace">
-    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym&apos;s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
+    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym&apos;s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current?.provider === "stripe" && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
     <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym&apos;s connected account. This subscription is collected only by IronCore&apos;s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
     {data.loading && <div className="table-state"><LoaderCircle className="spin" size={21} /><span>Loading protected billing records…</span></div>}
 
     <section className="saas-metrics">
-      <article className="panel saas-current"><span className="saas-icon violet"><Building2 size={20} /></span><div><small>Current plan</small><strong>{current?.plan_name ?? "No subscription"}</strong><p>{current ? `${money(current.amount_minor, current.currency)} / ${current.billing_interval === "monthly" ? "month" : "year"}` : "Choose a plan to start secure checkout."}</p></div><span className={`status ${current?.status ?? "inactive"}`}><i />{readable(current?.status ?? "Not subscribed")}</span></article>
-      <article className="panel saas-stat"><span className="saas-icon green"><CalendarDays size={20} /></span><small>{current?.status === "trialing" ? "Trial ends" : "Next renewal"}</small><strong>{date(nextRenewal)}</strong><p>{current?.cancel_at_period_end ? "Cancels at period end" : "Automatic collection"}</p></article>
+      <article className="panel saas-current"><span className="saas-icon violet"><Building2 size={20} /></span><div><small>Current plan</small><strong>{current?.plan_name ?? "No subscription"}</strong><p>{current ? `${money(current.amount_minor, current.currency)} / ${current.billing_interval === "monthly" ? "month" : "year"}` : "Choose a plan and an available payment method."}</p></div><span className={`status ${current?.status ?? "inactive"}`}><i />{readable(current?.status ?? "Not subscribed")}</span></article>
+      <article className="panel saas-stat"><span className="saas-icon green"><CalendarDays size={20} /></span><small>{current?.status === "trialing" ? "Trial ends" : "Next renewal"}</small><strong>{date(nextRenewal)}</strong><p>{current?.cancel_at_period_end ? "Cancels at period end" : current?.provider === "stripe" ? "Automatic collection" : current ? "Manual settlement" : "No active billing"}</p></article>
       <article className="panel saas-stat"><span className="saas-icon amber"><FileText size={20} /></span><small>Billing history</small><strong>{data.invoices.length}</strong><p>{data.invoices.filter((invoice) => invoice.status === "paid").length} paid invoices loaded</p></article>
     </section>
 
@@ -154,11 +260,30 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     <section className="billing-grid">{visiblePlans.map((plan, index) => {
       const price = plan.prices.find((item) => item.active && item.currency === data.baseCurrency && item.billing_interval === interval);
       const selected = current?.plan_code === plan.code;
-      return <article className={`panel plan-card saas-plan-card ${selected || index === 1 ? "featured" : ""}`} key={plan.id}>{selected && <span className="tag">Current plan</span>}<span className="saas-icon violet"><CircleDollarSign size={20} /></span><h3>{plan.name}</h3><strong>{price ? money(price.amount_minor, price.currency) : "Not priced"}{price && <small>/{interval === "monthly" ? "month" : "year"}</small>}</strong><p>{plan.description}</p><ul>{featureList(plan).map((feature) => <li key={feature}><Check size={15} />{feature}</li>)}</ul>{canManage && !current && <button className="primary-button plan-action" disabled={!price || busy === price?.id} onClick={() => price && void checkout(price.id)}>{busy === price?.id ? "Opening…" : price ? `Choose ${plan.name}` : `No ${data.baseCurrency} price`} <ArrowUpRight size={15} /></button>}</article>;
+      const methods = plan.payment_methods ?? ["stripe"];
+      return <article className={`panel plan-card saas-plan-card ${selected || index === 1 ? "featured" : ""}`} key={plan.id}>
+        {selected && <span className="tag">Current plan</span>}
+        <span className="saas-icon violet"><CircleDollarSign size={20} /></span>
+        <h3>{plan.name}</h3>
+        <strong>{price ? money(price.amount_minor, price.currency) : "Not priced"}{price && <small>/{interval === "monthly" ? "month" : "year"}</small>}</strong>
+        <p>{plan.description}</p>
+        <ul>{featureList(plan).map((feature) => <li key={feature}><Check size={15} />{feature}</li>)}</ul>
+        <div className="saas-plan-methods"><small>Payment options</small><span>{methods.map(readable).join(" · ")}</span></div>
+        {canManage && !current && <div className="saas-plan-actions">
+          {!price && <button className="secondary-button" disabled>No {data.baseCurrency} price</button>}
+          {price && methods.includes("bank_transfer") && <button className="secondary-button" onClick={() => setManualChoice({ priceId: price.id, planName: plan.name, method: "bank_transfer" })}><FileUp size={15} /> Bank transfer</button>}
+          {price && methods.includes("cash") && <button className="secondary-button" onClick={() => setManualChoice({ priceId: price.id, planName: plan.name, method: "cash" })}><Banknote size={15} /> Cash</button>}
+          {price && methods.includes("stripe") && <button className="primary-button" disabled={!data.paymentOptions.stripe_configured || busy === price.id} onClick={() => void checkout(price.id)}><CreditCard size={15} /> {busy === price.id ? "Opening…" : data.paymentOptions.stripe_configured ? "Debit/Credit Card" : "Stripe · Not configured"}</button>}
+        </div>}
+      </article>;
     })}</section>
     {!data.loading && visiblePlans.length === 0 && <div className="empty-state panel"><Sparkles size={25} /><strong>No active SaaS plans</strong><span>A super administrator can publish the first immutable platform price.</span></div>}
 
-    <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Provider-synchronized records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period end</th><th>Amount</th><th>Status</th><th>Document</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number ?? "Pending number"}</strong></td><td>{date(invoice.period_end)}</td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span></td><td>{invoice.hosted_invoice_url?.startsWith("https://") ? <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a> : "—"}</td></tr>)}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after Stripe creates the first subscription bill.</span></div>}</section>
+    <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>Manual payment reviews</h3></div><small>Separate platform ledger</small></div><table className="data-table"><thead><tr><th>Plan</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}</small></td><td>{readable(payment.method)}</td><td>{payment.reference ?? "—"}</td><td><strong>{money(payment.amount_minor, payment.currency)}</strong></td><td><span className={`status ${payment.status}`}><i />{readable(payment.status)}</span></td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No manual SaaS payments</strong><span>Cash and bank-transfer requests appear here without entering the member-payment ledger.</span></div>}</section>
+
+    <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Platform subscription records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period end</th><th>Amount</th><th>Status</th><th>Document</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number ?? "Pending number"}</strong></td><td>{date(invoice.period_end)}</td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span></td><td>{invoice.hosted_invoice_url?.startsWith("https://") ? <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a> : "—"}</td></tr>)}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after a cash, bank-transfer or Stripe subscription is approved.</span></div>}</section>
     {modal && data.onCreatePlan && <PlanModal currency={data.baseCurrency} onClose={() => setModal(false)} onCreate={data.onCreatePlan} />}
+    {manualChoice && <ManualPaymentModal choice={manualChoice} onClose={() => setManualChoice(null)} onSubmit={data.onManualPayment} />}
+    {reviewing && <ManualReviewModal payment={reviewing} onClose={() => setReviewing(null)} onSubmit={data.onReviewManualPayment} />}
   </section>;
 }

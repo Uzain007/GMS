@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ProgressMetric;
+use App\Enums\ProgressMeasurementStatus;
 use App\Models\Concerns\BelongsToGym;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -12,13 +13,24 @@ class MemberProgressMeasurement extends Model
 {
     use BelongsToGym, HasUuids;
 
-    protected $fillable = ['member_id', 'recorded_by', 'metric', 'value_milli', 'unit', 'measured_at', 'note'];
+    protected $fillable = [
+        'member_id', 'recorded_by', 'metric', 'value_milli', 'unit', 'measured_at', 'note',
+        'status', 'replaces_measurement_id', 'voided_by', 'voided_at',
+    ];
 
     protected function casts(): array
     {
-        return ['metric' => ProgressMetric::class, 'value_milli' => 'integer', 'measured_at' => 'immutable_datetime'];
+        return [
+            'metric' => ProgressMetric::class,
+            'status' => ProgressMeasurementStatus::class,
+            'value_milli' => 'integer',
+            'measured_at' => 'immutable_datetime',
+            'voided_at' => 'immutable_datetime',
+        ];
     }
 
     public function member(): BelongsTo { return $this->belongsTo(Member::class); }
     public function recordedBy(): BelongsTo { return $this->belongsTo(User::class, 'recorded_by'); }
+    public function replaces(): BelongsTo { return $this->belongsTo(self::class, 'replaces_measurement_id'); }
+    public function voidedBy(): BelongsTo { return $this->belongsTo(User::class, 'voided_by'); }
 }

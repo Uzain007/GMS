@@ -67,6 +67,49 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             ->assertJsonPath('data.method', 'member_code');
     }
 
+    public function test_member_code_is_persistent_and_identical_across_profile_qr_and_manual_check_in(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $existing = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-PERSISTENT'));
+        $code = $existing->member_code;
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+
+        $this->getJson("/api/v1/gyms/{$gym->id}/members/{$existing->id}", $headers)
+            ->assertOk()
+            ->assertJsonPath('data.member_code', $code);
+
+        $issued = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$existing->id}/access-credential", [], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.member_code', $code)->json('data');
+        $this->getJson("/api/v1/gyms/{$gym->id}/members/{$existing->id}/access-credential", $headers)
+            ->assertOk()->assertJsonPath('data.member_code', $code)
+            ->assertJsonPath('data.credential', $issued['credential']);
+
+        $this->patchJson("/api/v1/gyms/{$gym->id}/members/{$existing->id}", [
+            'first_name' => 'Updated',
+            'reason' => 'Confirm the visible code remains stable.',
+        ], $headers)->assertOk()->assertJsonPath('data.member_code', $code);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $code,
+        ], $headers)->assertCreated()->assertJsonPath('data.member.member_code', $code);
+
+        $createdCode = $this->postJson("/api/v1/gyms/{$gym->id}/members", [
+            'first_name' => 'New',
+            'last_name' => 'Member',
+            'email' => 'new.member@example.test',
+            'phone' => '+44 7700 900503',
+            'status' => 'active',
+        ], $headers)->assertCreated()->json('data.member_code');
+
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $createdCode);
+        $this->assertNotSame($code, $createdCode);
+        $this->assertSame($code, app(TenantContext::class)->run($gym, fn () => $existing->fresh()->member_code));
+    }
+
     public function test_valid_secure_qr_checks_in_once_and_rejects_a_duplicate(): void
     {
         [$owner, $gym, $branch] = $this->tenant();
@@ -75,7 +118,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         Sanctum::actingAs($owner);
         $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], [
             'X-Gym-ID' => $gym->id,
-        ])->assertCreated()->json('data.credential');
+        ])->assertCreated()->assertJsonPath('data.member_code', $member->member_code)->json('data.credential');
 
         $payload = ['branch_id' => $branch->id, 'credential' => $credential];
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", $payload, ['X-Gym-ID' => $gym->id])

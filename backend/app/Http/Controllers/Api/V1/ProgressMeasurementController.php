@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\ProgressMeasurementStatus;
 use App\Enums\TrainerAssignmentStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CorrectProgressMeasurementRequest;
 use App\Http\Requests\StoreProgressMeasurementRequest;
+use App\Http\Requests\VoidProgressMeasurementRequest;
 use App\Http\Resources\MemberProgressMeasurementResource;
 use App\Models\Member;
 use App\Models\MemberProgressMeasurement;
@@ -30,6 +33,11 @@ class ProgressMeasurementController extends Controller
         $query = MemberProgressMeasurement::query()->with('member')
             ->whereBetween('measured_at', [$from, $to])->orderByDesc('measured_at')->orderByDesc('id');
         $role = $request->user()->roleForGym($tenant->id());
+        // Only gym management can request correction/void history. Member and
+        // trainer views always receive the active clinical/business timeline.
+        if (! ($role?->canManageGym() ?? false) || ! $request->boolean('include_history')) {
+            $query->where('status', ProgressMeasurementStatus::Active->value);
+        }
         if ($role === UserRole::Member) {
             $member = Member::query()->where('user_id', $request->user()->getKey())->firstOrFail();
             $query->where('member_id', $member->getKey());
@@ -53,5 +61,25 @@ class ProgressMeasurementController extends Controller
     public function store(StoreProgressMeasurementRequest $request, ProgressService $service): MemberProgressMeasurementResource
     {
         return new MemberProgressMeasurementResource($service->record($request->validated(), $request->user(), $request));
+    }
+
+    public function update(
+        CorrectProgressMeasurementRequest $request,
+        string $measurement,
+        ProgressService $service,
+    ): MemberProgressMeasurementResource {
+        return new MemberProgressMeasurementResource(
+            $service->correct($measurement, $request->validated(), $request->user(), $request),
+        );
+    }
+
+    public function destroy(
+        VoidProgressMeasurementRequest $request,
+        string $measurement,
+        ProgressService $service,
+    ): MemberProgressMeasurementResource {
+        return new MemberProgressMeasurementResource(
+            $service->void($measurement, $request->validated()['reason'], $request->user(), $request),
+        );
     }
 }

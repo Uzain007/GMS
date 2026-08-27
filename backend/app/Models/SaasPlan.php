@@ -14,7 +14,7 @@ class SaasPlan extends Model
 
     protected $fillable = [
         'code', 'name', 'description', 'status', 'feature_limits', 'sort_order',
-        'provider', 'provider_product_id',
+        'payment_methods', 'provider', 'provider_product_id',
     ];
 
     protected function casts(): array
@@ -23,6 +23,7 @@ class SaasPlan extends Model
             'status' => SaasPlanStatus::class,
             'provider' => PaymentProvider::class,
             'feature_limits' => 'array',
+            'payment_methods' => 'array',
             'sort_order' => 'integer',
         ];
     }

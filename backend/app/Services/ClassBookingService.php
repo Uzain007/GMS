@@ -22,11 +22,17 @@ class ClassBookingService
         private readonly AttendanceService $attendance,
         private readonly AuditService $audit,
         private readonly TenantContext $tenant,
+        private readonly TrainingAccessService $trainingAccess,
     ) {}
 
     public function createSession(array $data, User $actor, Request $request): ClassSession
     {
         return DB::transaction(function () use ($data, $actor, $request): ClassSession {
+            if (! empty($data['trainer_staff_profile_id'])) {
+                $trainer = StaffProfile::query()->with('user')->findOrFail($data['trainer_staff_profile_id']);
+                $this->trainingAccess->assertActiveTrainer($trainer);
+                $this->trainingAccess->assertTrainerBranchAccess($trainer, $data['branch_id']);
+            }
             $session = ClassSession::query()->create([
                 ...$data,
                 'created_by' => $actor->getKey(),
@@ -42,12 +48,29 @@ class ClassBookingService
         return DB::transaction(function () use ($sessionId, $data, $actor, $request): ClassSession {
             $session = ClassSession::query()->lockForUpdate()->findOrFail($sessionId);
             $before = $session->toArray();
+            if ($session->status !== ClassSessionStatus::Scheduled) {
+                throw ValidationException::withMessages(['session' => ['Completed or cancelled classes are retained as history and cannot be edited.']]);
+            }
             if (isset($data['capacity']) && $data['capacity'] < $session->booked_count) {
                 throw ValidationException::withMessages(['capacity' => ['Capacity cannot be lower than the confirmed booking count.']]);
             }
 
             $reason = $data['reason'] ?? null;
             unset($data['reason']);
+            $trainerId = array_key_exists('trainer_staff_profile_id', $data)
+                ? $data['trainer_staff_profile_id']
+                : $session->trainer_staff_profile_id;
+            $branchId = $data['branch_id'] ?? $session->branch_id;
+            if ($branchId !== $session->branch_id && ClassBooking::query()
+                ->where('class_session_id', $session->getKey())
+                ->exists()) {
+                throw ValidationException::withMessages(['branch_id' => ['A class with booking history cannot be moved to another branch. Cancel it and create a replacement instead.']]);
+            }
+            if ($trainerId) {
+                $trainer = StaffProfile::query()->with('user')->findOrFail($trainerId);
+                $this->trainingAccess->assertActiveTrainer($trainer);
+                $this->trainingAccess->assertTrainerBranchAccess($trainer, $branchId);
+            }
             if (($data['status'] ?? null) === ClassSessionStatus::Cancelled->value) {
                 ClassBooking::query()->where('class_session_id', $session->getKey())
                     ->whereIn('status', [ClassBookingStatus::Booked->value, ClassBookingStatus::Waitlisted->value])
@@ -65,6 +88,18 @@ class ClassBookingService
             $endsAt = CarbonImmutable::parse($data['ends_at'] ?? $session->ends_at);
             if ($endsAt->lessThanOrEqualTo($startsAt)) {
                 throw ValidationException::withMessages(['ends_at' => ['The class end must be after its start.']]);
+            }
+            $bookingOpens = array_key_exists('booking_opens_at', $data)
+                ? ($data['booking_opens_at'] ? CarbonImmutable::parse($data['booking_opens_at']) : null)
+                : $session->booking_opens_at;
+            $bookingCloses = array_key_exists('booking_closes_at', $data)
+                ? ($data['booking_closes_at'] ? CarbonImmutable::parse($data['booking_closes_at']) : null)
+                : $session->booking_closes_at;
+            if ($bookingOpens && $bookingOpens->greaterThanOrEqualTo($endsAt)) {
+                throw ValidationException::withMessages(['booking_opens_at' => ['Booking must open before the class ends.']]);
+            }
+            if ($bookingCloses && ($bookingCloses->greaterThan($endsAt) || ($bookingOpens && $bookingCloses->lessThanOrEqualTo($bookingOpens)))) {
+                throw ValidationException::withMessages(['booking_closes_at' => ['Booking must close after it opens and no later than the class end.']]);
             }
 
             $session->update($data);

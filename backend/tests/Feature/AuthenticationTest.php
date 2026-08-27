@@ -2,7 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
+use App\Models\Gym;
 use App\Models\User;
+use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -28,6 +31,28 @@ class AuthenticationTest extends TestCase
             ->assertJsonMissingPath('data.token');
         $this->assertAuthenticatedAs($user);
         $this->assertDatabaseCount('personal_access_tokens', 0);
+    }
+
+    public function test_login_payload_includes_the_users_active_gym_under_postgresql_rls(): void
+    {
+        $user = User::factory()->create();
+        $gym = Gym::factory()->create();
+        app(TenantContext::class)->run($gym, fn () => $gym->users()->attach($user->id, [
+            'role' => UserRole::GymOwner->value,
+            'status' => 'active',
+            'joined_at' => now(),
+        ]));
+
+        $this->withHeaders([
+            'Origin' => 'http://localhost:3000',
+            'Referer' => 'http://localhost:3000/',
+        ])->postJson('/api/v1/auth/login', [
+            'email' => $user->email,
+            'password' => 'password',
+            'use_bearer_token' => false,
+        ])->assertOk()
+            ->assertJsonPath('data.user.gyms.0.id', $gym->id)
+            ->assertJsonPath('data.user.gyms.0.role', UserRole::GymOwner->value);
     }
 
     public function test_native_clients_can_explicitly_request_a_scoped_token(): void

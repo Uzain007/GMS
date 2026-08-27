@@ -32,7 +32,7 @@ class ProductionConfigurationPreflightTest extends TestCase
         $this->assertSame(1, $exitCode);
         $this->assertStringContainsString('APP_KEY must contain 32 bytes', $output);
         $this->assertStringContainsString('APP_URL must be a public HTTPS origin', $output);
-        $this->assertStringContainsString('STRIPE_WEBHOOK_SECRET is required', $output);
+        $this->assertStringContainsString('STRIPE_WEBHOOK_SECRET is required when member Stripe payments are enabled', $output);
         $this->assertStringNotContainsString('must-not-appear-in-output', $output);
     }
 
@@ -69,6 +69,25 @@ class ProductionConfigurationPreflightTest extends TestCase
             'NOTIFICATION_SMS_ENDPOINT and NOTIFICATION_SMS_TOKEN must be supplied together',
             Artisan::output(),
         );
+    }
+
+    public function test_stripe_is_optional_when_no_stripe_flow_is_configured(): void
+    {
+        $this->configureSafeProductionShape();
+        config([
+            'services.stripe.secret' => null,
+            'services.stripe.webhook_secret' => null,
+            'services.stripe.connect_refresh_url' => null,
+            'services.stripe.connect_return_url' => null,
+            'services.stripe.checkout_success_url' => null,
+            'services.stripe.checkout_cancel_url' => null,
+            'services.stripe.billing_webhook_secret' => null,
+            'services.stripe.billing_checkout_success_url' => null,
+            'services.stripe.billing_checkout_cancel_url' => null,
+            'services.stripe.billing_portal_return_url' => null,
+        ]);
+
+        $this->assertSame(0, Artisan::call('ironcore:production-preflight'));
     }
 
     public function test_trusted_proxy_must_be_an_ip_cidr_or_explicit_provider_wildcard(): void

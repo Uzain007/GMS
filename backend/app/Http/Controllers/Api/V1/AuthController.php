@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Models\User;
 use App\Services\MfaChallengeService;
+use App\Support\DatabaseIdentityContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -14,7 +15,11 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function login(LoginRequest $request, MfaChallengeService $mfaChallenges): JsonResponse
+    public function login(
+        LoginRequest $request,
+        MfaChallengeService $mfaChallenges,
+        DatabaseIdentityContext $identity,
+    ): JsonResponse
     {
         $usesBearerToken = $request->boolean('use_bearer_token');
         if (! $usesBearerToken && ! $request->hasSession()) {
@@ -52,7 +57,7 @@ class AuthController extends Controller
                     'authentication' => 'bearer',
                     'token' => $token,
                     'token_type' => 'Bearer',
-                    'user' => $this->userPayload($user->load('gyms')),
+                    'user' => $identity->run($user, fn (): array => $this->userPayload($user->load('gyms'))),
                 ],
             ]);
         }
@@ -67,7 +72,7 @@ class AuthController extends Controller
         return response()->json([
             'data' => [
                 'authentication' => 'session',
-                'user' => $this->userPayload($user->load('gyms')),
+                'user' => $identity->run($user, fn (): array => $this->userPayload($user->load('gyms'))),
             ],
         ]);
     }

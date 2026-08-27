@@ -14,6 +14,7 @@ use App\Services\AuditService;
 use App\Services\MfaChallengeService;
 use App\Services\MfaService;
 use App\Services\TotpService;
+use App\Support\DatabaseIdentityContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -185,6 +186,7 @@ class MfaController extends Controller
     public function challenge(
         VerifyMfaChallengeRequest $request,
         MfaChallengeService $challenges,
+        DatabaseIdentityContext $identity,
     ): JsonResponse {
         $result = $challenges->consume(
             (string) $request->validated('challenge_token'),
@@ -201,7 +203,7 @@ class MfaController extends Controller
                 'authentication' => 'bearer',
                 'token' => $token,
                 'token_type' => 'Bearer',
-                'user' => $this->userPayload($user->load('gyms')),
+                'user' => $identity->run($user, fn (): array => $this->userPayload($user->load('gyms'))),
             ]])->header('Cache-Control', 'no-store');
         }
 
@@ -217,7 +219,7 @@ class MfaController extends Controller
 
         return response()->json(['data' => [
             'authentication' => 'session',
-            'user' => $this->userPayload($user->load('gyms')),
+            'user' => $identity->run($user, fn (): array => $this->userPayload($user->load('gyms'))),
         ]])->header('Cache-Control', 'no-store');
     }
 

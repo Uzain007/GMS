@@ -42,15 +42,39 @@ test("camera scanning prefers rear cameras, supports device switching, and has d
 });
 
 test("member digital pass places the visible code beneath the secure QR", async () => {
-  const [portal, api, resource] = await Promise.all([
+  const [portal, dashboard, engagement, api, resource, credentialController] = await Promise.all([
     read("app/member-portal.tsx"),
+    read("app/ironcore-dashboard.tsx"),
+    read("app/engagement-management.tsx"),
     read("app/lib/ironcore-api.ts"),
     read("backend/app/Http/Resources/MemberSelfResource.php"),
+    read("backend/app/Http/Controllers/Api/V1/AttendanceController.php"),
   ]);
 
   assert.match(portal, /member-code-display/);
   assert.match(portal, /Member Code/);
   assert.match(portal, /data\.profile\?\.member_code/);
+  assert.doesNotMatch(portal, /data\.profile\?\.member_number/);
+  assert.match(dashboard, /Member Code/);
+  assert.match(dashboard, /member\.memberCode/);
+  assert.match(engagement, /credential-member-code/);
+  assert.match(engagement, /issuedMember\?\.memberCode/);
+  assert.match(engagement, /method: "member_code", accessValue/);
   assert.match(api, /member_code: string/);
   assert.match(resource, /'member_code' => \$this->member_code/);
+  assert.match(credentialController, /\$data\['member_code'\] = \$member->member_code/);
+});
+
+test("member detail resources consistently include the tenant-scoped visible code", async () => {
+  const resources = await Promise.all([
+    "MemberResource.php",
+    "AttendanceRecordResource.php",
+    "ClassBookingResource.php",
+    "TrainerMemberAssignmentResource.php",
+    "WorkoutPlanResource.php",
+    "WorkoutSessionResource.php",
+    "MemberProgressMeasurementResource.php",
+  ].map((file) => read(`backend/app/Http/Resources/${file}`)));
+
+  for (const resource of resources) assert.match(resource, /'member_code'/);
 });

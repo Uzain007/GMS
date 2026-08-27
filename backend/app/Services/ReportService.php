@@ -136,7 +136,7 @@ class ReportService
     private function periodSummary(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive): array
     {
         $settled = [
-            PaymentStatus::Succeeded->value,
+            PaymentStatus::Paid->value,
             PaymentStatus::PartiallyRefunded->value,
             PaymentStatus::Refunded->value,
         ];
@@ -211,7 +211,7 @@ class ReportService
         int $days,
         string $timezone,
     ): array {
-        $settled = [PaymentStatus::Succeeded->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
+        $settled = [PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
         $members = $this->dailyAggregate(
             Member::query()->where('gym_id', $gymId)->where('created_at', '>=', $from)->where('created_at', '<', $toExclusive),
             'created_at',
@@ -302,7 +302,7 @@ class ReportService
     /** @return list<array{method: string, count: int, net_minor: int}> */
     private function paymentMethodMix(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive): array
     {
-        $settled = [PaymentStatus::Succeeded->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
+        $settled = [PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
 
         return Payment::query()
             ->where('gym_id', $gymId)

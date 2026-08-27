@@ -6,6 +6,7 @@ use App\Enums\AccessCredentialStatus;
 use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\IssueAccessCredentialRequest;
+use App\Http\Requests\StoreMemberPaymentRequest;
 use App\Http\Requests\UpdateMemberSelfRequest;
 use App\Http\Resources\AttendanceRecordResource;
 use App\Http\Resources\InvoiceResource;
@@ -21,12 +22,15 @@ use App\Models\Membership;
 use App\Models\Payment;
 use App\Services\AttendanceService;
 use App\Services\AuditService;
+use App\Services\PaymentService;
+use App\Services\StripeGatewayService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MemberSelfServiceController extends Controller
 {
@@ -88,9 +92,68 @@ class MemberSelfServiceController extends Controller
     {
         $member = $this->memberFor($request);
         return PaymentResource::collection(
-            Payment::query()->with('refunds')->where('member_id', $member->getKey())
+            Payment::query()->with(['refunds', 'bankTransferReceipt'])->where('member_id', $member->getKey())
                 ->orderByDesc('paid_at')->paginate($this->pageSize($request, 25))
         );
+    }
+
+    public function paymentOptions(Request $request, StripeGatewayService $stripe): JsonResponse
+    {
+        $this->memberFor($request);
+        return response()->json(['data' => [
+            'stripe_configured' => $stripe->memberPaymentsConfigured(),
+            'stripe_available' => $stripe->checkoutAvailable(),
+            'bank_transfer_available' => true,
+            'cash_available_at_gym' => true,
+        ]]);
+    }
+
+    public function storePayment(StoreMemberPaymentRequest $request, PaymentService $service): JsonResponse
+    {
+        $member = $this->memberFor($request);
+        $invoice = Invoice::query()->findOrFail($request->validated('invoice_id'));
+        if ($invoice->member_id !== $member->getKey() || ! $invoice->membership_id) {
+            throw ValidationException::withMessages([
+                'invoice_id' => ['Choose an open membership invoice that belongs to your account.'],
+            ]);
+        }
+        if ($invoice->due_amount_minor <= 0) {
+            throw ValidationException::withMessages(['invoice_id' => ['This invoice has no outstanding balance.']]);
+        }
+
+        $validated = $request->safe()->except('receipt');
+        $result = $service->create([
+            'member_id' => $member->getKey(),
+            'membership_id' => $invoice->membership_id,
+            'invoice_id' => $invoice->getKey(),
+            'branch_id' => $invoice->branch_id,
+            'method' => $validated['method'],
+            // The invoice is the authoritative amount/currency boundary for
+            // member-submitted payments; neither value comes from the browser.
+            'amount_minor' => $invoice->due_amount_minor,
+            'currency' => $invoice->currency->value,
+            'idempotency_key' => $validated['idempotency_key'],
+            'bank_reference' => $validated['bank_reference'] ?? null,
+            'notes' => 'Submitted through member self-service.',
+        ], $request->user(), $request, $request->file('receipt'));
+
+        return response()->json([
+            'data' => (new PaymentResource($result['payment']))->resolve($request),
+            'meta' => [
+                'checkout_url' => $result['checkout_url'],
+                'idempotency_reused' => $result['reused'],
+            ],
+        ], $result['reused'] ? 200 : 201);
+    }
+
+    public function paymentReceipt(Request $request, string $payment): StreamedResponse
+    {
+        $member = $this->memberFor($request);
+        $record = Payment::query()->with('bankTransferReceipt')
+            ->where('member_id', $member->getKey())
+            ->findOrFail($payment);
+        abort_unless($record->bankTransferReceipt, 404);
+        return PaymentController::streamReceipt($record->bankTransferReceipt);
     }
 
     public function attendance(Request $request): AnonymousResourceCollection
@@ -114,7 +177,7 @@ class MemberSelfServiceController extends Controller
         );
     }
 
-    public function credential(Request $request): JsonResponse
+    public function credential(Request $request, AttendanceService $attendance): JsonResponse
     {
         $member = $this->memberFor($request);
         $credential = MemberAccessCredential::query()->where('member_id', $member->getKey())
@@ -122,19 +185,32 @@ class MemberSelfServiceController extends Controller
             ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->latest()->first();
 
-        return response()->json([
-            'data' => $credential ? (new MemberSelfCredentialResource($credential))->resolve($request) : null,
-        ]);
+        $data = $credential ? (new MemberSelfCredentialResource($credential))->resolve($request) : null;
+        if ($credential && $data && $plaintext = $attendance->plaintextFor($credential)) {
+            // Only the linked member receives the reconstructable opaque QR.
+            // The database retains its digest, not bearer plaintext.
+            $data['credential'] = $plaintext;
+        }
+
+        return response()->json(['data' => $data]);
     }
 
-    public function rotateCredential(IssueAccessCredentialRequest $request, AttendanceService $attendance): JsonResponse
+    public function ensureCredential(IssueAccessCredentialRequest $request, AttendanceService $attendance): JsonResponse
     {
         $result = $attendance->issueCredential(
             $this->memberFor($request), $request->validated(), $request->user(), $request,
         );
         $data = (new MemberSelfCredentialResource($result['credential']))->resolve($request);
-        // Plaintext exists only in this response; later reads expose safe hint
-        // and lifecycle metadata, never the credential or its digest.
+        $data['credential'] = $result['plaintext'];
+        return response()->json(['data' => $data], $result['created'] ? 201 : 200);
+    }
+
+    public function rotateCredential(IssueAccessCredentialRequest $request, AttendanceService $attendance): JsonResponse
+    {
+        $result = $attendance->rotateCredential(
+            $this->memberFor($request), $request->validated(), $request->user(), $request,
+        );
+        $data = (new MemberSelfCredentialResource($result['credential']))->resolve($request);
         $data['credential'] = $result['plaintext'];
         return response()->json(['data' => $data], 201);
     }

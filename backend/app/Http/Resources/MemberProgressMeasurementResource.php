@@ -11,10 +11,12 @@ class MemberProgressMeasurementResource extends JsonResource
     {
         return [
             'id' => $this->id, 'gym_id' => $this->gym_id, 'member_id' => $this->member_id,
-            'member' => $this->whenLoaded('member', fn () => ['id' => $this->member->id, 'member_number' => $this->member->member_number, 'name' => trim($this->member->first_name.' '.$this->member->last_name)]),
+            'member' => $this->whenLoaded('member', fn () => ['id' => $this->member->id, 'member_number' => $this->member->member_number, 'member_code' => $this->member->member_code, 'name' => trim($this->member->first_name.' '.$this->member->last_name)]),
             // Clients format integer thousandths for display; storage remains exact.
             'metric' => $this->metric->value, 'value_milli' => $this->value_milli, 'unit' => $this->unit,
             'measured_at' => $this->measured_at?->toIso8601String(), 'note' => $this->note,
+            'status' => $this->status->value, 'replaces_measurement_id' => $this->replaces_measurement_id,
+            'voided_at' => $this->voided_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

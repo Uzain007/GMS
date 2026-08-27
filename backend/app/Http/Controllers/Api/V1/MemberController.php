@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\MemberStatus;
+use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMemberRequest;
 use App\Http\Requests\UpdateMemberRequest;
 use App\Http\Resources\MemberResource;
 use App\Models\Member;
+use App\Models\Membership;
 use App\Services\AuditService;
 use App\Services\MemberCodeService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -58,7 +60,22 @@ class MemberController extends Controller
 
     public function show(string $member): MemberResource
     {
-        return new MemberResource(Member::query()->findOrFail($member));
+        $model = Member::query()->findOrFail($member);
+        // A member profile loads one bounded current-contract summary through
+        // the already selected tenant; it never scans or returns membership history.
+        $currentMembership = Membership::query()->with(['plan', 'branch'])
+            ->where('member_id', $model->getKey())
+            ->whereIn('status', [
+                MembershipStatus::Active->value,
+                MembershipStatus::Paused->value,
+                MembershipStatus::Pending->value,
+            ])
+            ->orderByRaw("CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END")
+            ->latest('starts_at')
+            ->first();
+        $model->setRelation('currentMembership', $currentMembership);
+
+        return new MemberResource($model);
     }
 
     public function update(UpdateMemberRequest $request, string $member, AuditService $audit): MemberResource

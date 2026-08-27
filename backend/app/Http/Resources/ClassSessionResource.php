@@ -17,7 +17,7 @@ class ClassSessionResource extends JsonResource
             'branch' => $this->whenLoaded('branch', fn () => ['id' => $this->branch->id, 'name' => $this->branch->name]),
             'trainer' => $this->whenLoaded('trainer', fn () => $this->trainer ? [
                 'id' => $this->trainer->id,
-                'name' => $this->trainer->user?->name,
+                'name' => $this->trainer->professionalName(),
             ] : null),
             'title' => $this->title,
             'description' => $this->description,

@@ -76,7 +76,7 @@ class ProcessMemberImport implements ShouldQueue
                 fn ($value) => Str::snake(trim((string) $value, "\xEF\xBB\xBF \t\n\r\0\x0B")),
                 $rawHeader,
             );
-            foreach (['first_name', 'last_name'] as $required) {
+            foreach (['first_name', 'last_name', 'email', 'phone'] as $required) {
                 if (! in_array($required, $headers, true)) {
                     throw new RuntimeException("The CSV header must contain {$required}.");
                 }
@@ -154,8 +154,13 @@ class ProcessMemberImport implements ShouldQueue
         }
 
         $email = mb_strtolower(trim((string) ($record['email'] ?? '')));
-        if ($email !== '' && (! filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 254)) {
-            throw new RuntimeException('Email is invalid.');
+        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 254) {
+            throw new RuntimeException('Email is required and must be valid.');
+        }
+
+        $phone = trim((string) ($record['phone'] ?? ''));
+        if ($phone === '' || mb_strlen($phone) > 40) {
+            throw new RuntimeException('Phone is required and must be at most 40 characters.');
         }
 
         $status = MemberStatus::tryFrom(trim((string) ($record['status'] ?? MemberStatus::Lead->value)));
@@ -184,8 +189,8 @@ class ProcessMemberImport implements ShouldQueue
             'member_number' => $memberNumber,
             'first_name' => $firstName,
             'last_name' => $lastName,
-            'email' => $email !== '' ? $email : null,
-            'phone' => $this->nullableString($record['phone'] ?? null, 40, 'Phone'),
+            'email' => $email,
+            'phone' => $phone,
             'date_of_birth' => $this->nullableDate($record['date_of_birth'] ?? null, 'Date of birth'),
             'status' => $status->value,
             'joined_at' => $this->nullableDate($record['joined_at'] ?? null, 'Joined date'),

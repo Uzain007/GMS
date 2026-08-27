@@ -21,8 +21,10 @@ class UpdateMemberRequest extends TenantFormRequest
             ],
             'first_name' => ['sometimes', 'string', 'max:100'],
             'last_name' => ['sometimes', 'string', 'max:100'],
-            'email' => ['nullable', 'email:rfc', 'max:254'],
-            'phone' => ['nullable', 'string', 'max:40'],
+            // Omitted contact fields remain unchanged on partial updates;
+            // explicit blank/null values are rejected so an edit cannot erase them.
+            'email' => ['sometimes', 'required', 'email:rfc', 'max:254'],
+            'phone' => ['sometimes', 'required', 'string', 'max:40'],
             'date_of_birth' => ['nullable', 'date', 'before:today'],
             'status' => ['sometimes', Rule::enum(MemberStatus::class)],
             'joined_at' => ['nullable', 'date'],

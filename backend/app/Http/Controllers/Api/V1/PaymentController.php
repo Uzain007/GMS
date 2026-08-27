@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\Currency;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePaymentRequest;
+use App\Http\Requests\ReviewBankTransferRequest;
 use App\Http\Requests\StoreRefundRequest;
 use App\Http\Resources\PaymentRefundResource;
 use App\Http\Resources\PaymentResource;
@@ -13,12 +14,15 @@ use App\Services\PaymentService;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentController extends Controller
 {
     public function index(): AnonymousResourceCollection
     {
-        $query = Payment::query()->with('refunds')->orderByDesc('created_at');
+        $query = Payment::query()->with(['refunds', 'bankTransferReceipt'])->orderByDesc('created_at');
         foreach (['status', 'method', 'member_id', 'invoice_id'] as $filter) {
             if (request()->filled($filter)) {
                 $query->where($filter, request($filter));
@@ -32,7 +36,7 @@ class PaymentController extends Controller
 
     public function store(StorePaymentRequest $request, PaymentService $service): JsonResponse
     {
-        $result = $service->create($request->validated(), $request->user(), $request);
+        $result = $service->create($request->safe()->except('receipt'), $request->user(), $request, $request->file('receipt'));
         return response()->json([
             'data' => (new PaymentResource($result['payment']))->resolve($request),
             'meta' => [
@@ -46,7 +50,7 @@ class PaymentController extends Controller
 
     public function show(string $payment): PaymentResource
     {
-        return new PaymentResource(Payment::query()->with('refunds')->findOrFail($payment));
+        return new PaymentResource(Payment::query()->with(['refunds', 'bankTransferReceipt'])->findOrFail($payment));
     }
 
     public function refund(StoreRefundRequest $request, string $payment, PaymentService $service): PaymentRefundResource
@@ -60,6 +64,49 @@ class PaymentController extends Controller
         $requested = strtoupper(trim((string) request('currency', $context->gym()->base_currency->value)));
         $currency = Currency::tryFrom($requested) ?? $context->gym()->base_currency;
         return response()->json(['data' => $service->summary($currency->value)]);
+    }
+
+    public function reviewBankTransfer(
+        ReviewBankTransferRequest $request,
+        string $payment,
+        PaymentService $service,
+    ): PaymentResource {
+        $model = Payment::query()->findOrFail($payment);
+        return new PaymentResource($service->reviewBankTransfer(
+            $model, $request->validated(), $request->user(), $request,
+        ));
+    }
+
+    public function receipt(string $payment): StreamedResponse
+    {
+        $record = Payment::query()->with('bankTransferReceipt')->findOrFail($payment);
+        abort_unless($record->bankTransferReceipt, 404);
+        return $this->streamReceipt($record->bankTransferReceipt);
+    }
+
+    public static function streamReceipt(\App\Models\BankTransferReceipt $receipt): StreamedResponse
+    {
+        $disk = Storage::disk($receipt->storage_disk);
+        abort_unless($disk->exists($receipt->storage_path), 404);
+        $disposition = (new ResponseHeaderBag())->makeDisposition(
+            ResponseHeaderBag::DISPOSITION_ATTACHMENT,
+            $receipt->original_name,
+            'bank-transfer-receipt',
+        );
+
+        return response()->stream(function () use ($disk, $receipt): void {
+            $stream = $disk->readStream($receipt->storage_path);
+            abort_unless(is_resource($stream), 404);
+            fpassthru($stream);
+            fclose($stream);
+        }, 200, [
+            'Content-Type' => $receipt->mime_type,
+            'Content-Length' => (string) $receipt->size_bytes,
+            'Content-Disposition' => $disposition,
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
+        ]);
     }
 
     private function pageSize(): int

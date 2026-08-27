@@ -97,9 +97,13 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/member/membership', [MemberSelfServiceController::class, 'membership'])->middleware('role:member');
                 Route::get('/member/invoices', [MemberSelfServiceController::class, 'invoices'])->middleware('role:member');
                 Route::get('/member/payments', [MemberSelfServiceController::class, 'payments'])->middleware('role:member');
+                Route::get('/member/payment-options', [MemberSelfServiceController::class, 'paymentOptions'])->middleware('role:member');
+                Route::post('/member/payments', [MemberSelfServiceController::class, 'storePayment'])->middleware('role:member');
+                Route::get('/member/payments/{payment}/receipt', [MemberSelfServiceController::class, 'paymentReceipt'])->middleware('role:member');
                 Route::get('/member/attendance', [MemberSelfServiceController::class, 'attendance'])->middleware('role:member');
                 Route::get('/member/access-credential', [MemberSelfServiceController::class, 'credential'])->middleware('role:member');
-                Route::post('/member/access-credential', [MemberSelfServiceController::class, 'rotateCredential'])->middleware('role:member');
+                Route::post('/member/access-credential', [MemberSelfServiceController::class, 'ensureCredential'])->middleware('role:member');
+                Route::post('/member/access-credential/rotate', [MemberSelfServiceController::class, 'rotateCredential'])->middleware('role:member');
                 Route::get('/member/data-exports', [MemberDataExportController::class, 'selfIndex'])->middleware('role:member');
                 Route::post('/member/data-exports', [MemberDataExportController::class, 'selfStore'])->middleware('role:member');
                 Route::get('/member/data-exports/{export}', [MemberDataExportController::class, 'selfShow'])->middleware('role:member');
@@ -122,7 +126,11 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::patch('/members/{member}', [MemberController::class, 'update'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/members/{member}/access-credential', [AttendanceController::class, 'credential'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::post('/members/{member}/access-credential', [AttendanceController::class, 'issueCredential'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::post('/members/{member}/access-credential/rotate', [AttendanceController::class, 'rotateCredential'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::get('/members/{member}/account-invitations', [MemberAccountInvitationController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
@@ -144,11 +152,25 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/member-imports/{import}', [MemberImportController::class, 'show'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
 
+                Route::get('/staff/me', [StaffProfileController::class, 'me'])
+                    ->middleware('role:trainer');
+                Route::patch('/staff/me', [StaffProfileController::class, 'updateMe'])
+                    ->middleware('role:trainer');
                 Route::get('/staff', [StaffProfileController::class, 'index'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/staff', [StaffProfileController::class, 'store'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/staff/{staff}', [StaffProfileController::class, 'show'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::patch('/staff/{staff}', [StaffProfileController::class, 'update'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::delete('/staff/{staff}', [StaffProfileController::class, 'destroy'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/staff/{staff}/profile-image', [StaffProfileController::class, 'image'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/staff/{staff}/profile-image', [StaffProfileController::class, 'replaceImage'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::delete('/staff/{staff}/profile-image', [StaffProfileController::class, 'removeImage'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/staff-invitations', [StaffInvitationController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
@@ -188,6 +210,10 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::get('/payments/{payment}', [PaymentController::class, 'show'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/payments/{payment}/receipt', [PaymentController::class, 'receipt'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::patch('/payments/{payment}/bank-transfer-review', [PaymentController::class, 'reviewBankTransfer'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::post('/payments/{payment}/refunds', [PaymentController::class, 'refund'])
                     ->middleware('role:super_admin,gym_owner');
 
@@ -204,6 +230,16 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-billing-invoices', [SaasSubscriptionController::class, 'invoices'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/saas-subscription/payment-options', [SaasSubscriptionController::class, 'paymentOptions'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'manualPayments'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'storeManualPayment'])
+                    ->middleware('role:super_admin,gym_owner');
+                Route::get('/saas-subscription/manual-payments/{payment}/receipt', [SaasSubscriptionController::class, 'manualPaymentReceipt'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::patch('/saas-subscription/manual-payments/{payment}/review', [SaasSubscriptionController::class, 'reviewManualPayment'])
+                    ->middleware('role:super_admin');
                 Route::post('/saas-subscription/checkout', [SaasSubscriptionController::class, 'checkout'])
                     ->middleware('role:super_admin,gym_owner');
                 Route::post('/saas-subscription/portal', [SaasSubscriptionController::class, 'portal'])
@@ -257,6 +293,10 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,trainer,member');
                 Route::post('/progress-measurements', [ProgressMeasurementController::class, 'store'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,trainer,member');
+                Route::patch('/progress-measurements/{measurement}', [ProgressMeasurementController::class, 'update'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::delete('/progress-measurements/{measurement}', [ProgressMeasurementController::class, 'destroy'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/notification-preferences', [NotificationController::class, 'preference'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,member');
