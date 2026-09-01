@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.42.1 — Full workflow audit remediation and PostgreSQL-safe role login |
-| Last verified | 27 August 2026 |
+| MAD version | 0.48.0 — Tenant-safe branch management workspace |
+| Last verified | 31 August 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Post-Milestone 26 full workflow audit remediation implemented locally; approval pending |
+| Active milestone | Post-Milestone 26 branch management workflow implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -328,7 +328,7 @@ Only one pending invitation may exist per `(gym_id, member_id)`. Reissuing revok
 
 Partial unique index `(gym_id, member_id)` permits only one `pending` or `active` membership at a time.
 
-### `member_imports` — asynchronous CSV import tracking
+### `member_imports` — previewed spreadsheet import tracking
 
 | Column | Type | Null | Constraints / index |
 | --- | --- | --- | --- |
@@ -337,9 +337,11 @@ Partial unique index `(gym_id, member_id)` permits only one `pending` or `active
 | `requested_by` | uuid | no | FK `users.id` restrict delete |
 | `original_name` | varchar(255) | no | display name only |
 | `storage_disk`, `storage_path` | varchar | no | private tenant-prefixed object location |
-| `status` | varchar(30) | no | `queued`, `processing`, `completed`, `failed` |
+| `status` | varchar(30) | no | `previewed`, `queued`, `processing`, `completed`, `failed` |
 | `total_rows`, `processed_rows`, `success_rows`, `failure_rows` | unsigned big integer | no | progress counters |
 | `errors` | jsonb | yes | first 100 bounded validation errors |
+| `preview_summary` | jsonb | yes | bounded category counters only; never source rows |
+| `previewed_at`, `confirmed_at` | timestamp | yes | explicit validation and user-confirmation evidence |
 | `started_at`, `completed_at` | timestamp | yes | — |
 | `created_at`, `updated_at` | timestamp | yes | indexes `(gym_id, status, created_at)`, `(gym_id, requested_by, created_at)` |
 
@@ -441,12 +443,26 @@ The payment-status upgrade runs one explicit gym at a time while PostgreSQL FORC
 | `invoice_id` | uuid | yes | composite tenant FK to the outstanding invoice when present |
 | `submitted_by`, `reviewed_by` | uuid | mixed | authenticated platform-user FKs; review actor nullable until decision |
 | `bank_reference` | varchar(160) | yes | bounded member/staff transfer reference |
+| `transferred_on` | date | yes | optional member-reported transfer date; never treated as settlement evidence by itself |
 | `storage_disk`, `storage_path` | varchar | no | private object locator under `gyms/{gym_id}/payments/{payment_id}`; never returned by resources |
 | `original_name`, `mime_type`, `size_bytes`, `content_sha256` | mixed | no | validated PDF/image metadata and integrity digest |
 | `reviewed_at`, `review_reason` | timestamp/text | yes | mandatory reason recorded on approval/rejection |
 | `created_at`, `updated_at` | timestamp | yes | indexes `(gym_id, member_id, created_at)`, `(gym_id, reviewed_at, created_at)` |
 
 Receipts are streamed only after tenant middleware, role/member-self authorization, Eloquent scoping and forced PostgreSQL RLS. Responses are private/no-store, attachment-only, MIME-sniff protected and never expose an object-store URL.
+
+### `gym_bank_transfer_settings` — encrypted tenant payment instructions
+
+| Column | Type | Null | Constraints / index |
+| --- | --- | --- | --- |
+| `id`, `gym_id` | uuid | no | tenant-owned identity; one row per gym, unique `(gym_id, id)`, forced RLS |
+| `enabled` | boolean | no | member bank transfer is offered only when enabled and required fields exist |
+| `account_name`, `bank_name`, `account_number_or_iban` | encrypted text | yes | required to enable; decrypted only through authorised tenant APIs |
+| `routing_details`, `payment_instructions` | encrypted text | yes | optional country-specific routing and bounded member guidance |
+| `updated_by` | uuid | no | authenticated user FK; restrict delete |
+| `created_at`, `updated_at` | timestamp | yes | tenant configuration lifecycle |
+
+Audit events contain only enabled/configured flags, never plaintext bank identifiers. The linked member receives the selected gym's details only alongside server-calculated open-invoice amount, ISO currency and a non-secret reconciliation reference.
 
 ### `payment_refunds` — immutable refund evidence
 
@@ -744,7 +760,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `Gym belongsToMany User` through `gym_user` with `role`, `status`, `joined_at` and timestamps.
 - `User belongsToMany Gym` through `gym_user`.
 - `User hasMany UserMfaRecoveryCode`; recovery rows are platform-owned one-time authentication evidence and never tenant data.
-- `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan`, `MemberImport` and `MemberDataExport`.
+- `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan`, `MemberImport` and `MemberDataExport`; it has one tenant-scoped encrypted GymBankTransferSetting.
 - `GymBranch belongsTo Gym` and has many home members and branch-specific membership plans.
 - `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships and time-limited data exports. Its detail response resolves one bounded current membership summary inside the selected tenant rather than depending on a paginated membership list.
 - `StaffProfile belongsTo User` and optionally a home branch; it belongs to many branches through tenant-owned `staff_profile_branch` and may reference one private profile image through tenant-owned storage metadata.
@@ -802,6 +818,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | PATCH | `/gyms/{gym}` | `auth:sanctum`, `tenant`, manager role, `GymPolicy::update` | Update gym identity/settings with audit reason |
 | GET/POST | `/gyms/{gym}/branches` | tenant; reads all tenant roles, writes owner/manager | List or create branches |
 | GET/PATCH | `/gyms/{gym}/branches/{branch}` | tenant; reads all tenant roles, writes owner/manager | Read or update a tenant-resolved branch |
+| DELETE | `/gyms/{gym}/branches/{branch}` | tenant; owner/manager/super admin | Audited removal of an empty non-primary branch only; linked branches must be deactivated to retain history |
 | GET/POST | `/gyms/{gym}/members` | tenant; owner/manager/receptionist | List/search or create member profiles |
 | GET/PATCH | `/gyms/{gym}/members/{member}` | tenant; owner/manager/receptionist | Read a tenant-resolved member with one bounded current plan/branch/contract summary, or update the member profile |
 | GET/POST | `/gyms/{gym}/members/{member}/account-invitations` | tenant; owner/manager/receptionist | Read bounded activation history or revoke/reissue a one-time member account invitation |
@@ -809,8 +826,12 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/members/{member}/data-exports/{export}[/download]` | tenant; owner/manager/super admin | Read safe export state or stream the authorised private JSON document |
 | POST | `/gyms/{gym}/member-account-invitations/preview` | public activation throttle; route gym + opaque fragment token in request body | Return only gym name, member first name, masked email and whether an existing account will be linked |
 | POST | `/gyms/{gym}/member-account-invitations/accept` | public activation throttle; route gym + opaque fragment token | Atomically create or link the invited email's platform user, add member tenant access, consume the token and start a regenerated web session |
-| GET/POST | `/gyms/{gym}/member-imports` | tenant; owner/manager/receptionist | List imports or queue a private CSV upload |
+| GET/POST | `/gyms/{gym}/member-imports` | tenant; owner/manager/receptionist | List imports or upload private CSV/XLS/XLSX for synchronous bounded preview; no rows are created |
 | GET | `/gyms/{gym}/member-imports/{import}` | tenant; owner/manager/receptionist | Poll import counters and bounded errors |
+| POST | `/gyms/{gym}/member-imports/{import}/confirm` | tenant; owner/manager/receptionist | Queue only a clean preview after explicit confirmation; invalid previews are rejected |
+| GET | `/gyms/{gym}/members-import-template?format=csv|xlsx` | tenant; owner/manager/receptionist | Download exact headers and one safe example row |
+| GET | `/gyms/{gym}/members-export` | tenant; owner/manager/receptionist | Stream the complete selected-gym roster as CSV under re-established ORM/RLS context |
+| GET | `/platform/members/export` | authenticated `super_admin` only | Dedicated audited cross-gym CSV export that enters each gym explicitly and never disables ordinary tenant scope |
 | GET/POST | `/gyms/{gym}/staff` | tenant; owner/manager | List staff or create an immediate trainer profile/account using server-fixed trainer role and a tenant-validated branch |
 | GET/PATCH/DELETE | `/gyms/{gym}/staff/{staff}` | tenant; owner/manager | Read/update staff, or delete an unreferenced trainer; reasons are required and managers cannot modify owner/manager hierarchy |
 | GET/POST/DELETE | `/gyms/{gym}/staff/{staff}/profile-image` | tenant; owner/manager | Stream, replace or remove a validated private trainer image without exposing an object-store URL |
@@ -822,6 +843,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/PATCH | `/gyms/{gym}/memberships/{membership}` | tenant; owner/manager/receptionist | Read/update lifecycle; cancellation reason required |
 | GET/POST | `/gyms/{gym}/invoices` | tenant; owner/manager/receptionist | List or issue server-calculated member invoices |
 | GET | `/gyms/{gym}/invoices/{invoice}` | tenant; owner/manager/receptionist | Read invoice and tenant-scoped items |
+| GET/PATCH | `/gyms/{gym}/bank-transfer-settings` | tenant; owner/manager/super admin; mandatory reason on update | Read or update encrypted member transfer instructions without logging account identifiers |
 | GET/POST | `/gyms/{gym}/payments` | tenant; owner/manager/receptionist | List or record cash/terminal immediately, submit a receipt-backed pending bank transfer, or start configured hosted online payment |
 | GET | `/gyms/{gym}/payments/summary` | tenant; owner/manager/receptionist | Currency-specific gross, refunds, net, pending and outstanding totals |
 | GET | `/gyms/{gym}/payments/{payment}` | tenant; owner/manager/receptionist | Read a payment and its refunds |
@@ -851,8 +873,8 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/member/membership` | tenant; linked member self | Read the linked member's current membership with safe plan and branch summaries |
 | GET | `/gyms/{gym}/member/invoices` | tenant; linked member self | List only the linked member's bounded invoice history |
 | GET | `/gyms/{gym}/member/payments` | tenant; linked member self | List only the linked member's bounded payment history and safe refund evidence |
-| GET | `/gyms/{gym}/member/payment-options` | tenant; linked member self | Read safe cash/bank/Stripe capability flags; never provider secrets |
-| POST | `/gyms/{gym}/member/payments` | tenant; linked member self | Submit a private bank receipt or start Stripe Checkout for the server-resolved member and authoritative open invoice amount |
+| GET | `/gyms/{gym}/member/payment-options` | tenant; linked member self | Read safe cash/Stripe capability plus enabled gym bank details and authoritative invoice reference/amount/currency; never provider secrets |
+| POST | `/gyms/{gym}/member/payments` | tenant; linked member self | Submit private receipt/reference/date evidence against an enabled gym bank configuration, or start Stripe Checkout for the server-resolved member and authoritative open invoice amount |
 | GET | `/gyms/{gym}/member/payments/{payment}/receipt` | tenant; linked member self | Stream only the linked member's own private receipt |
 | GET | `/gyms/{gym}/member/attendance` | tenant; linked member self | Cursor-list at most 90 days of the linked member's own attendance history |
 | GET/POST | `/gyms/{gym}/member/access-credential` | tenant; linked member self | Read or ensure the linked member's persistent opaque QR bearer while retaining only its tenant-scoped SHA-256 digest |
@@ -1058,7 +1080,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | MAD and repository enforcement | Active | Root `AGENTS.md` requires this document before source changes |
 | PostgreSQL RLS and fail-closed tenancy | Passing locally and hosted | Commit `79ed6ae` passed 44 Laravel tests / 335 assertions under PostgreSQL 17 forced RLS and non-superuser `ironcore_app` |
 | Branches, members, staff, invitations, plans and memberships API | Implemented; core runtime passing | Tenant composite FKs, RLS, validation, audit and capped pagination are active |
-| Streaming member CSV imports | Implemented; PostgreSQL/Redis runtime passing | Private tenant paths, Redis job, 500-row inserts, bounded errors and progress counters |
+| Previewed member spreadsheet imports and roster exports | Implemented locally; approval pending | CSV/XLS/XLSX uploads receive category preview before explicit confirmation; clean imports use private tenant paths, Redis and 500-row writes. Tenant and Super Admin exports keep distinct role boundaries and re-enter each gym rather than disabling RLS. |
 | Secure web authentication and tenant selection | Implemented; core runtime passing | Stateful Sanctum/CSRF flow, session rotation, explicit super-admin tenant selection and no browser bearer storage |
 | Real role entry and actionable frontend portals | Local business acceptance complete; production acceptance pending | Login, logout and recovery work for Super Admin, Gym Admin and Member accounts; permission-visible tenant/member writes use existing API methods; representative previews are explicit and read-only |
 | Members frontend/API integration | Implemented; local acceptance passing | Tenant route/header agreement, capped server search, loading/error/empty states, creation, portal invitation and audited profile/lifecycle editing; demo preview remains isolated |
@@ -1067,13 +1089,13 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone 3 — gym, member and staff operations | Feature-complete; core runtime passing | Browser/API contracts and GitHub-hosted Laravel/PostgreSQL/Redis tests pass |
 | Tenant invoices and immutable payment/refund ledger | Implemented locally; approval pending | Server totals, Paid cash/terminal records, pending/reviewed private bank receipts, optional hosted checkout, refunds and currency summaries |
 | Stripe Connect onboarding and signed webhooks | Optional adapter implemented; provider sandbox gate pending | Plans/cash/bank work without Stripe; configured direct charges retain HMAC verification, narrow tenant lookup and idempotent settlement |
-| Payments frontend/API integration | Implemented locally; approval pending | Stripe Not configured state, cash recording, receipt upload/download, audited admin approval/rejection and member invoice payment choices |
+| Payments frontend/API integration | Implemented locally; approval pending | Encrypted gym bank settings, member copy/details/upload journey, Pending Verification and rejection/resubmission, receipt review, cash recording and optional Stripe |
 | Platform SaaS plan catalogue and immutable prices | Implemented locally; approval pending | Platform-owned tiers publish without Stripe, declare cash/bank/card availability and lazily synchronize Stripe IDs only for configured card checkout |
 | Tenant-isolated gym subscriptions and SaaS invoices | Implemented locally; approval pending | Separate platform Stripe/manual identities, reviewed cash/bank evidence, one current subscription, immutable snapshots and invoice history |
 | Stripe Billing signed webhook synchronization | Implemented; core runtime passing; provider gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
 | Platform SaaS subscription frontend/API integration | Implemented; core runtime passing; provider gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
 | Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |
-| Member QR credentials, Member Codes and branch attendance | Persistent secure-pass correction implemented locally; approval pending | Separate tenant-unique six-digit lookup, server-reconstructable opaque/hash-only QR security, explicit rotation, camera scanning, active-membership/branch validation and one open presence row |
+| Member QR credentials, Member Codes and branch attendance | Persistent secure-pass display correction implemented locally; approval pending | Separate tenant-unique six-digit lookup, server-reconstructable opaque/hash-only QR security, deterministic image rendering with retry/error states, explicit rotation that revokes old scanner values, camera scanning, active-membership/branch validation and one open presence row |
 | Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; core runtime passing | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |
 | Attendance and class-booking frontend/API integration | Implemented; core runtime passing | Check-in console, persistent authorised QR rendering, live presence, schedule, rosters, booking and waitlist actions; attendance columns use the responsive shared table contract |
 | Milestone 5A — attendance, classes and bookings | Feature-complete; core runtime passing | Static contracts, production build, type-check, browser QA and GitHub-hosted runtime pass |
@@ -1119,6 +1141,10 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Post-Milestone 26 — membership lifecycle audit | Implemented locally; approval pending | Confirms an active member profile may correctly exist without a plan, adds a tenant-scoped current-membership profile summary, plan duration and membership expiry controls, and requires an active in-date membership before QR pass issuance as well as at check-in. Full plan → member → contract → invoice/payment → QR/check-in → expiry tests pass locally. |
 | Post-Milestone 26 — provider-optional SaaS publication | Implemented locally; approval pending | Removes provider calls from plan publication, stores allowed payment methods, lazily synchronizes configured Stripe checkout, and adds tenant-isolated reviewed cash/bank platform payments without touching the member-payment ledger. |
 | Post-Milestone 26 — full workflow audit remediation | Implemented locally; approval pending | Completes management/settings/trainer/report workflows already identified by the audit, fixes member contact edit safety and persistent secure QR reconstruction, adds Super Admin platform-audit read RLS, and binds login identity before RLS-protected gym-role serialization. Verification uses a separate non-superuser PostgreSQL/Redis database. |
+| Post-Milestone 26 — canonical location controls | Implemented locally; approval pending | Super Admin gym create/edit and Gym Admin business settings share the same searchable ISO country/calling-code and IANA-timezone controls; branch create/edit exposes its existing validated IANA timezone. Member/trainer profile forms do not persist an independent country or timezone, and member notification timezone remains inherited from the verified gym tenant. Currency behavior is unchanged. |
+| Post-Milestone 26 — member roster workflow | Implemented locally; approval pending | Members now exposes Import members, Export members and CSV/XLSX template downloads. Laravel previews CSV/XLS/XLSX with totals and explicit duplicate/contact/branch/plan errors, blocks invalid confirmation, creates optional membership snapshots for valid plan references, and streams selected-tenant or Super-Admin-only cross-gym exports with audit evidence. |
+| Post-Milestone 26 — member activation form presentation | Implemented locally; approval pending | The existing one-time activation/security flow now uses a full-width single-column password form, labelled show/hide controls, balanced spacing and responsive desktop/mobile presentation without changing token handling or acceptance rules. |
+| Post-Milestone 26 — branch management workflow | Implemented locally; approval pending | Gym Admin branches now open a unified workspace for details, audited status changes, staff/trainer and member home-branch assignment, branch classes and attendance, plus deletion of empty non-primary branches. Inactive branches retain history and reject new check-ins, classes and bookings. |
 
 ## Change control
 

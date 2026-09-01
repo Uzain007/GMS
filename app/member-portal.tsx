@@ -9,10 +9,12 @@ import {
   Check,
   CircleUserRound,
   CreditCard,
+  Copy,
   Dumbbell,
   Download,
   FileUp,
   Home,
+  Landmark,
   LockKeyhole,
   LogOut,
   QrCode,
@@ -24,7 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from "react";
 import type {
   AttendanceRecord,
   ClassBookingRecord,
@@ -80,7 +82,7 @@ export type MemberPortalActions = {
   onUpdateProfile: (input: UpdateMemberSelf) => Promise<void>;
   onEnsureCredential: () => Promise<MemberSelfCredentialRecord>;
   onRotateCredential: () => Promise<MemberSelfCredentialRecord>;
-  onSubmitPayment: (input: { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; receipt?: File }) => Promise<string | null>;
+  onSubmitPayment: (input: { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; transferred_on?: string; receipt?: File }) => Promise<string | null>;
   onLoadPaymentReceipt: (paymentId: string) => Promise<Blob>;
   onBookClass: (sessionId: string) => Promise<void>;
   onCancelBooking: (bookingId: string, reason: string) => Promise<void>;
@@ -138,6 +140,30 @@ function MemberPaymentsCard({ data, actions }: { data: MemberPortalData; actions
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const bankDetails = data.paymentOptions.bank_transfer_details;
+  const firstOpenInvoiceId = openInvoices[0]?.id ?? "";
+  const selectedInvoiceId = openInvoices.some((invoice) => invoice.id === invoiceId) ? invoiceId : firstOpenInvoiceId;
+  const transferDetails = bankDetails?.invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId) ?? null;
+
+  async function copyValue(label: string, value: string) {
+    try { await navigator.clipboard.writeText(value); setCopied(label); window.setTimeout(() => setCopied(null), 1800); }
+    catch { setError("Copy was blocked by your browser. Select and copy the details manually."); }
+  }
+
+  function copyAll() {
+    if (!bankDetails || !transferDetails) return;
+    const lines = [
+      `Account name: ${bankDetails.account_name}`,
+      `Bank name: ${bankDetails.bank_name}`,
+      `Account number / IBAN: ${bankDetails.account_number_or_iban}`,
+      bankDetails.routing_details ? `Sort code / routing: ${bankDetails.routing_details}` : null,
+      `Payment reference: ${transferDetails.payment_reference}`,
+      `Amount due: ${money(transferDetails.amount_minor, transferDetails.currency)}`,
+      `Currency: ${transferDetails.currency}`,
+    ].filter(Boolean).join("\n");
+    void copyValue("all", lines);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError(null); setNotice(null);
@@ -145,14 +171,15 @@ function MemberPaymentsCard({ data, actions }: { data: MemberPortalData; actions
       const form = new FormData(event.currentTarget);
       const receipt = form.get("receipt");
       const checkout = await actions.onSubmitPayment({
-        invoice_id: invoiceId,
+        invoice_id: selectedInvoiceId,
         method,
         idempotency_key: paymentRequestKey(),
         bank_reference: String(form.get("bank_reference")) || undefined,
+        transferred_on: String(form.get("transferred_on")) || undefined,
         receipt: receipt instanceof File && receipt.size > 0 ? receipt : undefined,
       });
       if (checkout) window.location.assign(checkout);
-      else setNotice("Receipt submitted. Your gym will review it before marking the payment Paid.");
+      else setNotice("Receipt submitted. Payment status is now Pending Verification.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The payment could not be submitted.");
     } finally { setBusy(false); }
@@ -169,7 +196,9 @@ function MemberPaymentsCard({ data, actions }: { data: MemberPortalData; actions
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The receipt could not be downloaded."); }
   }
 
-  return <article className="member-card member-payments-card"><div className="member-card-title"><div><small>Payments</small><h3>Membership payments</h3></div><CreditCard /></div>{!actions.readOnly && openInvoices.length > 0 && <form className="member-payment-form" onSubmit={submit}><label>Invoice<select value={invoiceId} onChange={(event) => setInvoiceId(event.target.value)} required>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.number} · {money(invoice.due_amount_minor, invoice.currency)}</option>)}</select></label><div className="member-payment-methods"><button type="button" className={method === "bank_transfer" ? "active" : ""} onClick={() => setMethod("bank_transfer")}><Banknote size={16} /> Bank transfer</button><button type="button" className={method === "online_card" ? "active" : ""} disabled={!data.paymentOptions.stripe_available} onClick={() => setMethod("online_card")}><CreditCard size={16} /> Stripe {data.paymentOptions.stripe_available ? "" : "· Not configured"}</button></div>{method === "bank_transfer" ? <><label>Bank reference<input name="bank_reference" maxLength={160} placeholder="Reference shown on your transfer" /></label><label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label><button className="member-primary" disabled={busy}><FileUp size={16} /> {busy ? "Submitting…" : "Submit receipt"}</button></> : <><div className="member-payment-safe"><ShieldCheck size={16} /><span>Card details are entered only on Stripe’s hosted checkout.</span></div><button className="member-primary" disabled={busy || !data.paymentOptions.stripe_available}>{busy ? "Opening…" : "Pay securely with Stripe"}</button></>}{error && <div className="member-inline-error" role="alert">{error}</div>}{notice && <div className="member-inline-notice" role="status">{notice}</div>}</form>}{!actions.readOnly && openInvoices.length === 0 && <p className="member-payment-copy">You have no open membership invoice to pay. Cash can be recorded safely by reception.</p>}{!data.paymentOptions.stripe_configured && <div className="member-payment-unavailable"><CreditCard size={15} /><span><strong>Stripe · Not configured</strong><small>Bank transfer and cash at reception remain available.</small></span></div>}<div className="member-payment-list">{data.payments.slice(0, 6).map((payment) => <div key={payment.id}><span><strong>{payment.receipt_number}</strong><small>{payment.method.replaceAll("_", " ")} · {payment.status.replaceAll("_", " ")}</small>{payment.bank_transfer_receipt?.review_reason && <small>{payment.bank_transfer_receipt.review_reason}</small>}</span><span className="member-payment-amount"><b>{money(payment.amount_minor, payment.currency)}</b>{payment.bank_transfer_receipt && <button onClick={() => void download(payment)} aria-label={`Download receipt ${payment.receipt_number}`}><Download size={14} /></button>}</span></div>)}{data.payments.length === 0 && <Empty icon={WalletCards} title="No payments" copy="Payments and pending bank receipts will appear here." />}</div></article>;
+  return <article className="member-card member-payments-card"><div className="member-card-title"><div><small>Payments</small><h3>Membership payments</h3></div><CreditCard /></div>{!actions.readOnly && openInvoices.length > 0 && <form className="member-payment-form" onSubmit={submit}><label>Invoice<select value={invoiceId} onChange={(event) => setInvoiceId(event.target.value)} required>{openInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.number} · {money(invoice.due_amount_minor, invoice.currency)}</option>)}</select></label><div className="member-payment-methods"><button type="button" className={method === "bank_transfer" ? "active" : ""} disabled={!data.paymentOptions.bank_transfer_available} onClick={() => setMethod("bank_transfer")}><Banknote size={16} /> Pay by Bank Transfer</button><button type="button" className={method === "online_card" ? "active" : ""} disabled={!data.paymentOptions.stripe_available} onClick={() => setMethod("online_card")}><CreditCard size={16} /> Stripe {data.paymentOptions.stripe_available ? "" : "· Not configured"}</button></div>{method === "bank_transfer" ? data.paymentOptions.bank_transfer_available && bankDetails && transferDetails ? <><section className="member-bank-details" aria-label="Bank transfer payment details"><div className="member-bank-heading"><span><Landmark size={18} /><strong>Transfer details</strong></span><button type="button" onClick={copyAll}><Copy size={15} /> {copied === "all" ? "Copied" : "Copy all payment details"}</button></div>{[
+    ["Account name", bankDetails.account_name], ["Bank name", bankDetails.bank_name], ["Account number / IBAN", bankDetails.account_number_or_iban], ["Sort code / routing", bankDetails.routing_details], ["Payment reference", transferDetails.payment_reference], ["Amount due", money(transferDetails.amount_minor, transferDetails.currency)], ["Currency", transferDetails.currency],
+  ].filter((item): item is [string, string] => Boolean(item[1])).map(([label, value]) => <div className="member-bank-field" key={label}><span><small>{label}</small><strong>{value}</strong></span><button type="button" aria-label={`Copy ${label}`} onClick={() => void copyValue(label, value)}>{copied === label ? <Check size={15} /> : <Copy size={15} />}<span>{copied === label ? "Copied" : "Copy"}</span></button></div>)}{bankDetails.payment_instructions && <p>{bankDetails.payment_instructions}</p>}</section><label>Payment reference<input name="bank_reference" key={transferDetails.payment_reference} maxLength={160} defaultValue={transferDetails.payment_reference} /></label><label>Transfer date <span>(optional)</span><input name="transferred_on" type="date" /></label><label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label><button className="member-primary" disabled={busy}><FileUp size={16} /> {busy ? "Submitting…" : "Submit for verification"}</button></> : <div className="member-payment-unavailable"><Banknote size={15} /><span><strong>Bank transfer · Not configured</strong><small>Ask your gym or pay cash at reception.</small></span></div> : <><div className="member-payment-safe"><ShieldCheck size={16} /><span>Card details are entered only on Stripe’s hosted checkout.</span></div><button className="member-primary" disabled={busy || !data.paymentOptions.stripe_available}>{busy ? "Opening…" : "Pay securely with Stripe"}</button></>}{error && <div className="member-inline-error" role="alert">{error}</div>}{notice && <div className="member-inline-notice" role="status">{notice}</div>}</form>}{!actions.readOnly && openInvoices.length === 0 && <p className="member-payment-copy">You have no open membership invoice to pay. Cash can be recorded safely by reception.</p>}{!data.paymentOptions.stripe_configured && <div className="member-payment-unavailable"><CreditCard size={15} /><span><strong>Stripe · Not configured</strong><small>Configured bank transfer and cash at reception remain available.</small></span></div>}<div className="member-payment-list">{data.payments.slice(0, 6).map((payment) => <div key={payment.id}><span><strong>{payment.receipt_number}</strong><small>{payment.method.replaceAll("_", " ")} · {payment.method === "bank_transfer" && payment.status === "pending" ? "Pending Verification" : payment.status.replaceAll("_", " ")}</small>{payment.bank_transfer_receipt?.review_reason && <small>{payment.bank_transfer_receipt.review_reason}{payment.status === "rejected" ? " You may submit new proof for the open invoice." : ""}</small>}</span><span className="member-payment-amount"><b>{money(payment.amount_minor, payment.currency)}</b>{payment.bank_transfer_receipt && <button onClick={() => void download(payment)} aria-label={`Download receipt ${payment.receipt_number}`}><Download size={14} /></button>}</span></div>)}{data.payments.length === 0 && <Empty icon={WalletCards} title="No payments" copy="Payments and pending bank receipts will appear here." />}</div></article>;
 }
 
 export function MemberPortal({ data, actions }: { data: MemberPortalData; actions: MemberPortalActions }) {
@@ -178,10 +207,18 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [renderedCredential, setRenderedCredential] = useState<string | null>(null);
+  const [qrRender, setQrRender] = useState<{ credential: string; attempt: number; imageUrl: string | null; error: string | null } | null>(null);
+  const [qrRenderAttempt, setQrRenderAttempt] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
-  const qrCanvas = useRef<HTMLCanvasElement>(null);
   const qrPlaintext = renderedCredential ?? data.credential?.credential ?? null;
+  const membershipAccessReady = data.profile?.status === "active"
+    && data.membership?.status === "active"
+    && data.membership?.is_in_date === true;
+  const displayCredential = membershipAccessReady ? qrPlaintext : null;
+  const currentQrRender = qrRender?.credential === displayCredential && qrRender.attempt === qrRenderAttempt ? qrRender : null;
+  const qrImageUrl = currentQrRender?.imageUrl ?? null;
+  const qrRenderError = currentQrRender?.error ?? null;
 
   function navigate(nextView: MemberView) {
     setNotice(null);
@@ -190,13 +227,23 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
   }
 
   useEffect(() => {
-    if (!qrPlaintext || !qrCanvas.current) return;
-    void QRCode.toCanvas(qrCanvas.current, qrPlaintext, {
-      width: 224,
-      margin: 1,
+    let current = true;
+    if (!displayCredential) return () => { current = false; };
+
+    // Generate independently of page visibility so opening "My pass" after
+    // initial data load cannot leave an undrawn canvas in the pass card.
+    void QRCode.toDataURL(displayCredential, {
+      width: 256,
+      margin: 2,
+      errorCorrectionLevel: "M",
       color: { dark: "#25183f", light: "#ffffff" },
+    }).then((url) => {
+      if (current) setQrRender({ credential: displayCredential, attempt: qrRenderAttempt, imageUrl: url, error: null });
+    }).catch(() => {
+      if (current) setQrRender({ credential: displayCredential, attempt: qrRenderAttempt, imageUrl: null, error: "Your secure QR could not be displayed. Try again or use your Member Code at reception." });
     });
-  }, [qrPlaintext]);
+    return () => { current = false; };
+  }, [displayCredential, qrRenderAttempt]);
 
   const bookingBySession = useMemo(() => {
     const map = new Map<string, ClassBookingRecord>();
@@ -280,17 +327,13 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
     void act("preferences", "Preference updated.", () => actions.onUpdatePreferences({ [event.target.name]: event.target.checked }));
   }
 
-  const membershipAccessReady = data.profile?.status === "active"
-    && data.membership?.status === "active"
-    && data.membership?.is_in_date === true;
-
   const nav = <nav>{navigation.map(({ view: target, label, icon: Icon }) => <button key={target} className={view === target ? "active" : ""} onClick={() => navigate(target)}><Icon size={19} /><span>{label}</span></button>)}</nav>;
 
   return <main className="member-shell">
     <aside className="member-sidebar"><Brand />{nav}<div className="member-sidebar-foot"><button onClick={actions.onLogout}><LogOut size={18} /> Sign out</button><small>Tenant-isolated member access</small></div></aside>
     <header className="member-mobile-top"><Brand /><button aria-label="Account" onClick={() => navigate("account")}><span>{initials(data.profile)}</span></button></header>
     <section className="member-main">
-      <header className="member-page-top"><div><p>{data.gym.name}</p><h1>{navigation.find((item) => item.view === view)?.label}</h1></div><div className="member-top-actions">{actions.onPortalSwitch && <button className="member-switch" onClick={actions.onPortalSwitch}>{actions.portalSwitchLabel ?? "Switch portal"}</button>}{!actions.readOnly && <button className="member-icon-button" aria-label="Reload" onClick={actions.onReload}><RefreshCw size={17} /></button>}<button className="member-avatar" onClick={() => navigate("account")}>{initials(data.profile)}</button></div></header>
+      <header className="member-page-top"><div><p>{data.gym.name}</p><h1>{navigation.find((item) => item.view === view)?.label}</h1></div><div className="member-top-actions">{actions.onPortalSwitch && <button className="member-switch" onClick={actions.onPortalSwitch}>{actions.portalSwitchLabel ?? "Switch portal"}</button>}{!actions.readOnly && <button className="member-icon-button" aria-label="Reload" onClick={actions.onReload}><RefreshCw size={17} /></button>}<button className="member-avatar" onClick={() => navigate("account")} aria-label="Open member profile and settings" title="Profile and settings">{initials(data.profile)}</button></div></header>
       {data.error && <div className="member-alert error" role="alert">{data.error}<button onClick={actions.onReload}>Try again</button></div>}
       {actionError && <div className="member-alert error" role="alert">{actionError}<button onClick={() => setActionError(null)}><X size={15} /></button></div>}
       {notice && <div className="member-alert success"><Check size={16} />{notice}<button onClick={() => setNotice(null)}><X size={15} /></button></div>}
@@ -306,7 +349,7 @@ export function MemberPortal({ data, actions }: { data: MemberPortalData; action
           <section className="member-two-col"><article className="member-card"><div className="member-card-title"><div><small>Up next</small><h3>Your schedule</h3></div><CalendarDays /></div>{nextClass ? <div className="member-feature-row"><span className="member-date-tile"><b>{formatGymDay(nextClass.starts_at, data.gym.timezone)}</b><small>{formatGymMonth(nextClass.starts_at, data.gym.timezone)}</small></span><div><strong>{nextClass.title}</strong><small>{dateTime(nextClass.starts_at, data.gym.timezone)} · {nextClass.branch?.name ?? "Main gym"}</small></div><button onClick={() => navigate("classes")}>View</button></div> : <Empty icon={CalendarDays} title="Your schedule is clear" copy="Browse classes and reserve a place." />}</article><article className="member-card"><div className="member-card-title"><div><small>Plan</small><h3>Training focus</h3></div><Dumbbell /></div>{activePlan ? <><h4>{activePlan.title}</h4><p>{activePlan.goal ?? "Your coach has prepared this programme for you."}</p><button className="member-text-button" onClick={() => navigate("training")}>View {activePlan.exercises.length} exercises</button></> : <Empty icon={Dumbbell} title="No training plan yet" copy="Your assigned coach can publish one here." />}</article></section>
         </>}
 
-        {view === "pass" && <section className="member-pass-layout"><article className="member-pass-card"><div className="member-pass-head"><Brand /><span className={membershipAccessReady ? "active" : ""}>{membershipAccessReady ? "Access ready" : "Access unavailable"}</span></div><div className="member-pass-person"><span>{initials(data.profile)}</span><div><small>Member</small><h2>{data.profile?.first_name} {data.profile?.last_name}</h2><p>Member Code {data.profile?.member_code ?? "——"}</p></div></div><div className="member-qr-zone">{qrPlaintext ? <><canvas ref={qrCanvas} aria-label="Persistent gym access QR code" /><div className="member-code-display"><small>Member Code</small><strong>{data.profile?.member_code ?? "——"}</strong></div><strong>Your secure gym pass</strong><small>This QR remains available after reload and sign-in. It can be replaced at any time.</small></> : <><QrCode size={62} /><div className="member-code-display"><small>Member Code</small><strong>{data.profile?.member_code ?? "——"}</strong></div><strong>{membershipAccessReady ? "Create your gym pass" : "An active membership is required"}</strong><small>{membershipAccessReady ? "Only tenant-scoped SHA-256 evidence is stored; bearer plaintext is reconstructed only for you." : "Contact your gym if your membership should be active."}</small></>}{!actions.readOnly && (qrPlaintext ? <button className="member-secondary" disabled={busy === "pass" || !membershipAccessReady} onClick={() => void rotatePass()}><RefreshCw size={17} /> Replace pass</button> : <button className="member-primary" disabled={busy === "pass" || !membershipAccessReady} onClick={() => void ensurePass()}><QrCode size={17} /> Create pass</button>)}</div><div className="member-pass-foot"><span><ShieldCheck size={16} /> {data.gym.name}</span><span>Valid membership required</span></div></article><aside className="member-card member-pass-help"><small>How it works</small><h3>Private by design</h3><ol><li><span>1</span><div><strong>Open your pass</strong><small>Your normal QR is available after secure sign-in.</small></div></li><li><span>2</span><div><strong>Show reception</strong><small>Staff scan the opaque QR, not your visible Member Code.</small></div></li><li><span>3</span><div><strong>Verified by IronCore</strong><small>The backend checks gym, membership, branch and duplicate status.</small></div></li></ol></aside></section>}
+        {view === "pass" && <section className="member-pass-layout"><article className="member-pass-card"><div className="member-pass-head"><Brand /><span className={membershipAccessReady ? "active" : ""}>{membershipAccessReady ? "Access ready" : "Access unavailable"}</span></div><div className="member-pass-person"><span>{initials(data.profile)}</span><div><small>Member</small><h2>{data.profile?.first_name} {data.profile?.last_name}</h2><p>Member Code {data.profile?.member_code ?? "——"}</p></div></div><div className="member-qr-zone">{displayCredential ? <>{qrImageUrl ? <img className="member-qr-image" src={qrImageUrl} alt="Persistent gym access QR code" width={256} height={256} draggable={false} /> : qrRenderError ? <div className="member-qr-error" role="alert"><QrCode size={52} /><strong>QR could not load</strong><small>{qrRenderError}</small><button className="member-secondary" type="button" onClick={() => setQrRenderAttempt((attempt) => attempt + 1)}><RefreshCw size={17} /> Retry QR</button></div> : <div className="member-qr-loading" role="status"><RefreshCw className="spin" size={36} /><strong>Loading secure QR…</strong></div>}<div className="member-code-display"><small>Member Code</small><strong>{data.profile?.member_code ?? "——"}</strong></div><strong>Your secure gym pass</strong><small>This QR remains available after reload and sign-in. It is the same secure credential verified by reception&apos;s camera scanner.</small></> : <><QrCode size={62} /><div className="member-code-display"><small>Member Code</small><strong>{data.profile?.member_code ?? "——"}</strong></div><strong>{membershipAccessReady ? "Create your gym pass" : "An active membership is required"}</strong><small>{membershipAccessReady ? "Only tenant-scoped SHA-256 evidence is stored; bearer plaintext is reconstructed only for you." : "Contact your gym if your membership should be active."}</small></>}{!actions.readOnly && (displayCredential ? <button className="member-secondary" disabled={busy === "pass"} onClick={() => void rotatePass()}><RefreshCw size={17} /> Replace pass</button> : membershipAccessReady && !qrPlaintext ? <button className="member-primary" disabled={busy === "pass"} onClick={() => void ensurePass()}><QrCode size={17} /> Create pass</button> : null)}</div><div className="member-pass-foot"><span><ShieldCheck size={16} /> {data.gym.name}</span><span>Valid membership required</span></div></article><aside className="member-card member-pass-help"><small>How it works</small><h3>Private by design</h3><ol><li><span>1</span><div><strong>Open your pass</strong><small>Your normal QR is available after secure sign-in.</small></div></li><li><span>2</span><div><strong>Show reception</strong><small>Staff scan the opaque QR, not your visible Member Code.</small></div></li><li><span>3</span><div><strong>Verified by IronCore</strong><small>The backend checks gym, membership, branch and duplicate status.</small></div></li></ol></aside></section>}
 
         {view === "classes" && <section className="member-card-grid">{data.classes.map((session) => { const booking = bookingBySession.get(session.id); const full = session.booked_count >= session.capacity; return <article className="member-class-card" key={session.id}><div className="member-class-art"><CalendarDays size={32} /><span>{session.branch?.name ?? "Main gym"}</span></div><div className="member-class-body"><small>{dateTime(session.starts_at, data.gym.timezone)}</small><h3>{session.title}</h3><p>{session.description ?? "Instructor-led session at your gym."}</p><div><span><UserRound size={14} /> {session.trainer?.name ?? "Gym team"}</span><span>{session.booked_count}/{session.capacity} places</span></div>{!actions.readOnly && (booking ? <button className="member-secondary" disabled={busy === booking.id} onClick={() => void act(booking.id, "Booking cancelled.", () => actions.onCancelBooking(booking.id, "Cancelled by member"))}>{booking.status === "waitlisted" ? "Leave waitlist" : "Cancel booking"}</button> : <button className="member-primary" disabled={busy === session.id || session.status !== "scheduled"} onClick={() => void act(session.id, full ? "You joined the waitlist." : "Class booked.", () => actions.onBookClass(session.id))}>{full && session.waitlist_enabled ? "Join waitlist" : "Book class"}</button>)}</div></article>; })}{data.classes.length === 0 && <Empty icon={CalendarDays} title="No classes available" copy="Your gym has not published an upcoming schedule." />}</section>}
 

@@ -94,11 +94,13 @@ export type NewMember = {
   phone: string;
   status?: MemberRecord["status"];
 };
-export type UpdateMember = { first_name: string; last_name: string; email: string; phone: string; status: MemberRecord["status"]; reason: string };
+export type UpdateMember = { home_branch_id?: string | null; first_name?: string; last_name?: string; email?: string; phone?: string; status?: MemberRecord["status"]; reason: string };
+export type MemberImportSummary = { total_rows: number; valid_rows: number; invalid_rows: number; duplicate_rows: number; missing_required_fields: number; invalid_email: number; invalid_phone: number; invalid_branch_references: number; invalid_membership_references: number };
+export type MemberImportRecord = { id: string; gym_id: string; original_name: string; status: "previewed" | "queued" | "processing" | "completed" | "failed"; total_rows: number; processed_rows: number; success_rows: number; failure_rows: number; preview_summary: MemberImportSummary | null; errors: Array<{ line: number | null; category: string; message: string }> | null; previewed_at: string | null; confirmed_at: string | null; completed_at: string | null };
 
-export type BranchRecord = { id: string; gym_id: string; name: string; code: string; email: string | null; phone: string | null; timezone: string; status: "active" | "inactive"; is_primary: boolean; created_at: string | null };
-export type NewBranch = { name: string; code: string; email?: string; phone?: string; is_primary?: boolean };
-export type UpdateBranch = { name: string; code: string; email?: string | null; phone?: string | null; status: BranchRecord["status"]; is_primary: boolean; reason: string };
+export type BranchRecord = { id: string; gym_id: string; name: string; code: string; email: string | null; phone: string | null; timezone: string | null; status: "active" | "inactive"; is_primary: boolean; created_at: string | null };
+export type NewBranch = { name: string; code: string; email?: string; phone?: string; timezone?: string; is_primary?: boolean };
+export type UpdateBranch = { name: string; code: string; email?: string | null; phone?: string | null; timezone?: string | null; status: BranchRecord["status"]; is_primary: boolean; reason: string };
 export type MembershipPlanRecord = { id: string; gym_id: string; branch_id: string | null; name: string; code: string; description: string | null; billing_interval: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor: number; duration_days: number | null; trial_days: number; status: "active" | "inactive"; created_at: string | null };
 export type NewMembershipPlan = { name: string; code: string; branch_id?: string; description?: string; billing_interval: MembershipPlanRecord["billing_interval"]; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; duration_days?: number; trial_days?: number; status?: "active" };
 export type UpdateMembershipPlan = { name: string; code: string; branch_id?: string | null; description?: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; duration_days?: number | null; trial_days?: number; status: MembershipPlanRecord["status"]; reason: string };
@@ -121,16 +123,20 @@ export type MemberAccountActivationPreview = { gym_name: string; member_first_na
 export type InvoiceItemRecord = { id: string; invoice_id: string; description: string; quantity: number; unit_amount_minor: number; subtotal_amount_minor: number; tax_amount_minor: number; total_amount_minor: number };
 export type InvoiceRecord = { id: string; gym_id: string; member_id: string; membership_id: string | null; branch_id: string | null; number: string; status: "draft" | "open" | "paid" | "void" | "uncollectible"; currency: GymSummary["base_currency"]; subtotal_amount_minor: number; tax_amount_minor: number; total_amount_minor: number; paid_amount_minor: number; due_amount_minor: number; issued_at: string; due_at: string | null; paid_at: string | null; notes: string | null; items: InvoiceItemRecord[]; created_at: string | null };
 export type PaymentRefundRecord = { id: string; payment_id: string; status: "pending" | "succeeded" | "failed"; amount_minor: number; currency: GymSummary["base_currency"]; reason: string; refunded_at: string | null; created_at: string | null };
-export type BankTransferReceiptRecord = { id: string; payment_id: string; member_id: string; membership_id: string; invoice_id: string | null; bank_reference: string | null; original_name: string; mime_type: string; size_bytes: number; submitted_at: string | null; reviewed_at: string | null; review_reason: string | null };
+export type BankTransferReceiptRecord = { id: string; payment_id: string; member_id: string; membership_id: string; invoice_id: string | null; bank_reference: string | null; transferred_on: string | null; original_name: string; mime_type: string; size_bytes: number; submitted_at: string | null; reviewed_at: string | null; review_reason: string | null };
 export type PaymentRecord = { id: string; gym_id: string; member_id: string; membership_id: string | null; invoice_id: string | null; branch_id: string | null; receipt_number: string; provider: "manual" | "stripe"; method: "cash" | "card" | "bank_transfer" | "online_card" | "other"; status: "pending" | "paid" | "rejected" | "partially_refunded" | "refunded" | "voided"; amount_minor: number; refunded_amount_minor: number; currency: GymSummary["base_currency"]; paid_at: string | null; failure_message: string | null; notes: string | null; provider_checkout_id: string | null; refunds: PaymentRefundRecord[]; bank_transfer_receipt: BankTransferReceiptRecord | null; created_at: string | null };
 export type PaymentSummaryRecord = { gross_minor: number; refunded_minor: number; net_minor: number; pending_minor: number; outstanding_minor: number; currency: GymSummary["base_currency"] };
 export type PaymentGatewayRecord = { id: string; provider: "stripe"; status: "pending" | "restricted" | "active" | "disabled"; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean; country_code: string; default_currency: GymSummary["base_currency"]; requirements: { currently_due?: string[]; eventually_due?: string[]; disabled_reason?: string | null } | null; connected_at: string | null; provider_account_id: string | null };
 export type NewInvoice = { member_id: string; membership_id?: string; branch_id?: string; currency: GymSummary["base_currency"]; issued_at?: string; due_at?: string; notes?: string; items: Array<{ description: string; quantity: number; unit_amount_minor: number; tax_amount_minor?: number }> };
-export type NewPayment = { member_id: string; membership_id?: string; invoice_id?: string; branch_id?: string; method: PaymentRecord["method"]; amount_minor: number; currency: GymSummary["base_currency"]; idempotency_key: string; paid_at?: string; notes?: string; bank_reference?: string; receipt?: File };
+export type NewPayment = { member_id: string; membership_id?: string; invoice_id?: string; branch_id?: string; method: PaymentRecord["method"]; amount_minor: number; currency: GymSummary["base_currency"]; idempotency_key: string; paid_at?: string; notes?: string; bank_reference?: string; transferred_on?: string; receipt?: File };
 export type CreatedPayment = { payment: PaymentRecord; checkout_url: string | null; idempotency_reused: boolean };
 export type PaymentGatewayState = { gateway: PaymentGatewayRecord | null; provider_configured: boolean; checkout_available: boolean };
-export type MemberPaymentOptions = { stripe_configured: boolean; stripe_available: boolean; bank_transfer_available: boolean; cash_available_at_gym: boolean };
-export type NewMemberPayment = { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; receipt?: File };
+export type BankTransferInvoiceDetails = { invoice_id: string; payment_reference: string; amount_minor: number; currency: GymSummary["base_currency"] };
+export type BankTransferDetails = { account_name: string; bank_name: string; account_number_or_iban: string; routing_details: string | null; payment_instructions: string | null; invoices: BankTransferInvoiceDetails[] };
+export type GymBankTransferSetting = { id: string; gym_id: string; enabled: boolean; account_name: string | null; bank_name: string | null; account_number_or_iban: string | null; routing_details: string | null; payment_instructions: string | null; updated_at: string | null };
+export type UpdateGymBankTransferSetting = { enabled: boolean; account_name?: string; bank_name?: string; account_number_or_iban?: string; routing_details?: string; payment_instructions?: string; reason: string };
+export type MemberPaymentOptions = { stripe_configured: boolean; stripe_available: boolean; bank_transfer_available: boolean; bank_transfer_details: BankTransferDetails | null; cash_available_at_gym: boolean };
+export type NewMemberPayment = { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; transferred_on?: string; receipt?: File };
 export type SaasFeatureLimits = { members: number; branches: number; staff: number; advanced_reports: boolean; priority_support: boolean };
 export type SaasPaymentMethod = "cash" | "bank_transfer" | "stripe";
 export type SaasPlanPriceRecord = { id: string; currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly"; amount_minor: number; trial_days: number; active: boolean };
@@ -402,6 +408,20 @@ export class IronCoreApi {
     )).data;
   }
 
+  async gymBankTransferSetting(gymId: string): Promise<GymBankTransferSetting | null> {
+    return (await this.request<ApiEnvelope<GymBankTransferSetting | null>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/bank-transfer-settings`, {}, gymId,
+    )).data;
+  }
+
+  async updateGymBankTransferSetting(gymId: string, input: UpdateGymBankTransferSetting): Promise<GymBankTransferSetting> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<GymBankTransferSetting>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/bank-transfer-settings`,
+      { method: "PATCH", body: JSON.stringify(input) }, gymId,
+    )).data;
+  }
+
   async platformSaasPlans(): Promise<SaasPlanRecord[]> {
     return (await this.request<Paginated<SaasPlanRecord>>("/api/v1/platform/saas-plans?per_page=100")).data;
   }
@@ -423,6 +443,47 @@ export class IronCoreApi {
       { method: "POST", body: JSON.stringify(member) },
       gymId,
     )).data;
+  }
+
+  async previewMemberImport(gymId: string, file: File): Promise<MemberImportRecord> {
+    await this.csrf();
+    const form = new FormData(); form.set("file", file);
+    return (await this.request<ApiEnvelope<MemberImportRecord>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/member-imports`,
+      { method: "POST", body: form }, gymId,
+    )).data;
+  }
+
+  async confirmMemberImport(gymId: string, importId: string): Promise<MemberImportRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MemberImportRecord>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/member-imports/${encodeURIComponent(importId)}/confirm`,
+      { method: "POST" }, gymId,
+    )).data;
+  }
+
+  async memberImport(gymId: string, importId: string): Promise<MemberImportRecord> {
+    return (await this.request<ApiEnvelope<MemberImportRecord>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/member-imports/${encodeURIComponent(importId)}`, {}, gymId,
+    )).data;
+  }
+
+  async memberImportTemplate(gymId: string, format: "csv" | "xlsx"): Promise<Blob> {
+    const response = await this.performRequest(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/members-import-template?format=${format}`,
+      { headers: { Accept: format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } }, gymId,
+    );
+    return response.blob();
+  }
+
+  async memberRosterExport(gymId: string): Promise<Blob> {
+    const response = await this.performRequest(`/api/v1/gyms/${encodeURIComponent(gymId)}/members-export`, { headers: { Accept: "text/csv" } }, gymId);
+    return response.blob();
+  }
+
+  async platformMemberRosterExport(): Promise<Blob> {
+    const response = await this.performRequest("/api/v1/platform/members/export", { headers: { Accept: "text/csv" } });
+    return response.blob();
   }
 
   async member(gymId: string, memberId: string): Promise<MemberRecord> {
@@ -483,6 +544,10 @@ export class IronCoreApi {
   branches(gymId: string) { return this.tenantCollection<BranchRecord>(gymId, "branches"); }
   createBranch(gymId: string, input: NewBranch) { return this.createTenantRecord<BranchRecord>(gymId, "branches", input); }
   updateBranch(gymId: string, branchId: string, input: UpdateBranch) { return this.updateTenantRecord<BranchRecord>(gymId, "branches", branchId, input); }
+  async deleteBranch(gymId: string, branchId: string, reason: string): Promise<void> {
+    await this.csrf();
+    await this.request<void>(`/api/v1/gyms/${encodeURIComponent(gymId)}/branches/${encodeURIComponent(branchId)}`, { method: "DELETE", body: JSON.stringify({ reason }) }, gymId);
+  }
   membershipPlans(gymId: string) { return this.tenantCollection<MembershipPlanRecord>(gymId, "membership-plans"); }
   createMembershipPlan(gymId: string, input: NewMembershipPlan) { return this.createTenantRecord<MembershipPlanRecord>(gymId, "membership-plans", input); }
   updateMembershipPlan(gymId: string, planId: string, input: UpdateMembershipPlan) { return this.updateTenantRecord<MembershipPlanRecord>(gymId, "membership-plans", planId, input); }

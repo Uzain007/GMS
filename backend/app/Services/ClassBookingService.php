@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Enums\ClassBookingStatus;
 use App\Enums\ClassSessionStatus;
+use App\Enums\BranchStatus;
 use App\Enums\UserRole;
 use App\Models\ClassBooking;
 use App\Models\ClassSession;
+use App\Models\GymBranch;
 use App\Models\Member;
 use App\Models\StaffProfile;
 use App\Models\User;
@@ -28,6 +30,10 @@ class ClassBookingService
     public function createSession(array $data, User $actor, Request $request): ClassSession
     {
         return DB::transaction(function () use ($data, $actor, $request): ClassSession {
+            $branch = GymBranch::query()->findOrFail($data['branch_id']);
+            if ($branch->status !== BranchStatus::Active) {
+                throw ValidationException::withMessages(['branch_id' => ['Classes cannot be scheduled at an inactive branch.']]);
+            }
             if (! empty($data['trainer_staff_profile_id'])) {
                 $trainer = StaffProfile::query()->with('user')->findOrFail($data['trainer_staff_profile_id']);
                 $this->trainingAccess->assertActiveTrainer($trainer);
@@ -266,6 +272,10 @@ class ClassBookingService
 
     private function assertBookable(ClassSession $session): void
     {
+        $branch = GymBranch::query()->findOrFail($session->branch_id);
+        if ($branch->status !== BranchStatus::Active) {
+            throw ValidationException::withMessages(['class_session' => ['Booking is unavailable while this branch is inactive.']]);
+        }
         if ($session->status !== ClassSessionStatus::Scheduled || $session->ends_at->isPast()) {
             throw ValidationException::withMessages(['class_session' => ['This class is not open for booking.']]);
         }

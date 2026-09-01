@@ -16,6 +16,7 @@ use App\Http\Resources\MembershipResource;
 use App\Http\Resources\PaymentResource;
 use App\Models\AttendanceRecord;
 use App\Models\Invoice;
+use App\Models\GymBankTransferSetting;
 use App\Models\Member;
 use App\Models\MemberAccessCredential;
 use App\Models\Membership;
@@ -99,11 +100,39 @@ class MemberSelfServiceController extends Controller
 
     public function paymentOptions(Request $request, StripeGatewayService $stripe): JsonResponse
     {
-        $this->memberFor($request);
+        $member = $this->memberFor($request);
+        $setting = GymBankTransferSetting::query()->first();
+        $bankAvailable = $setting
+            && $setting->enabled
+            && filled($setting->account_name)
+            && filled($setting->bank_name)
+            && filled($setting->account_number_or_iban);
+        $invoiceDetails = $bankAvailable
+            ? Invoice::query()->where('member_id', $member->getKey())
+                ->where('status', 'open')->where('due_amount_minor', '>', 0)
+                ->whereNotNull('membership_id')->orderBy('issued_at')->get()
+                ->map(fn (Invoice $invoice): array => [
+                    'invoice_id' => $invoice->getKey(),
+                    // A short member code plus invoice number is visible and
+                    // useful for reconciliation; neither value is a credential.
+                    'payment_reference' => "{$member->member_code}-{$invoice->number}",
+                    'amount_minor' => $invoice->due_amount_minor,
+                    'currency' => $invoice->currency->value,
+                ])->values()
+            : collect();
+
         return response()->json(['data' => [
             'stripe_configured' => $stripe->memberPaymentsConfigured(),
             'stripe_available' => $stripe->checkoutAvailable(),
-            'bank_transfer_available' => true,
+            'bank_transfer_available' => (bool) $bankAvailable,
+            'bank_transfer_details' => $bankAvailable ? [
+                'account_name' => $setting->account_name,
+                'bank_name' => $setting->bank_name,
+                'account_number_or_iban' => $setting->account_number_or_iban,
+                'routing_details' => $setting->routing_details,
+                'payment_instructions' => $setting->payment_instructions,
+                'invoices' => $invoiceDetails,
+            ] : null,
             'cash_available_at_gym' => true,
         ]]);
     }
@@ -121,6 +150,15 @@ class MemberSelfServiceController extends Controller
             throw ValidationException::withMessages(['invoice_id' => ['This invoice has no outstanding balance.']]);
         }
 
+        if ($request->validated('method') === 'bank_transfer') {
+            $setting = GymBankTransferSetting::query()->first();
+            if (! $setting?->enabled || blank($setting->account_name) || blank($setting->bank_name) || blank($setting->account_number_or_iban)) {
+                throw ValidationException::withMessages([
+                    'method' => ['Bank transfer is not currently configured for this gym.'],
+                ]);
+            }
+        }
+
         $validated = $request->safe()->except('receipt');
         $result = $service->create([
             'member_id' => $member->getKey(),
@@ -134,6 +172,7 @@ class MemberSelfServiceController extends Controller
             'currency' => $invoice->currency->value,
             'idempotency_key' => $validated['idempotency_key'],
             'bank_reference' => $validated['bank_reference'] ?? null,
+            'transferred_on' => $validated['transferred_on'] ?? null,
             'notes' => 'Submitted through member self-service.',
         ], $request->user(), $request, $request->file('receipt'));
 

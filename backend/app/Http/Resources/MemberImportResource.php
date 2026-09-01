@@ -19,8 +19,11 @@ class MemberImportResource extends JsonResource
             'processed_rows' => $this->processed_rows,
             'success_rows' => $this->success_rows,
             'failure_rows' => $this->failure_rows,
+            'preview_summary' => $this->preview_summary,
             // Storage paths stay private; only bounded validation errors are exposed.
             'errors' => $this->errors,
+            'previewed_at' => $this->previewed_at?->toIso8601String(),
+            'confirmed_at' => $this->confirmed_at?->toIso8601String(),
             'started_at' => $this->started_at?->toIso8601String(),
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),

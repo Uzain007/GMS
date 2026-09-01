@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Gym extends Model
 {
@@ -94,4 +95,5 @@ class Gym extends Model
     public function workoutSessions(): HasMany { return $this->hasMany(WorkoutSession::class); }
     public function progressMeasurements(): HasMany { return $this->hasMany(MemberProgressMeasurement::class); }
     public function notificationDeliveries(): HasMany { return $this->hasMany(NotificationDelivery::class); }
+    public function bankTransferSetting(): HasOne { return $this->hasOne(GymBankTransferSetting::class); }
 }

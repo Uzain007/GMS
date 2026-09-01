@@ -16,7 +16,7 @@ class MemberImport extends Model
     protected $fillable = [
         'requested_by', 'original_name', 'storage_disk', 'storage_path', 'status',
         'total_rows', 'processed_rows', 'success_rows', 'failure_rows', 'errors',
-        'started_at', 'completed_at',
+        'preview_summary', 'previewed_at', 'confirmed_at', 'started_at', 'completed_at',
     ];
 
     protected $hidden = ['storage_disk', 'storage_path'];
@@ -30,6 +30,9 @@ class MemberImport extends Model
             'success_rows' => 'integer',
             'failure_rows' => 'integer',
             'errors' => 'array',
+            'preview_summary' => 'array',
+            'previewed_at' => 'immutable_datetime',
+            'confirmed_at' => 'immutable_datetime',
             'started_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',
         ];

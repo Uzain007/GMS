@@ -1,18 +1,22 @@
 "use client";
 
 import {
-  Archive, ArrowRight, Building2, CircleDollarSign, Eye, LayoutDashboard, LoaderCircle,
+  Archive, ArrowRight, Building2, ChevronDown, CircleDollarSign, Download, Eye, LayoutDashboard, LoaderCircle,
   LogOut, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
+import {
+  countryOptions, defaultTimezoneForCountry, normalizeCountryCode, normalizeTimezone, timezoneOptions,
+} from "./gym-location-options";
 import type {
   AuthenticatedUser, GymSummary, NewGym, NewSaasPlan, NewSaasPlanPrice,
   SaasPlanRecord, UpdateGym, UpdateSaasPlan,
 } from "./lib/ironcore-api";
+import { SearchableSelect } from "./searchable-select";
 import { decimalToMinor } from "./tenant-operations";
 
-type PlatformView = "overview" | "gyms" | "plans" | "settings";
+type PlatformView = "overview" | "gyms" | "members" | "plans" | "settings";
 
 export type PlatformPortalData = {
   user: AuthenticatedUser;
@@ -26,6 +30,7 @@ export type PlatformPortalData = {
   onUpdateGym: (gymId: string, input: UpdateGym) => Promise<void>;
   onCreatePlan: (input: NewSaasPlan) => Promise<void>;
   onUpdatePlan: (planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice) => Promise<void>;
+  onExportMembers: () => Promise<void>;
   onChangePassword: (currentPassword: string, password: string) => Promise<void>;
   onLogout: () => void;
   mfa?: MfaActions;
@@ -63,6 +68,13 @@ function ModalShell({ title, eyebrow, onClose, children }: {
 function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: PlatformPortalData["onCreateGym"] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [countryCode, setCountryCode] = useState("GB");
+  const [timezone, setTimezone] = useState("Europe/London");
+
+  function changeCountry(nextCountryCode: string) {
+    setCountryCode(nextCountryCode);
+    setTimezone(defaultTimezoneForCountry(nextCountryCode));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,7 +100,7 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
   return <ModalShell title="Create a gym" eyebrow="Platform tenant onboarding" onClose={onClose}>
     <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}
       <div className="field-pair"><label>Gym name<input name="name" maxLength={160} required autoFocus /></label><label>Legal name<input name="legal_name" maxLength={200} /></label></div>
-      <div className="field-trio"><label>Currency<select name="base_currency" defaultValue="GBP">{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label>Country code<input name="country_code" required minLength={2} maxLength={2} defaultValue="GB" pattern="[A-Za-z]{2}" /></label><label>Timezone<input name="timezone" required defaultValue="Europe/London" placeholder="Europe/London" /></label></div>
+      <div className="field-trio"><label>Currency<select name="base_currency" defaultValue="GBP">{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
       <div className="field-pair"><label>Gym owner name<input name="owner_name" maxLength={160} required /></label><label>Gym owner email<input name="owner_email" type="email" maxLength={254} required /></label></div>
       <div className="modal-note"><ShieldCheck size={17} />Laravel creates the trial gym and tenant owner membership atomically. The browser never assigns tenant authority.</div>
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={16} /> Creating…</> : <>Create gym <ArrowRight size={16} /></>}</button></div>
@@ -154,6 +166,14 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initialCountryCode = normalizeCountryCode(gym.country_code);
+  const [countryCode, setCountryCode] = useState(initialCountryCode);
+  const [timezone, setTimezone] = useState(() => normalizeTimezone(gym.timezone, initialCountryCode));
+
+  function changeCountry(nextCountryCode: string) {
+    setCountryCode(nextCountryCode);
+    setTimezone(defaultTimezoneForCountry(nextCountryCode));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -174,7 +194,7 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
     {error && <div className="form-error" role="alert">{error}</div>}
     {editing ? <form onSubmit={submit}>
       <div className="field-pair"><label>Gym name<input name="name" required maxLength={160} defaultValue={gym.name} /></label><label>Legal name<input name="legal_name" maxLength={200} defaultValue={gym.legal_name ?? ""} /></label></div>
-      <div className="field-trio"><label>Currency<select name="base_currency" defaultValue={gym.base_currency}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label>Country code<input name="country_code" required minLength={2} maxLength={2} defaultValue={gym.country_code} /></label><label>Timezone<input name="timezone" required defaultValue={gym.timezone} /></label></div>
+      <div className="field-trio"><label>Currency<select name="base_currency" defaultValue={gym.base_currency}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
       <label>Tenant status<select name="status" defaultValue={gym.status}><option value="trial">Trial</option><option value="active">Active</option><option value="past_due">Past due</option><option value="suspended">Deactivated / suspended</option><option value="cancelled">Archived / cancelled</option></select></label>
       <label>Audit reason<textarea name="reason" required minLength={5} maxLength={500} placeholder="Explain this tenant or settings change" /></label>
       <div className="modal-note"><ShieldCheck size={17} />Currency belongs to this gym only. Existing payments and memberships retain their historical currency snapshots.</div>
@@ -255,6 +275,9 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
   const [selectedGym, setSelectedGym] = useState<GymSummary | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<SaasPlanRecord | null>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [memberExportBusy, setMemberExportBusy] = useState(false);
+  const [memberExportError, setMemberExportError] = useState<string | null>(null);
   const filteredGyms = useMemo(() => data.gyms.filter((gym) => `${gym.name} ${gym.slug} ${gym.country_code} ${gym.status}`.toLowerCase().includes(query.toLowerCase())), [data.gyms, query]);
   const activeGyms = data.gyms.filter((gym) => gym.status === "active").length;
   const trials = data.gyms.filter((gym) => gym.status === "trial").length;
@@ -262,6 +285,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
   const navigation: Array<{ id: PlatformView; label: string; icon: typeof LayoutDashboard }> = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "gyms", label: "Gyms", icon: Building2 },
+    { id: "members", label: "Global members", icon: UsersRound },
     { id: "plans", label: "SaaS plans", icon: CircleDollarSign },
     { id: "settings", label: "Settings", icon: Settings },
   ];
@@ -277,7 +301,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
       <div className="platform-sidebar-foot"><button onClick={() => setSecurityOpen(true)}><ShieldCheck size={17} /> Account security</button><button onClick={data.onLogout}><LogOut size={17} /> Sign out</button></div>
     </aside>
     <section className="platform-main">
-      <header className="platform-topbar"><div><button className="icon-button platform-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={20} /></button><span>Platform control</span><h1>{navigation.find((item) => item.id === view)?.label}</h1></div><div>{view === "gyms" && <label className="search-box"><Search size={17} /><input aria-label="Search gyms" placeholder="Search gyms" value={query} onChange={(event) => setQuery(event.target.value)} /></label>}<button className="icon-button" onClick={data.onReload} aria-label="Refresh platform data"><RefreshCw className={data.loading ? "spin" : ""} size={18} /></button><button className="platform-profile" onClick={() => setSecurityOpen(true)}><span>{initials(data.user.name)}</span><strong>{data.user.name}</strong></button></div></header>
+      <header className="platform-topbar"><div><button className="icon-button platform-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Menu size={20} /></button><span>Platform control</span><h1>{navigation.find((item) => item.id === view)?.label}</h1></div><div>{view === "gyms" && <label className="search-box"><Search size={17} /><input aria-label="Search gyms" placeholder="Search gyms" value={query} onChange={(event) => setQuery(event.target.value)} /></label>}<button className="icon-button" onClick={data.onReload} aria-label="Refresh platform data"><RefreshCw className={data.loading ? "spin" : ""} size={18} /></button><div className="profile-wrap platform-profile-wrap"><button className="platform-profile profile-button" onClick={() => setProfileOpen((open) => !open)} aria-label="Open account menu" aria-haspopup="menu" aria-expanded={profileOpen}><span>{initials(data.user.name)}</span><strong>{data.user.name}</strong><ChevronDown size={15} /></button>{profileOpen && <div className="profile-popover" role="menu"><button type="button" className="profile-summary" onClick={() => { setProfileOpen(false); setSecurityOpen(true); }}><span className="profile-summary-avatar">{initials(data.user.name)}</span><span><strong>{data.user.name}</strong><small>Super Admin</small></span></button><button onClick={() => { setProfileOpen(false); setSecurityOpen(true); }}><ShieldCheck size={17} /> Account security</button><button className="danger" onClick={() => { setProfileOpen(false); data.onLogout(); }}><LogOut size={17} /> Sign out</button></div>}</div></div></header>
       <main className="platform-content">
         {data.error && <div className="form-error" role="alert">{data.error}</div>}
         {view === "overview" && <>
@@ -286,6 +310,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
           <section className="platform-grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Tenant registry</p><h3>Recently available gyms</h3></div><button className="secondary-button" onClick={() => navigate("gyms")}>View all</button></div><div className="platform-quick-list">{data.gyms.slice(0, 5).map((gym) => <button key={gym.id} onClick={() => data.onOpenGym(gym)}><span>{initials(gym.name)}</span><div><strong>{gym.name}</strong><small>{gym.country_code} · {readable(gym.status)}</small></div><ArrowRight size={16} /></button>)}{!data.loading && data.gyms.length === 0 && <p>No gyms have been created yet.</p>}</div></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Product catalogue</p><h3>Active SaaS plans</h3></div><button className="secondary-button" onClick={() => navigate("plans")}>Manage</button></div><div className="platform-plan-summary"><strong>{data.plans.filter((plan) => plan.status === "active").length}</strong><span>active tiers</span><p>Prices are immutable and controlled only by Super Admin accounts.</p><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={16} /> Publish plan</button></div></article></section>
         </>}
         {view === "gyms" && <><section className="module-heading"><div><p className="eyebrow">Tenant registry</p><h2>Gyms</h2><p>View, edit, activate, deactivate or safely archive a gym with a recorded reason.</p></div><button className="primary-button" onClick={() => setGymModal(true)}><Plus size={17} /> Create gym</button></section><section className="panel table-scroll">{data.loading ? <div className="table-state"><LoaderCircle className="spin" size={20} /> Loading gyms…</div> : <table className="data-table"><thead><tr><th>Gym</th><th>Country</th><th>Currency</th><th>Status</th><th /></tr></thead><tbody>{filteredGyms.map((gym) => <tr key={gym.id}><td><strong>{gym.name}</strong><small className="table-sub">{gym.slug}</small></td><td>{gym.country_code}</td><td>{gym.base_currency}</td><td><span className={`status ${gym.status}`}><i />{readable(gym.status)}</span></td><td><div className="table-action-group"><button className="table-action" onClick={() => setSelectedGym(gym)}><Eye size={13} /> View / manage</button><button className="table-action" onClick={() => data.onOpenGym(gym)}>Open <ArrowRight size={13} /></button></div></td></tr>)}</tbody></table>}{!data.loading && filteredGyms.length === 0 && <div className="empty-state"><Search size={23} /><strong>No gyms found</strong><span>Change the search or create the first gym.</span></div>}</section></>}
+        {view === "members" && <><section className="module-heading"><div><p className="eyebrow">Authorised platform export</p><h2>Global members</h2><p>Export member rosters across all gyms without disabling tenant scopes or PostgreSQL RLS.</p></div><button className="primary-button" disabled={memberExportBusy} onClick={async () => { setMemberExportBusy(true); setMemberExportError(null); try { await data.onExportMembers(); } catch (reason) { setMemberExportError(reason instanceof Error ? reason.message : "The global member export failed."); } finally { setMemberExportBusy(false); } }}><Download size={17} />{memberExportBusy ? "Exporting…" : "Export all gyms"}</button></section>{memberExportError && <div className="form-error" role="alert">{memberExportError}</div>}<section className="panel platform-global-members"><UsersRound size={28} /><strong>Super Admin permission required</strong><p>The downloaded CSV identifies each gym and contains its current member roster. Each gym is entered explicitly on the server; Gym Admin users cannot call this platform endpoint.</p></section></>}
         {view === "plans" && <><section className="module-heading"><div><p className="eyebrow">Platform billing</p><h2>SaaS plans</h2><p>Manage catalogue details and append-only prices without changing accepted subscription history.</p></div><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={17} /> Publish plan</button></section><section className="platform-plan-grid">{data.plans.map((plan) => <article className="panel" key={plan.id}><div><span className={`status ${plan.status}`}><i />{readable(plan.status)}</span><small>{plan.code}</small></div><h3>{plan.name}</h3><p>{plan.description ?? "No description"}</p><ul>{plan.prices.filter((price) => price.active).map((price) => <li key={price.id}><strong>{money(price.amount_minor, price.currency)}</strong><span>/{price.billing_interval === "monthly" ? "month" : "year"}</span></li>)}</ul><small>{plan.feature_limits.members.toLocaleString()} members · {plan.feature_limits.branches.toLocaleString()} branches · {plan.feature_limits.staff.toLocaleString()} staff</small><small>Payments: {plan.payment_methods.map(readable).join(" · ")}</small><div className="platform-card-actions"><button className="secondary-button" onClick={() => setSelectedPlan(plan)}><Eye size={14} /> View / edit</button></div></article>)}{!data.loading && data.plans.length === 0 && <div className="empty-state panel"><CircleDollarSign size={24} /><strong>No plans published</strong><span>Create the first platform plan and immutable price.</span></div>}</section></>}
         {view === "settings" && <><section className="module-heading"><div><p className="eyebrow">Platform settings</p><h2>Settings</h2><p>Tenant currencies and timezones are managed per gym; account security stays platform-wide.</p></div></section><section className="platform-settings-grid"><article className="panel"><CircleDollarSign size={21} /><h3>Tenant currency settings</h3><p>Each gym keeps its own current base currency. Changing Gym A never changes Gym B or any historical transaction snapshot.</p><div className="platform-settings-list">{data.gyms.map((gym) => <button key={gym.id} onClick={() => setSelectedGym(gym)}><span><strong>{gym.name}</strong><small>{gym.timezone}</small></span><b>{gym.base_currency}</b><Pencil size={14} /></button>)}</div></article><article className="panel"><ShieldCheck size={21} /><h3>Account security</h3><p>Manage your password, authenticator and recovery codes separately from tenant business settings.</p><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Open account security</button></article><article className="panel"><Power size={21} /><h3>Provider status</h3><p>Stripe remains optional. Cash and bank transfer continue independently; credentials stay in deployment configuration, never this browser.</p></article></section></>}
       </main>

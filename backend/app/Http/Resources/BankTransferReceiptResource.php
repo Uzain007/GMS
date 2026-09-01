@@ -16,6 +16,7 @@ class BankTransferReceiptResource extends JsonResource
             'membership_id' => $this->membership_id,
             'invoice_id' => $this->invoice_id,
             'bank_reference' => $this->bank_reference,
+            'transferred_on' => $this->transferred_on?->toDateString(),
             'original_name' => $this->original_name,
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,

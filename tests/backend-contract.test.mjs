@@ -77,7 +77,7 @@ test("phase-three endpoints remain behind tenant and role middleware", async () 
   assert.match(routes, /role:super_admin,gym_owner,gym_manager,receptionist/);
 });
 
-test("member CSV imports stream in tenant-scoped queue batches", async () => {
+test("member spreadsheet imports validate before tenant-scoped queue batches", async () => {
   const migration = await read("database/migrations/2026_08_06_000007_create_queue_and_member_import_tables.php");
   const job = await read("app/Jobs/ProcessMemberImport.php");
   const controller = await read("app/Http/Controllers/Api/V1/MemberImportController.php");
@@ -85,9 +85,10 @@ test("member CSV imports stream in tenant-scoped queue batches", async () => {
   assert.match(migration, /Schema::create\('member_imports'/);
   assert.match(migration, /index\(\['gym_id', 'status', 'created_at'\]\)/);
   assert.match(job, /implements ShouldQueue/);
-  assert.match(job, /count\(\$batch\) >= 500/);
+  assert.match(job, /array_chunk\(\$analysis\['rows'\], 500\)/);
   assert.match(job, /'gym_id' => app\(TenantContext::class\)->id\(\)/);
-  assert.match(job, /insertOrIgnore\(\$batch\)/);
+  assert.match(job, /insertOrIgnore\(\$memberRows\)/);
+  assert.match(job, /confirmed_at/);
   assert.match(controller, /gyms\/\{\$context->id\(\)\}\/imports\/members/);
   assert.match(controller, /afterCommit\(\)/);
 });

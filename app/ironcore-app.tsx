@@ -67,6 +67,8 @@ import {
   type UpdateSaasPlan,
   type NewSaasPlanPrice,
   type UpdateMember,
+  type GymBankTransferSetting,
+  type UpdateGymBankTransferSetting,
 } from "./lib/ironcore-api";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
@@ -93,15 +95,15 @@ type MemberSelfState = {
 
 const apiOrigin = process.env.NEXT_PUBLIC_IRONCORE_API_URL?.trim() ?? "";
 const demoMode = process.env.NEXT_PUBLIC_IRONCORE_DEMO_MODE === "true" || !apiOrigin;
-const emptyPaymentOptions: MemberPaymentOptions = { stripe_configured: false, stripe_available: false, bank_transfer_available: true, cash_available_at_gym: true };
+const emptyPaymentOptions: MemberPaymentOptions = { stripe_configured: false, stripe_available: false, bank_transfer_available: false, bank_transfer_details: null, cash_available_at_gym: true };
 const emptySaasPaymentOptions: SaasPaymentOptions = { stripe_configured: false, bank_transfer_available: true, cash_available: true };
 const demoOperations: OperationData = {
   // Representative preview records stay inside demo mode. Authenticated mode
   // always replaces them with collections fetched for the explicitly selected
   // gym, so preview content can never become tenant authority.
   branches: [
-    { id: "demo-branch-1", name: "Manchester Central", code: "MCR-CENTRAL", email: "central@forge.example", phone: "+44 161 555 0142", status: "active", isPrimary: true },
-    { id: "demo-branch-2", name: "Salford Quays", code: "SQ-01", email: "salford@forge.example", phone: "+44 161 555 0188", status: "active", isPrimary: false },
+    { id: "demo-branch-1", name: "Manchester Central", code: "MCR-CENTRAL", email: "central@forge.example", phone: "+44 161 555 0142", timezone: "Europe/London", status: "active", isPrimary: true },
+    { id: "demo-branch-2", name: "Salford Quays", code: "SQ-01", email: "salford@forge.example", phone: "+44 161 555 0188", timezone: "Europe/London", status: "active", isPrimary: false },
   ],
   plans: [
     { id: "demo-plan-1", branchId: null, name: "Unlimited", code: "UNLIMITED", description: "All-hours gym access.", interval: "monthly", intervalCount: 1, priceMinor: 8900, currency: "GBP", durationDays: null, trialDays: 0, status: "active" },
@@ -121,6 +123,7 @@ const demoOperations: OperationData = {
   loading: false,
   error: null,
   baseCurrency: "GBP",
+  gymTimezone: "Europe/London",
   canManageSetup: false,
   canManageMemberships: false,
   preview: true,
@@ -311,6 +314,7 @@ function dashboardMember(member: MemberRecord, gymName: string): DashboardMember
     gym: gymName,
     membership: member.member_code,
     memberCode: member.member_code,
+    homeBranchId: member.home_branch_id,
     joined: member.joined_at
       ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(member.joined_at))
       : "Not set",
@@ -342,6 +346,11 @@ function dashboardMemberProfile(member: MemberRecord, gymName: string): Dashboar
       isInDate: membership.is_in_date ?? false,
     } : null,
   };
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob); const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
 }
 
 function pendingMemberActivation(): MemberActivationSecret | null {
@@ -488,6 +497,8 @@ export function IronCoreApp() {
   const [trainerProfileRefresh, setTrainerProfileRefresh] = useState(0);
   const [finance, setFinance] = useState<FinanceState>({ payments: [], invoices: [], summary: null, gateway: null, stripeConfigured: false, stripeAvailable: false, loading: false, error: null });
   const [financeRefresh, setFinanceRefresh] = useState(0);
+  const [bankTransferSettingState, setBankTransferSettingState] = useState<{ gymId: string; setting: GymBankTransferSetting | null } | null>(null);
+  const [bankTransferSettingRefresh, setBankTransferSettingRefresh] = useState(0);
   const [saas, setSaas] = useState<SaasState>({ plans: [], subscription: null, invoices: [], payments: [], paymentOptions: emptySaasPaymentOptions, loading: false, error: null });
   const [saasRefresh, setSaasRefresh] = useState(0);
   const [engagement, setEngagement] = useState<EngagementState>({ attendance: [], sessions: [], bookings: [], loading: false, error: null });
@@ -714,6 +725,18 @@ export function IronCoreApp() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [api, financeRefresh, selectedGym]);
+
+  useEffect(() => {
+    if (!api || !selectedGym || !["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role)) {
+      return;
+    }
+    const gymId = selectedGym.id;
+    let current = true;
+    void api.gymBankTransferSetting(gymId)
+      .then((setting) => { if (current) setBankTransferSettingState({ gymId, setting }); })
+      .catch(() => { if (current) setBankTransferSettingState({ gymId, setting: null }); });
+    return () => { current = false; };
+  }, [api, bankTransferSettingRefresh, selectedGym]);
 
   useEffect(() => {
     if (!api || !selectedGym || !["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role)) return;
@@ -949,6 +972,13 @@ export function IronCoreApp() {
     setReportRefresh((value) => value + 1);
   }
 
+  async function updateCurrentGymBankTransferSetting(input: UpdateGymBankTransferSetting): Promise<void> {
+    if (!api || !selectedGym || !["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role)) throw new Error("You are not allowed to change this gym's bank details.");
+    const setting = await api.updateGymBankTransferSetting(selectedGym.id, input);
+    setBankTransferSettingState({ gymId: selectedGym.id, setting });
+    setBankTransferSettingRefresh((value) => value + 1);
+  }
+
   async function updateTrainerProfile(input: UpdateOwnStaffProfile): Promise<void> {
     if (!api || !selectedGym || selectedGym.role !== "trainer") throw new Error("Open your trainer workspace first.");
     const profile = await api.updateOwnStaffProfile(selectedGym.id, input);
@@ -977,9 +1007,32 @@ export function IronCoreApp() {
     const created = await api.createMemberAccountInvitation(selectedGym.id, memberId);
     return `${window.location.origin}${window.location.pathname}#activate_gym=${encodeURIComponent(selectedGym.id)}&activate_token=${encodeURIComponent(created.activation_token)}`;
   }
+  async function previewMemberImport(file: File) {
+    if (!api || !selectedGym) throw new Error("Select a gym before importing members.");
+    return api.previewMemberImport(selectedGym.id, file);
+  }
+  async function confirmMemberImport(importId: string) {
+    if (!api || !selectedGym) throw new Error("Select a gym before importing members.");
+    return api.confirmMemberImport(selectedGym.id, importId);
+  }
+  async function pollMemberImport(importId: string) {
+    if (!api || !selectedGym) throw new Error("Select a gym before importing members.");
+    return api.memberImport(selectedGym.id, importId);
+  }
+  async function downloadMemberTemplate(format: "csv" | "xlsx") {
+    if (!api || !selectedGym) throw new Error("Select a gym before downloading a template.");
+    downloadBlob(await api.memberImportTemplate(selectedGym.id, format), `ironcore-member-import-template.${format}`);
+  }
+  async function exportMembers() {
+    if (!api || !selectedGym) throw new Error("Select a gym before exporting members.");
+    downloadBlob(await api.memberRosterExport(selectedGym.id), `ironcore-${selectedGym.slug}-members.csv`);
+  }
 
   async function createBranch(input: NewOperationBranch) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createBranch(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
   async function updateBranch(id: string, input: Parameters<IronCoreApi["updateBranch"]>[2]) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateBranch(selectedGym.id, id, input); setOperationsRefresh((v) => v + 1); }
+  async function deleteBranch(id: string, reason: string) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.deleteBranch(selectedGym.id, id, reason); setOperationsRefresh((v) => v + 1); }
+  async function assignBranchMember(memberId: string, branchId: string | null, reason: string) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateMember(selectedGym.id, memberId, { home_branch_id: branchId, reason }); setMemberRefresh((value) => value + 1); }
+  async function assignBranchStaff(staffId: string, branchId: string | null, reason: string) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateStaff(selectedGym.id, staffId, { home_branch_id: branchId, reason }); setStaffRefresh((value) => value + 1); }
   async function createPlan(input: NewOperationPlan) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createMembershipPlan(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
   async function updatePlan(id: string, input: Parameters<IronCoreApi["updateMembershipPlan"]>[2]) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateMembershipPlan(selectedGym.id, id, input); setOperationsRefresh((v) => v + 1); }
   async function createMembership(input: NewOperationMembership) { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createMembership(selectedGym.id, input); setOperationsRefresh((v) => v + 1); }
@@ -1163,7 +1216,7 @@ export function IronCoreApp() {
     return result;
   }
 
-  async function submitMemberPayment(input: { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; receipt?: File }): Promise<string | null> {
+  async function submitMemberPayment(input: { invoice_id: string; method: "bank_transfer" | "online_card"; idempotency_key: string; bank_reference?: string; transferred_on?: string; receipt?: File }): Promise<string | null> {
     if (!api || !selectedGym || selectedGym.role !== "member") throw new Error("Select your member workspace first.");
     const result = await api.createMemberPayment(selectedGym.id, input);
     setMemberSelfRefresh((value) => value + 1);
@@ -1311,6 +1364,7 @@ export function IronCoreApp() {
     onUpdateGym: updatePlatformGym,
     onCreatePlan: createSaasPlan,
     onUpdatePlan: updateSaasPlan,
+    onExportMembers: async () => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformMemberRosterExport(), "ironcore-all-gyms-members.csv"); },
     onChangePassword: changePassword,
     onLogout: logout,
     mfa: mfaActions,
@@ -1350,12 +1404,14 @@ export function IronCoreApp() {
   const setupRoles: IronCoreRole[] = ["super_admin", "gym_owner", "gym_manager"];
   const membershipRoles: IronCoreRole[] = [...setupRoles, "receptionist"];
   const liveOperations: OperationData = {
-    branches: operations.branches.map((v) => ({ id: v.id, name: v.name, code: v.code, email: v.email, phone: v.phone, status: v.status, isPrimary: v.is_primary })),
+    branches: operations.branches.map((v) => ({ id: v.id, name: v.name, code: v.code, email: v.email, phone: v.phone, timezone: v.timezone, status: v.status, isPrimary: v.is_primary })),
     plans: operations.plans.map((v) => ({ id: v.id, branchId: v.branch_id, name: v.name, code: v.code, description: v.description, interval: v.billing_interval, intervalCount: v.interval_count, priceMinor: v.price_amount_minor, currency: v.currency, durationDays: v.duration_days, trialDays: v.trial_days, status: v.status })),
     memberships: operations.memberships.map((v) => ({ id: v.id, memberId: v.member_id, planId: v.plan_id, status: v.status, startsAt: v.starts_at, endsAt: v.ends_at ?? null, nextBillingAt: v.next_billing_at, priceMinor: v.price_amount_minor, currency: v.currency, autoRenew: v.auto_renew })),
-    members: members.rows.map((v) => ({ id: v.id, name: v.name, memberCode: v.memberCode ?? "" })).filter((v) => /^\d{4,6}$/.test(v.memberCode)), loading: operations.loading, error: operations.error,
-    baseCurrency: selectedGym.base_currency, canManageSetup: setupRoles.includes(selectedGym.role), canManageMemberships: membershipRoles.includes(selectedGym.role),
-    onReload: () => setOperationsRefresh((v) => v + 1), onCreateBranch: createBranch, onUpdateBranch: updateBranch, onCreatePlan: createPlan, onUpdatePlan: updatePlan, onCreateMembership: createMembership, onUpdateMembership: updateMembership,
+    members: members.rows.map((v) => ({ id: v.id, name: v.name, memberCode: v.memberCode ?? "", branchId: v.homeBranchId, status: v.statusValue })).filter((v) => /^\d{4,6}$/.test(v.memberCode)),
+    staff: staff.rows.map((row) => ({ id: row.id, name: row.user.name, role: row.role, branchId: row.home_branch_id, status: row.status })), sessions: engagement.sessions, attendance: engagement.attendance,
+    loading: operations.loading, error: operations.error,
+    baseCurrency: selectedGym.base_currency, gymTimezone: selectedGym.timezone, canManageSetup: setupRoles.includes(selectedGym.role), canManageMemberships: membershipRoles.includes(selectedGym.role),
+    onReload: () => setOperationsRefresh((v) => v + 1), onCreateBranch: createBranch, onUpdateBranch: updateBranch, onDeleteBranch: deleteBranch, onAssignBranchMember: assignBranchMember, onAssignBranchStaff: assignBranchStaff, onCreateClassSession: createClassSession, onCreatePlan: createPlan, onUpdatePlan: updatePlan, onCreateMembership: createMembership, onUpdateMembership: updateMembership,
   };
   const liveStaff: StaffData = {
     rows: staff.rows.map((row) => ({ id: row.id, name: row.user.name, email: row.user.email, phone: row.phone, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, hiredAt: row.hired_at, hasProfileImage: row.has_profile_image })),
@@ -1365,7 +1421,7 @@ export function IronCoreApp() {
   };
   const financeSummary = finance.summary ?? { gross_minor: 0, refunded_minor: 0, net_minor: 0, pending_minor: 0, outstanding_minor: 0, currency: selectedGym.base_currency };
   const liveFinance: FinanceData = {
-    payments: finance.payments.map((row) => ({ id: row.id, memberId: row.member_id, invoiceId: row.invoice_id, branchId: row.branch_id, receipt: row.receipt_number, provider: row.provider, method: row.method, status: row.status, amountMinor: row.amount_minor, refundedMinor: row.refunded_amount_minor, currency: row.currency, paidAt: row.paid_at, notes: row.notes, bankReceipt: row.bank_transfer_receipt ? { originalName: row.bank_transfer_receipt.original_name, bankReference: row.bank_transfer_receipt.bank_reference, reviewedAt: row.bank_transfer_receipt.reviewed_at, reviewReason: row.bank_transfer_receipt.review_reason } : null })),
+    payments: finance.payments.map((row) => ({ id: row.id, memberId: row.member_id, invoiceId: row.invoice_id, branchId: row.branch_id, receipt: row.receipt_number, provider: row.provider, method: row.method, status: row.status, amountMinor: row.amount_minor, refundedMinor: row.refunded_amount_minor, currency: row.currency, paidAt: row.paid_at, notes: row.notes, bankReceipt: row.bank_transfer_receipt ? { originalName: row.bank_transfer_receipt.original_name, bankReference: row.bank_transfer_receipt.bank_reference, transferredOn: row.bank_transfer_receipt.transferred_on, reviewedAt: row.bank_transfer_receipt.reviewed_at, reviewReason: row.bank_transfer_receipt.review_reason } : null })),
     invoices: finance.invoices.map((row) => ({ id: row.id, memberId: row.member_id, membershipId: row.membership_id, branchId: row.branch_id, number: row.number, status: row.status, currency: row.currency, totalMinor: row.total_amount_minor, paidMinor: row.paid_amount_minor, dueMinor: row.due_amount_minor, issuedAt: row.issued_at, dueAt: row.due_at, notes: row.notes })),
     members: members.rows.map((row) => ({ id: row.id, name: row.name })),
     memberships: operations.memberships.map((row) => ({ id: row.id, memberId: row.member_id, label: `${operations.plans.find((plan) => plan.id === row.plan_id)?.name ?? "Membership"} · ${row.status}` })),
@@ -1481,7 +1537,7 @@ export function IronCoreApp() {
     onLogout={logout}
     onChangePassword={changePassword}
     mfa={mfaActions}
-    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onView: viewMember, onInvitePortal: inviteMemberPortal, onUpdate: updateMember } : undefined}
+    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onView: viewMember, onInvitePortal: inviteMemberPortal, onUpdate: updateMember, onPreviewImport: previewMemberImport, onConfirmImport: confirmMemberImport, onPollImport: pollMemberImport, onDownloadTemplate: downloadMemberTemplate, onExport: exportMembers } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}
     liveFinance={canManageMembers ? liveFinance : undefined}
@@ -1489,7 +1545,7 @@ export function IronCoreApp() {
     liveEngagement={liveEngagement}
     liveCoaching={canUseCoaching ? liveCoaching : undefined}
     liveReports={canReadReports ? reportData : undefined}
-    gymSettings={["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role) ? { gym: selectedGym, canManage: true, onUpdate: updateCurrentGymSettings } : undefined}
+    gymSettings={["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role) ? { gym: selectedGym, canManage: true, bankTransferSetting: bankTransferSettingState?.gymId === selectedGym.id ? bankTransferSettingState.setting : null, onUpdate: updateCurrentGymSettings, onUpdateBankTransferSetting: updateCurrentGymBankTransferSetting } : undefined}
     trainerProfile={selectedGym.role === "trainer" ? { ...trainerProfile, branchName: operations.branches.find((branch) => branch.id === trainerProfile.profile?.home_branch_id)?.name ?? null, onUpdate: updateTrainerProfile } : undefined}
     tenantViews={tenantViews}
     onCreateMember={createMember}

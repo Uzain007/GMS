@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\AccountSecurityController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\BranchController;
+use App\Http\Controllers\Api\V1\BankTransferSettingController;
 use App\Http\Controllers\Api\V1\ClassBookingController;
 use App\Http\Controllers\Api\V1\ClassSessionController;
 use App\Http\Controllers\Api\V1\GymController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Api\V1\MemberController;
 use App\Http\Controllers\Api\V1\MemberDataExportController;
 use App\Http\Controllers\Api\V1\MemberAccountInvitationController;
 use App\Http\Controllers\Api\V1\MemberImportController;
+use App\Http\Controllers\Api\V1\MemberRosterController;
 use App\Http\Controllers\Api\V1\MemberSelfServiceController;
 use App\Http\Controllers\Api\V1\MembershipController;
 use App\Http\Controllers\Api\V1\MembershipPlanController;
@@ -80,6 +82,8 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('role:super_admin');
         Route::post('/platform/saas-plans/{plan}/prices', [PlatformSaasPlanController::class, 'storePrice'])
             ->middleware('role:super_admin');
+        Route::get('/platform/members/export', [MemberRosterController::class, 'platformExport'])
+            ->middleware('role:super_admin');
 
         // Invitation acceptance uses the signed token before tenant membership exists.
         Route::post('/gyms/{gym}/staff-invitations/accept', [StaffInvitationController::class, 'accept']);
@@ -87,6 +91,10 @@ Route::prefix('v1')->group(function (): void {
         Route::middleware('tenant')->group(function (): void {
             Route::get('/gyms/{gym}', [GymController::class, 'show']);
             Route::patch('/gyms/{gym}', [GymController::class, 'update'])
+                ->middleware('role:super_admin,gym_owner,gym_manager');
+            Route::get('/gyms/{gym}/bank-transfer-settings', [BankTransferSettingController::class, 'show'])
+                ->middleware('role:super_admin,gym_owner,gym_manager');
+            Route::patch('/gyms/{gym}/bank-transfer-settings', [BankTransferSettingController::class, 'update'])
                 ->middleware('role:super_admin,gym_owner,gym_manager');
 
             Route::prefix('/gyms/{gym}')->group(function (): void {
@@ -116,6 +124,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/branches/{branch}', [BranchController::class, 'show'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer,member');
                 Route::patch('/branches/{branch}', [BranchController::class, 'update'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::delete('/branches/{branch}', [BranchController::class, 'destroy'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/members', [MemberController::class, 'index'])
@@ -150,6 +160,12 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/member-imports', [MemberImportController::class, 'store'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::get('/member-imports/{import}', [MemberImportController::class, 'show'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::post('/member-imports/{import}/confirm', [MemberImportController::class, 'confirm'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/members-import-template', [MemberRosterController::class, 'template'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::get('/members-export', [MemberRosterController::class, 'export'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
 
                 Route::get('/staff/me', [StaffProfileController::class, 'me'])

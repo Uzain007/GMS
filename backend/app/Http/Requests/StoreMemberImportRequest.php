@@ -8,7 +8,7 @@ class StoreMemberImportRequest extends TenantFormRequest
     {
         return [
             // Ten-megabyte limit bounds upload/queue work; rows stream in chunks.
-            'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
+            'file' => ['required', 'file', 'mimes:csv,txt,xls,xlsx', 'max:10240'],
         ];
     }
 }

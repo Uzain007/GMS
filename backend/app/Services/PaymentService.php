@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\MembershipStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentProvider;
 use App\Enums\PaymentStatus;
@@ -61,6 +62,14 @@ class PaymentService
                         'receipt' => ['A bank-transfer receipt and linked membership are required.'],
                     ]);
                 }
+                if ($method === PaymentMethod::BankTransfer && $invoice && Payment::query()
+                    ->where('invoice_id', $invoice->getKey())
+                    ->where('method', PaymentMethod::BankTransfer->value)
+                    ->where('status', PaymentStatus::Pending->value)->exists()) {
+                    throw ValidationException::withMessages([
+                        'invoice_id' => ['A bank transfer for this invoice is already pending verification.'],
+                    ]);
+                }
 
                 $pending = $method->isOnline() || $method === PaymentMethod::BankTransfer;
                 $payment = Payment::query()->create([
@@ -84,7 +93,8 @@ class PaymentService
 
                 if ($method === PaymentMethod::BankTransfer && $receipt) {
                     $storedReceipt = $this->storeBankTransferReceipt(
-                        $payment, $member, $membership, $invoice, $actor, $receipt, $data['bank_reference'] ?? null,
+                        $payment, $member, $membership, $invoice, $actor, $receipt,
+                        $data['bank_reference'] ?? null, $data['transferred_on'] ?? null,
                     );
                     $this->audit->record(
                         'payment.bank_transfer_submitted',
@@ -252,6 +262,20 @@ class PaymentService
                     ]);
                 }
                 $this->applyPaymentToInvoice($invoice, $locked->amount_minor);
+                if ($invoice->fresh()->status === InvoiceStatus::Paid && $locked->membership_id) {
+                    $membership = Membership::query()->lockForUpdate()->findOrFail($locked->membership_id);
+                    if ($membership->status === MembershipStatus::Pending
+                        && $membership->starts_at->lte(today())
+                        && (! $membership->ends_at || $membership->ends_at->gte(today()))) {
+                        $membership->update(['status' => MembershipStatus::Active]);
+                        $this->audit->record(
+                            'membership.activated_from_payment', $membership->fresh(), $actor,
+                            before: ['status' => MembershipStatus::Pending->value],
+                            after: ['status' => MembershipStatus::Active->value, 'payment_id' => $locked->getKey()],
+                            reason: $data['reason'], request: $request,
+                        );
+                    }
+                }
             }
 
             $locked->update($approved ? [
@@ -316,6 +340,7 @@ class PaymentService
         User $actor,
         UploadedFile $receipt,
         ?string $bankReference,
+        ?string $transferredOn,
     ): array {
         $disk = (string) config('filesystems.default');
         $extension = $receipt->guessExtension() ?: 'bin';
@@ -338,6 +363,7 @@ class PaymentService
                 'invoice_id' => $invoice?->getKey(),
                 'submitted_by' => $actor->getKey(),
                 'bank_reference' => filled($bankReference) ? trim((string) $bankReference) : null,
+                'transferred_on' => $transferredOn,
                 'storage_disk' => $disk,
                 'storage_path' => $path,
                 'original_name' => Str::limit(basename($receipt->getClientOriginalName()), 240, ''),

@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Enums\AccessCredentialStatus;
 use App\Enums\AttendanceMethod;
 use App\Enums\AttendanceStatus;
+use App\Enums\BranchStatus;
 use App\Enums\MemberStatus;
 use App\Enums\MembershipStatus;
 use App\Models\AttendanceRecord;
+use App\Models\GymBranch;
 use App\Models\Member;
 use App\Models\MemberAccessCredential;
 use App\Models\Membership;
@@ -155,6 +157,10 @@ class AttendanceService
     public function checkIn(array $data, User $actor, Request $request): AttendanceRecord
     {
         return DB::transaction(function () use ($data, $actor, $request): AttendanceRecord {
+            $branch = GymBranch::query()->findOrFail($data['branch_id']);
+            if ($branch->status !== BranchStatus::Active) {
+                throw ValidationException::withMessages(['branch_id' => ['Check-in is unavailable while this branch is inactive.']]);
+            }
             [$member, $credential, $method] = $this->resolveMember($data);
             $membership = $this->activeMembershipFor($member, $data['branch_id']);
 

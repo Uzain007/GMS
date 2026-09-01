@@ -127,6 +127,27 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors('member');
     }
 
+    public function test_replacing_a_secure_qr_invalidates_the_old_scanner_value_and_keeps_the_new_one_valid(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-ROTATED-QR'));
+        $headers = ['X-Gym-ID' => $gym->id];
+
+        Sanctum::actingAs($owner);
+        $original = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], $headers)
+            ->assertCreated()->json('data.credential');
+        $replacement = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential/rotate", [], $headers)
+            ->assertCreated()->json('data.credential');
+
+        $this->assertNotSame($original, $replacement);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id, 'credential' => $original,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('credential');
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id, 'credential' => $replacement,
+        ], $headers)->assertCreated()->assertJsonPath('data.method', 'qr');
+    }
+
     public function test_secure_qr_rejects_expired_membership_wrong_gym_and_wrong_branch(): void
     {
         [$owner, $gym, $branch] = $this->tenant();

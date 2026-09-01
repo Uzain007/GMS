@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\BranchStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DeleteBranchRequest;
 use App\Http\Requests\StoreBranchRequest;
 use App\Http\Requests\UpdateBranchRequest;
 use App\Http\Resources\GymBranchResource;
 use App\Models\GymBranch;
 use App\Services\AuditService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class BranchController extends Controller
 {
@@ -67,6 +70,47 @@ class BranchController extends Controller
         });
 
         return new GymBranchResource($fresh);
+    }
+
+    public function destroy(DeleteBranchRequest $request, string $branch, AuditService $audit): JsonResponse
+    {
+        $links = [
+            'members' => 'home_branch_id',
+            'staff_profiles' => 'home_branch_id',
+            'staff_profile_branch' => 'branch_id',
+            'staff_invitations' => 'home_branch_id',
+            'membership_plans' => 'branch_id',
+            'memberships' => 'branch_id',
+            'class_sessions' => 'branch_id',
+            'attendance_records' => 'branch_id',
+            'invoices' => 'branch_id',
+            'payments' => 'branch_id',
+        ];
+
+        DB::transaction(function () use ($branch, $links, $request, $audit): void {
+            $model = GymBranch::query()->lockForUpdate()->findOrFail($branch);
+            if ($model->is_primary) {
+                throw ValidationException::withMessages([
+                    'branch' => ['The primary branch cannot be deleted. Make another branch primary first.'],
+                ]);
+            }
+
+            // Explicit dependency checks preserve historical business records
+            // and avoid exposing a database FK failure as an unclear workflow.
+            foreach ($links as $table => $column) {
+                if (DB::table($table)->where('gym_id', $model->gym_id)->where($column, $model->getKey())->exists()) {
+                    throw ValidationException::withMessages([
+                        'branch' => ['This branch has linked records. Deactivate it to preserve member, staff, class, attendance and payment history.'],
+                    ]);
+                }
+            }
+
+            $before = $model->toArray();
+            $audit->record('branch.deleted', $model, $request->user(), $before, [], (string) $request->string('reason'), $request);
+            $model->delete();
+        });
+
+        return response()->json(['data' => ['deleted' => true]]);
     }
 
     private function pageSize(): int

@@ -38,6 +38,7 @@ yarn-error.log*
 /backend/vendor/
 /backend/.phpunit.result.cache
 /backend/storage/*.key
+/backend/storage/app/private/*
 /backend/storage/framework/cache/data/*
 /backend/storage/framework/sessions/*
 /backend/storage/framework/testing/*

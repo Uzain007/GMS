@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Building2, CheckCircle2, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, Eye, EyeOff, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import type { MemberAccountActivationPreview } from "./lib/ironcore-api";
 
@@ -22,6 +22,8 @@ export function MemberAccountActivation({ invitation, onPreview, onAccept, onCan
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -66,7 +68,29 @@ export function MemberAccountActivation({ invitation, onPreview, onAccept, onCan
           <h2>Welcome, {preview.member_first_name}</h2>
           <p>{preview.existing_account ? `Link your existing ${preview.masked_email} account to this member profile.` : `Create your sign-in for ${preview.masked_email}.`}</p>
           {error && <div className="form-error" role="alert">{error}</div>}
-          {!preview.existing_account && <div className="activation-fields"><label>Create password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={255} autoFocus /></label><label>Confirm password<input name="password_confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><small>Use at least 12 characters. IronCore never stores this password in the browser.</small></div>}
+          {!preview.existing_account && <div className="activation-fields">
+            <label className="activation-field" htmlFor="activation-password">
+              <span>Create password</span>
+              <span className="activation-password-control">
+                <input id="activation-password" name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={12} maxLength={255} aria-describedby="activation-password-help" autoFocus />
+                <button type="button" className="activation-password-toggle" aria-label={`${showPassword ? "Hide" : "Show"} password`} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>
+                  {showPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                  <span>{showPassword ? "Hide" : "Show"}</span>
+                </button>
+              </span>
+            </label>
+            <label className="activation-field" htmlFor="activation-password-confirmation">
+              <span>Confirm password</span>
+              <span className="activation-password-control">
+                <input id="activation-password-confirmation" name="password_confirmation" type={showConfirmation ? "text" : "password"} autoComplete="new-password" required minLength={12} maxLength={255} aria-describedby="activation-password-help" />
+                <button type="button" className="activation-password-toggle" aria-label={`${showConfirmation ? "Hide" : "Show"} password confirmation`} aria-pressed={showConfirmation} onClick={() => setShowConfirmation((visible) => !visible)}>
+                  {showConfirmation ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                  <span>{showConfirmation ? "Hide" : "Show"}</span>
+                </button>
+              </span>
+            </label>
+            <small id="activation-password-help">Use at least 12 characters. IronCore never stores this password in the browser.</small>
+          </div>}
           <button className="primary-button auth-submit" disabled={busy} type="submit">{busy ? <><LoaderCircle className="spin" size={17} /> Activating</> : <>Activate and sign in <ArrowRight size={17} /></>}</button>
           <button type="button" className="activation-text-button" onClick={onCancel}>Use a different account</button>
           <small>The activation secret was removed from your address bar and is used only for this request.</small>

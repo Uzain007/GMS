@@ -2,7 +2,8 @@
 
 namespace App\Enums;
 
-// Branches are deactivated instead of deleted so historical memberships retain context.
+// Branches with business history are deactivated; only completely unused
+// non-primary branches can be removed through the audited lifecycle endpoint.
 enum BranchStatus: string
 {
     case Active = 'active';

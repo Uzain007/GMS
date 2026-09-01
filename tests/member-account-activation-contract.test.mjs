@@ -59,3 +59,18 @@ test("browser activation clears fragment secrets and keeps issuance in volatile 
   assert.match(activation, /autoComplete="new-password"/);
   assert.doesNotMatch(`${app}\n${activation}`, /localStorage|sessionStorage|indexedDB/);
 });
+
+test("member activation uses an accessible single-column password form", async () => {
+  const activation = await read("app/member-account-activation.tsx");
+  const css = await read("app/globals.css");
+
+  assert.match(activation, /className="activation-field" htmlFor="activation-password"/);
+  assert.match(activation, /id="activation-password-confirmation"/);
+  assert.match(activation, /aria-describedby="activation-password-help"/);
+  assert.match(activation, /aria-label=\{`\$\{showPassword \? "Hide" : "Show"\} password`\}/);
+  assert.match(activation, /type="button" className="activation-password-toggle"/);
+  assert.match(css, /\.activation-fields\{display:grid;gap:15px/);
+  assert.match(css, /\.activation-field\{display:grid;gap:7px;width:100%/);
+  assert.match(css, /\.activation-password-control input\{width:100%;min-width:0/);
+  assert.match(css, /@media\(max-width:420px\).*\.activation-card\{padding:24px 20px\}/s);
+});

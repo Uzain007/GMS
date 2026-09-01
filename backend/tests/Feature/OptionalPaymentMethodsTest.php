@@ -10,6 +10,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\UserRole;
 use App\Models\Gym;
 use App\Models\GymBranch;
+use App\Models\GymBankTransferSetting;
 use App\Models\Member;
 use App\Models\Payment;
 use App\Models\PaymentGatewayAccount;
@@ -81,6 +82,7 @@ class OptionalPaymentMethodsTest extends TestCase
             'method' => 'bank_transfer',
             'idempotency_key' => 'member-bank-transfer-001',
             'bank_reference' => 'BANK-REFERENCE-2048',
+            'transferred_on' => today()->subDay()->toDateString(),
             'receipt' => UploadedFile::fake()->create('bank-receipt.pdf', 80, 'application/pdf'),
         ], $headers)->assertCreated()
             ->assertJsonPath('data.status', 'pending')
@@ -88,6 +90,7 @@ class OptionalPaymentMethodsTest extends TestCase
             ->assertJsonPath('data.membership_id', $membership['id'])
             ->assertJsonPath('data.invoice_id', $invoice['id'])
             ->assertJsonPath('data.bank_transfer_receipt.bank_reference', 'BANK-REFERENCE-2048');
+        $response->assertJsonPath('data.bank_transfer_receipt.transferred_on', today()->subDay()->toDateString());
 
         $payment = $response->json('data');
         $receipt = app(TenantContext::class)->run($gym, fn () => Payment::query()
@@ -105,14 +108,18 @@ class OptionalPaymentMethodsTest extends TestCase
             $this->assertSame($invoice['due_amount_minor'], \App\Models\Invoice::query()->findOrFail($invoice['id'])->due_amount_minor);
         });
 
+        app(TenantContext::class)->run($gym, fn () => \App\Models\Membership::query()
+            ->findOrFail($membership['id'])->update(['status' => 'pending']));
+
         Sanctum::actingAs($owner);
         $this->patchJson("/api/v1/gyms/{$gym->id}/payments/{$payment['id']}/bank-transfer-review", [
             'decision' => 'approve',
             'reason' => 'Receipt and bank statement match.',
         ], ['X-Gym-ID' => $gym->id])->assertOk()->assertJsonPath('data.status', 'paid');
 
-        app(TenantContext::class)->run($gym, function () use ($invoice, $payment): void {
+        app(TenantContext::class)->run($gym, function () use ($invoice, $payment, $membership): void {
             $this->assertSame(0, \App\Models\Invoice::query()->findOrFail($invoice['id'])->due_amount_minor);
+            $this->assertSame('active', \App\Models\Membership::query()->findOrFail($membership['id'])->status->value);
             $this->assertDatabaseHas('audit_logs', [
                 'gym_id' => $payment['gym_id'],
                 'event' => 'payment.bank_transfer_approved',
@@ -168,6 +175,55 @@ class OptionalPaymentMethodsTest extends TestCase
             $invoice['due_amount_minor'],
             \App\Models\Invoice::query()->findOrFail($invoice['id'])->due_amount_minor,
         ));
+
+        Sanctum::actingAs($memberUser);
+        $this->post("/api/v1/gyms/{$gym->id}/member/payments", [
+            'invoice_id' => $invoice['id'],
+            'method' => 'bank_transfer',
+            'idempotency_key' => 'member-bank-transfer-resubmitted',
+            'receipt' => UploadedFile::fake()->create('replacement.pdf', 40, 'application/pdf'),
+        ], ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'])
+            ->assertCreated()->assertJsonPath('data.status', 'pending');
+    }
+
+    public function test_gym_bank_details_are_tenant_private_and_exposed_with_authoritative_invoice_values(): void
+    {
+        [$owner, $memberUser, $gym, , $member, , $invoice] = $this->contract('DETAILS');
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $this->patchJson("/api/v1/gyms/{$gym->id}/bank-transfer-settings", [
+            'enabled' => true,
+            'account_name' => 'IronCore Test Gym Ltd',
+            'bank_name' => 'Example Bank',
+            'account_number_or_iban' => 'GB82 WEST 1234 5698 7654 32',
+            'routing_details' => '20-00-00',
+            'payment_instructions' => 'Use the exact reference shown.',
+            'reason' => 'Configure member transfer instructions.',
+        ], $headers)->assertOk()->assertJsonPath('data.enabled', true);
+
+        $raw = app(TenantContext::class)->run($gym, fn () => DB::table('gym_bank_transfer_settings')->where('gym_id', $gym->id)->first());
+        $this->assertNotSame('GB82 WEST 1234 5698 7654 32', $raw->account_number_or_iban);
+
+        Sanctum::actingAs($memberUser);
+        $this->getJson("/api/v1/gyms/{$gym->id}/member/payment-options", $headers)
+            ->assertOk()
+            ->assertJsonPath('data.bank_transfer_available', true)
+            ->assertJsonPath('data.bank_transfer_details.account_name', 'IronCore Test Gym Ltd')
+            ->assertJsonPath('data.bank_transfer_details.invoices.0.invoice_id', $invoice['id'])
+            ->assertJsonPath('data.bank_transfer_details.invoices.0.amount_minor', $invoice['due_amount_minor'])
+            ->assertJsonPath('data.bank_transfer_details.invoices.0.currency', 'GBP')
+            ->assertJsonPath('data.bank_transfer_details.invoices.0.payment_reference', "{$member->member_code}-{$invoice['number']}");
+
+        [$otherOwner, $otherMemberUser, $otherGym] = $this->tenant('DETAILS-OTHER');
+        Sanctum::actingAs($otherMemberUser);
+        $this->getJson("/api/v1/gyms/{$otherGym->id}/member/payment-options", ['X-Gym-ID' => $otherGym->id])
+            ->assertNotFound();
+        Sanctum::actingAs($otherOwner);
+        $this->getJson("/api/v1/gyms/{$gym->id}/bank-transfer-settings", [
+            'X-Gym-ID' => $gym->id,
+        ])->assertForbidden();
+        $this->getJson("/api/v1/gyms/{$otherGym->id}/bank-transfer-settings", ['X-Gym-ID' => $otherGym->id])
+            ->assertOk()->assertJsonPath('data', null);
     }
 
     public function test_member_stripe_checkout_is_available_only_for_an_active_configured_gateway(): void
@@ -240,6 +296,14 @@ class OptionalPaymentMethodsTest extends TestCase
             $member->update(['user_id' => $memberUser->id]);
             return $member->fresh();
         });
+        app(TenantContext::class)->run($gym, fn () => GymBankTransferSetting::query()->create([
+            'enabled' => true,
+            'account_name' => 'Optional Payments Gym',
+            'bank_name' => 'Example Bank',
+            'account_number_or_iban' => 'GB82 WEST 1234 5698 7654 32',
+            'routing_details' => '20-00-00',
+            'updated_by' => $owner->id,
+        ]));
         $membership = $this->postJson("/api/v1/gyms/{$gym->id}/memberships", [
             'member_id' => $member->id,
             'plan_id' => $plan['id'],
