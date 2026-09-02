@@ -11,7 +11,7 @@ Milestones 9 and 10 complete password recovery, authenticated password changes, 
 5. `POST /api/v1/auth/reset-password` locks and consumes the one-time token with the user credential change, applies the strong-password rule, rotates the remember token, advances `auth_version` and deletes every Sanctum token.
 6. A user without MFA receives one regenerated web session. An MFA-enabled user receives only a five-minute opaque challenge and must complete the second factor before any session is created.
 
-Reset values must never be moved into query parameters, logs, analytics, local storage, session storage or offline caches. The broker expiry is 60 minutes and request throttling is keyed by normalized email plus source IP.
+Reset values must never be moved into query parameters, logs, analytics, local storage, session storage or offline caches. The broker expiry defaults to 60 minutes through `AUTH_PASSWORD_RESET_EXPIRE`; resend throttling defaults to 60 seconds through `AUTH_PASSWORD_RESET_THROTTLE`, while the recovery endpoint remains rate-limited by normalized email plus source IP.
 
 ## Password changes and session revocation
 
@@ -42,10 +42,11 @@ Regeneration requires the current password and a fresh authenticator code and in
 - Set `FRONTEND_URL` to the exact HTTPS web origin before caching Laravel configuration.
 - Keep `QUEUE_CONNECTION=redis` and run the default queue worker from the same release as the web process.
 - Keep `CACHE_STORE=redis`; five-minute MFA challenges and their locks must use the shared production cache across API instances.
-- Configure a real mail transport; the local default writes reset messages to the Laravel log.
+- Local Docker runs Mailpit as a private development inbox: its SMTP listener is available to containers at `mailpit:1025`, and its inbox is bound to the host loopback interface at `http://localhost:8025`.
+- Production must replace the local SMTP values with an authenticated provider through `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_SCHEME`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME`. Never expose Mailpit in production.
 - Use HTTPS, secure encrypted session cookies, exact CORS/Sanctum origins and the existing shared parent-domain deployment contract.
 - Apply migrations `2026_08_11_000020_add_auth_version_to_users_table.php` and `2026_08_11_000021_add_multi_factor_authentication.php`. Existing sessions without a generation intentionally fail closed, requiring one fresh sign-in after deployment.
 
 ## Verification
 
-The portable contract suite validates migrations, middleware order, non-enumerating queuing, fragment-only reset handoff, strong-password rules, credential revocation, challenge storage, entry-path MFA enforcement and volatile web handling. `PhaseNineAccountSecurityTest`, `PhaseTenMultiFactorAuthenticationTest` and `TotpServiceTest` additionally exercise the Laravel broker, RFC vector, enrollment, login, one-time recovery, reset gating, disablement and stale-session rejection when a PHP/PostgreSQL/Redis-capable runtime is available.
+The portable contract suite validates migrations, middleware order, non-enumerating queuing, fragment-only reset handoff, strong-password rules, credential revocation, challenge storage, entry-path MFA enforcement and volatile web handling. `PhaseNineAccountSecurityTest`, `PhaseTenMultiFactorAuthenticationTest` and `TotpServiceTest` additionally exercise recovery for every supported identity role, token expiry and one-time use, replacement-password login, the Laravel broker, RFC vectors, enrollment, reset gating, disablement and stale-session rejection when a PHP/PostgreSQL/Redis-capable runtime is available.

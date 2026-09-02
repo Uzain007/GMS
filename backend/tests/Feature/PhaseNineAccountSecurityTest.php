@@ -2,14 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Jobs\SendPasswordResetLink;
+use App\Models\Gym;
 use App\Models\User;
+use App\Tenancy\TenantContext;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class PhaseNineAccountSecurityTest extends TestCase
@@ -51,6 +55,30 @@ class PhaseNineAccountSecurityTest extends TestCase
         });
     }
 
+    #[DataProvider('recoverableRoles')]
+    public function test_reset_email_is_available_to_every_identity_role(UserRole $role): void
+    {
+        Notification::fake();
+        $user = User::factory()->create([
+            'email' => $role->value.'@example.test',
+            'platform_role' => $role === UserRole::SuperAdmin ? UserRole::SuperAdmin : null,
+        ]);
+
+        if ($role !== UserRole::SuperAdmin) {
+            $gym = Gym::factory()->create();
+            app(TenantContext::class)->run($gym, fn () => $gym->users()->attach($user->id, [
+                'role' => $role->value,
+                'status' => 'active',
+                'joined_at' => now(),
+            ]));
+        }
+
+        (new SendPasswordResetLink($user->email))->handle();
+
+        Notification::assertSentTo($user, ResetPassword::class);
+        $this->assertDatabaseHas('password_reset_tokens', ['email' => $user->email]);
+    }
+
     public function test_valid_reset_replaces_password_and_revokes_every_previous_credential(): void
     {
         $user = User::factory()->create(['email' => 'reset@example.test']);
@@ -87,6 +115,62 @@ class PhaseNineAccountSecurityTest extends TestCase
             ->assertJsonPath('errors.token.0', 'This password reset link is invalid or has expired.');
     }
 
+    public function test_reset_token_expires_and_a_consumed_token_cannot_be_reused(): void
+    {
+        $user = User::factory()->create(['email' => 'one-time@example.test']);
+        $expiredToken = Password::createToken($user);
+
+        $this->travel(((int) config('auth.passwords.users.expire')) + 1)->minutes();
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/reset-password', [
+            'email' => $user->email,
+            'token' => $expiredToken,
+            'password' => 'NewSecurePassword123!',
+            'password_confirmation' => 'NewSecurePassword123!',
+        ])->assertUnprocessable()
+            ->assertJsonPath('errors.token.0', 'This password reset link is invalid or has expired.');
+        $this->travelBack();
+
+        $validToken = Password::createToken($user);
+        $payload = [
+            'email' => $user->email,
+            'token' => $validToken,
+            'password' => 'NewSecurePassword123!',
+            'password_confirmation' => 'NewSecurePassword123!',
+        ];
+
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/reset-password', $payload)
+            ->assertOk();
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/reset-password', $payload)
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.token.0', 'This password reset link is invalid or has expired.');
+    }
+
+    public function test_user_can_log_in_with_new_password_but_not_the_old_password(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'new-password@example.test',
+            'password' => Hash::make('OldSecurePassword123!'),
+        ]);
+        $token = Password::createToken($user);
+
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/reset-password', [
+            'email' => $user->email,
+            'token' => $token,
+            'password' => 'NewSecurePassword123!',
+            'password_confirmation' => 'NewSecurePassword123!',
+        ])->assertOk();
+
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/logout')->assertNoContent();
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/login', [
+            'email' => $user->email,
+            'password' => 'OldSecurePassword123!',
+        ])->assertUnprocessable();
+        $this->withHeaders($this->browserHeaders())->postJson('/api/v1/auth/login', [
+            'email' => $user->email,
+            'password' => 'NewSecurePassword123!',
+        ])->assertOk()->assertJsonPath('data.authentication', 'session');
+    }
+
     public function test_password_change_keeps_current_session_and_revokes_other_credentials(): void
     {
         $user = User::factory()->create();
@@ -121,6 +205,18 @@ class PhaseNineAccountSecurityTest extends TestCase
             ->assertUnauthorized()
             ->assertJsonPath('message', 'This session is no longer valid. Please sign in again.');
         $this->assertGuest();
+    }
+
+    /** @return array<string, array{UserRole}> */
+    public static function recoverableRoles(): array
+    {
+        return [
+            'Super Admin' => [UserRole::SuperAdmin],
+            'Gym Admin' => [UserRole::GymOwner],
+            'Staff / Reception' => [UserRole::Receptionist],
+            'Trainer' => [UserRole::Trainer],
+            'Member' => [UserRole::Member],
+        ];
     }
 
     /** @return array<string, string> */

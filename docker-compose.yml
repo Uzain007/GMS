@@ -22,14 +22,45 @@ services:
     volumes:
       - ironcore_redis:/data
 
+  mailpit:
+    # Local-only SMTP inbox. Production replaces these values with its
+    # authenticated provider and never exposes an inbox port publicly.
+    image: axllent/mailpit:v1.30.6
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    environment:
+      MP_MAX_MESSAGES: 500
+
   api:
     build: ./backend
     env_file: ./backend/.env
+    environment:
+      MAIL_MAILER: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+      mailpit: { condition: service_started }
     ports: ["8000:8000"]
     command: php artisan serve --host=0.0.0.0 --port=8000
+
+  queue:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      MAIL_MAILER: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+      mailpit: { condition: service_started }
+    # Password recovery stays asynchronous and non-enumerating. The worker
+    # runs from the same immutable application image as the API.
+    command: php artisan queue:work redis --queue=default,notifications --sleep=1 --tries=3 --timeout=60
 
 volumes:
   ironcore_postgres:

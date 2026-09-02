@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.49.0 — One-time platform-owner setup |
+| MAD version | 0.50.0 — Production-ready password-reset delivery |
 | Last verified | 2 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | IronCore Beta v0.1 initial Super Admin onboarding implemented locally; approval pending |
+| Active milestone | IronCore Beta v0.1 password-reset email delivery implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -961,7 +961,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Members may access only the member profile explicitly linked to their authenticated `user_id`.
 - Member account invitations can be created only for an unlinked tenant member with a normalized email. Reissuing revokes the previous pending token; acceptance requires a matching unexpired digest and unchanged member email, then consumes the row under a database lock.
 - A new activation creates a platform user only when no user owns the invited email. An existing account is linked without changing its password. Both paths create/update only the `member` role for the invitation gym and regenerate the authenticated web session.
-- Password recovery returns the same accepted response for existing and unknown normalized emails. Reset tokens are one-time, broker-hashed at rest, expiry-bound and placed only in a frontend URL fragment; they never enter query strings, logs, analytics or browser persistence.
+- Password recovery returns the same accepted response for existing and unknown normalized emails. Reset tokens are one-time, broker-hashed at rest, expiry-bound and placed only in a frontend URL fragment; they never enter query strings, logs, analytics or browser persistence. Expiry and resend throttling are deployment-configurable, reset delivery uses the normal Redis queue, local Docker routes SMTP only to its loopback-bound Mailpit inbox, and production must provide an authenticated SMTP transport.
 - Stateful login records the user's current `auth_version`. Every authenticated route compares that session value with the database value before tenant identity is bound; password reset or change advances the version so every stale Redis/database session fails closed on its next request.
 - Password reset revokes all Sanctum tokens before creating the replacement session. Authenticated password change retains only the current context: it updates the current session generation or, for a bearer request, revokes every other personal access token.
 - MFA is optional per platform identity and applies uniformly across super-admin, tenant staff and member roles. It never belongs to a gym and a tenant role cannot enable, disable or inspect another user's factor.
@@ -1088,6 +1088,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| IronCore Beta v0.1 — password-reset email delivery | Implemented locally; approval pending | Keeps the existing non-enumerating, hash-only, expiring and single-use recovery contract while adding a local SMTP inbox, a dedicated Redis queue worker, production-provider environment settings and role-wide recovery/login regression coverage. No tenant schema or permission boundary changes. |
 | IronCore Beta v0.1 — initial Super Admin onboarding | Implemented locally; approval pending | Replaces the fixed demo seeder credential with a stateful, CSRF-protected, rate-limited one-time owner setup; a hash-only deployment key, Redis serialization, no-Super-Admin guard, strong password validation and platform audit evidence preserve existing tenant roles and login flows. |
 | Milestone 1 — responsive super-admin interface | Complete | Representative browser data and automated UI contracts |
 | Milestone 2 — Laravel API, authentication and base tenancy | Complete with hardening carried into M3 | Sanctum, gym CRUD, roles, audit foundation |

@@ -71,6 +71,8 @@ npm test
 
 `npm test` performs the production build, TypeScript type-check and all frontend/backend architecture contract tests. Laravel feature and live PostgreSQL RLS tests run in a PHP/Docker-capable CI or deployment environment.
 
+Run `docker compose up --build` for the complete local stack. Password-reset messages are processed by the Redis queue worker and delivered to the private local inbox at `http://localhost:8025`; Mailpit does not send them to real recipients. Production uses the same application flow with an authenticated SMTP provider configured through environment values.
+
 GitHub pull requests and `main` pushes also run `.github/workflows/quality.yml`. Its backend lane uses an ephemeral non-superuser PostgreSQL role and fails on skipped runtime assertions; see `docs/CI_RUNTIME_GATE.md` for the evidence and branch-protection handoff.
 
 ## Important files
