@@ -5,14 +5,17 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("signed-out users receive real session login before any representative preview", async () => {
+test("signed-out users receive only the real session login", async () => {
   const app = await read("app/ironcore-app.tsx");
   const api = await read("app/lib/ironcore-api.ts");
 
   assert.match(app, /const \[phase, setPhase\].*demoMode \? "anonymous" : "booting"/);
   assert.match(app, /phase === "anonymous" \|\| !user.*<LoginScreen/);
   assert.match(app, /Sign in securely/);
-  for (const role of ["Super Admin", "Gym Admin", "Member"]) assert.match(app, new RegExp(`>${role}<`));
+  assert.match(app, /name="email" type="email" autoComplete="off" required/);
+  assert.match(app, /name="password" type="password" autoComplete="off" required/);
+  assert.doesNotMatch(app, /auth-preview-launch|Explore read-only product previews|onPreview=\{demoMode/);
+  assert.doesNotMatch(app, /admin@ironcore\.test|alice\.owner@ironcore\.test|maya\.member@ironcore\.test|LocalDemo|ChangeMe/i);
   assert.match(api, /async login\(email: string, password: string\)/);
   assert.match(api, /await this\.csrf\(\)/);
   assert.match(api, /credentials:\s*"include"/);
@@ -58,21 +61,10 @@ test("Gym Admin and Member portals keep visible writes connected to tenant APIs"
   assert.match(member, /actions\.onRecordProgress/);
 });
 
-test("representative portals are explicit and read-only", async () => {
+test("demo fixtures cannot be reached through signed-out authentication", async () => {
   const app = await read("app/ironcore-app.tsx");
-  const staff = await read("app/staff-management.tsx");
-  const finance = await read("app/financial-management.tsx");
-  const engagement = await read("app/engagement-management.tsx");
-  const coaching = await read("app/coaching-management.tsx");
-  const member = await read("app/member-portal.tsx");
 
-  for (const fixture of ["demoStaff", "demoFinance", "demoSaasBilling", "demoEngagement", "demoCoaching"]) {
-    assert.match(app, new RegExp(`const ${fixture}:[\\s\\S]*?readOnly: true,`));
-  }
-  assert.match(app, /<MemberPortal data=\{demoMemberPortal\} actions=\{\{\s*readOnly: true/);
-  for (const surface of [staff, finance, engagement, coaching, member]) assert.match(surface, /readOnly\?: boolean/);
-  assert.match(app, /canManageSetup: false/);
-  assert.match(app, /canManageMemberships: false/);
-  assert.doesNotMatch(app, /liveMembers=\{\{[^}]*onInvitePortal/);
-  assert.match(await read("app/ironcore-dashboard.tsx"), /m\.email && live\.onInvitePortal[\s\S]*Preview only/);
+  assert.doesNotMatch(app, /previewActive|setPreviewActive|sharedPreview/);
+  assert.doesNotMatch(app, /onPreview=\{demoMode|Preview gym portal|Preview member portal/);
+  assert.match(app, /if \(!api\) throw new Error\("Live account activation needs the Laravel API deployment to be configured first\."\)/);
 });

@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.50.0 — Production-ready password-reset delivery |
+| MAD version | 0.51.0 — Real-login-only signed-out entry |
 | Last verified | 2 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | IronCore Beta v0.1 password-reset email delivery implemented locally; approval pending |
+| Active milestone | IronCore Beta v0.1 demo login access removed locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -983,7 +983,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - Before normal session bootstrap, configured API mode reads the no-store initial-setup status. An installation without a platform Super Admin renders the owner onboarding form; once platform ownership exists, the unchanged login/recovery flow renders.
 - The setup key and new password stay in form/component memory, are never placed in a URL or browser storage, and are submitted only through the stateful CSRF-protected API path. Validation requires a normalized email and the same strong-password contract used by account recovery.
-- The signed-out web entry is always the real account login screen. Representative Super Admin, Gym Admin and Member previews are explicit secondary choices and never replace, prefill or grant an authenticated session.
+- The signed-out web entry is always the real account login screen. It never renders demo/role-login controls, prefills credentials or grants access without successful server authentication.
 - The Next.js web/PWA uses Sanctum's stateful cookie flow: it first requests `/sanctum/csrf-cookie`, sends `X-XSRF-TOKEN` on mutations and includes credentials on API requests.
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
 - The Laravel session identifier is regenerated after login and invalidated on logout. The session cookie remains encrypted and HttpOnly; bearer tokens are never written to `localStorage` or `sessionStorage`.
@@ -1012,14 +1012,14 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. Class form wall-clock values are converted with the selected gym's IANA timezone, and staff/member schedules render in that gym timezone rather than the device timezone. The same API-sourced numeric Member Code is shown on member lists/profiles, member self-service, the reception QR card and relevant coaching/attendance details; the long business reference is never presented as that visible code. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage. Reception camera scanning prefers a rear mobile camera, permits webcam/USB-camera selection, stops every media track on close and retains the exact numeric Member Code fallback when permission or QR detection is unavailable.
 - Training plans, workout sessions, progress measurements and notification preferences use independent stale-response guards and clear immediately on logout or tenant switch. Staff-entered workout and corrected-measurement wall-clock values are converted with the selected gym's IANA timezone before persistence. Management receives explicit view/edit/delete controls only when Laravel permits them; correction and safe deletion require reasons, and live charts exclude corrected/voided history. The browser never decides trainer/member scope and never stores notification destinations or health/progress history in local storage.
 - Reports use one independently guarded tenant request and clear immediately on logout or tenant switch. Date and currency filters are sent to Laravel, while all aggregation and scope decisions remain server-authoritative.
-- `NEXT_PUBLIC_IRONCORE_DEMO_MODE=true` (or an absent public API origin) keeps the real login screen visible but disables account submission with a clear deployment notice. It also offers separately labelled representative previews; configured API mode exposes only authenticated live modules.
-- Preview mode supplies isolated representative records to the same operational views while labelling them as read-only samples. Write controls, security controls and invitation issuance are hidden or disabled there. Authenticated mode constructs collections exclusively from bounded API responses and exposes a control only when it has a permitted backend action.
+- `NEXT_PUBLIC_IRONCORE_DEMO_MODE=true` (or an absent public API origin) keeps the real login screen visible but disables account submission with a clear deployment notice. It does not expose a demo portal or bypass the Laravel session.
+- Authenticated mode constructs collections exclusively from bounded API responses and exposes a control only when it has a permitted backend action. Internal representative fixtures retained for component development have no signed-out navigation or authentication path.
 - Platform and gym-client portals use distinct landing views and role-aware navigation. The gym dashboard composes only collections already returned for the explicitly selected gym; its cards and navigation are presentational and never grant access or expand the server-authoritative permission scope.
 - Linked members receive a dedicated mobile-first shell for their profile, current membership, billing history, own attendance, classes, training, progress, preferences and access pass. The server resolves every member identifier from the authenticated `user_id`; the client cannot choose or override that link.
 - QR plaintext exists only in authorised response/component memory and no offline cache contains it. Reload, logout or tenant change clears browser memory; a later authorised read safely reconstructs the same active pass server-side from the application key and non-secret row identities.
 - Member activation tokens arrive in the URL fragment, are copied into component memory and removed from the address immediately. Preview and acceptance send the opaque value only in stateful request bodies; no referrer, analytics event or browser persistence receives it.
 - The install manifest provides standalone PWA presentation metadata only. IronCore deliberately defines no offline data cache until a separately reviewed encrypted/offline threat model exists.
-- Representative preview mode may switch between the platform, gym-client and member shells for product review. The switch is labelled as a preview, does not persist tenant data, and is unavailable as an authorization mechanism in configured API mode.
+- Portal switching is available only to an authenticated Super Admin returning from an explicitly selected tenant to the platform workspace; it never creates or replaces an authenticated role.
 - The production frontend is not ready for authenticated acceptance until its build receives a reviewed public HTTPS `NEXT_PUBLIC_IRONCORE_API_URL` and the Laravel API, PostgreSQL, Redis and queue services are reachable. The 18 August 2026 live audit found the deployed Vercel release still serving preview-only mode and the previously expected `api.ironcore.co.uk` hostname unresolved; this is a deployment blocker, not a browser fallback.
 
 ## Currency and money contract
@@ -1088,6 +1088,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| IronCore Beta v0.1 — demo login removal | Implemented locally; approval pending | The public login contains only real email/password and recovery actions. Demo role buttons, credential autofill and API-unavailable preview/activation fallbacks are absent; all roles continue through the unchanged Laravel session and permission flow. |
 | IronCore Beta v0.1 — password-reset email delivery | Implemented locally; approval pending | Keeps the existing non-enumerating, hash-only, expiring and single-use recovery contract while adding a local SMTP inbox, a dedicated Redis queue worker, production-provider environment settings and role-wide recovery/login regression coverage. No tenant schema or permission boundary changes. |
 | IronCore Beta v0.1 — initial Super Admin onboarding | Implemented locally; approval pending | Replaces the fixed demo seeder credential with a stateful, CSRF-protected, rate-limited one-time owner setup; a hash-only deployment key, Redis serialization, no-Super-Admin guard, strong password validation and platform audit evidence preserve existing tenant roles and login flows. |
 | Milestone 1 — responsive super-admin interface | Complete | Representative browser data and automated UI contracts |
@@ -1097,9 +1098,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Branches, members, staff, invitations, plans and memberships API | Implemented; core runtime passing | Tenant composite FKs, RLS, validation, audit and capped pagination are active |
 | Previewed member spreadsheet imports and roster exports | Implemented locally; approval pending | CSV/XLS/XLSX uploads receive category preview before explicit confirmation; clean imports use private tenant paths, Redis and 500-row writes. Tenant and Super Admin exports keep distinct role boundaries and re-enter each gym rather than disabling RLS. |
 | Secure web authentication and tenant selection | Implemented; core runtime passing | Stateful Sanctum/CSRF flow, session rotation, explicit super-admin tenant selection and no browser bearer storage |
-| Real role entry and actionable frontend portals | Local business acceptance complete; production acceptance pending | Login, logout and recovery work for Super Admin, Gym Admin and Member accounts; permission-visible tenant/member writes use existing API methods; representative previews are explicit and read-only |
-| Members frontend/API integration | Implemented; local acceptance passing | Tenant route/header agreement, capped server search, loading/error/empty states, creation, portal invitation and audited profile/lifecycle editing; demo preview remains isolated |
-| Branch, plan and membership frontend/API integration | Implemented; local acceptance passing | Parallel bounded reads, role-aware creation and audited edits/status transitions, exact minor-unit prices and immutable accepted snapshots; isolated preview navigation renders representative rows |
+| Real role entry and actionable frontend portals | Local business acceptance complete; production acceptance pending | Login, logout and recovery work for Super Admin, Gym Admin, Trainer/Staff and Member accounts; permission-visible tenant/member writes use existing API methods; no demo role entry is exposed |
+| Members frontend/API integration | Implemented; local acceptance passing | Tenant route/header agreement, capped server search, loading/error/empty states, creation, portal invitation and audited profile/lifecycle editing |
+| Branch, plan and membership frontend/API integration | Implemented; local acceptance passing | Parallel bounded reads, role-aware creation and audited edits/status transitions, exact minor-unit prices and immutable accepted snapshots |
 | Staff, trainer and invitation frontend/API integration | Implemented locally; full quality and browser acceptance passing | Tenant directory, immediate trainer creation/account setup, private profile images, branch assignment, active-status dropdown propagation, dependency-safe deletion, pending invitations and hierarchy-safe audited edits |
 | Milestone 3 — gym, member and staff operations | Feature-complete; core runtime passing | Browser/API contracts and GitHub-hosted Laravel/PostgreSQL/Redis tests pass |
 | Tenant invoices and immutable payment/refund ledger | Implemented locally; approval pending | Server totals, Paid cash/terminal records, pending/reviewed private bank receipts, optional hosted checkout, refunds and currency summaries |

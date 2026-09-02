@@ -50,7 +50,7 @@ test("renders development preview metadata", async () => {
   } else {
     assert.match(html, /Sign in to IronCore/i);
     assert.match(html, /Sign in securely/i);
-    assert.match(html, /Explore read-only product previews/i);
+    assert.doesNotMatch(html, /Explore read-only product previews|Super Admin<\/button>|Gym Admin<\/button>|Member<\/button>/i);
   }
 });
 

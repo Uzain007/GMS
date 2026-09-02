@@ -258,6 +258,10 @@ const demoMemberPortal: MemberPortalData = {
   error: null,
 };
 
+// Keep isolated visual fixtures type-checked without exposing a runtime route
+// from the public login or any authenticated role boundary.
+void [demoOperations, demoStaff, demoFinance, demoSaasBilling, demoMemberPortal];
+
 function isoDate(date: Date): string { return date.toISOString().slice(0, 10); }
 
 function initialReportRange(): { from: string; to: string } {
@@ -436,7 +440,7 @@ function InitialSuperAdminSetup({ available, busy, error, onCreate }: {
   </main>;
 }
 
-function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error, liveApiConfigured = true, onPreview }: {
+function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error, liveApiConfigured = true }: {
   onLogin: (email: string, password: string) => Promise<void>;
   onRequestReset: (email: string) => Promise<void>;
   onReset: (secret: PasswordResetSecret, password: string) => Promise<void>;
@@ -448,7 +452,6 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
   busy: boolean;
   error: string | null;
   liveApiConfigured?: boolean;
-  onPreview?: (portal: "platform" | "gym" | "member") => void;
 }) {
   const [mode, setMode] = useState<"login" | "forgot" | "reset" | "mfa">(challenge ? "mfa" : resetSecret ? "reset" : "login");
   const [localBusy, setLocalBusy] = useState(false);
@@ -501,7 +504,7 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
         <div className="auth-mobile-brand"><Brand /></div>
         <p className="eyebrow">{mode === "login" ? "Welcome back" : mode === "mfa" ? "Multi-factor authentication" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
         {(mode === "login" || mode === "mfa" ? error : localError) && <div className="form-error" role="alert">{mode === "login" || mode === "mfa" ? error : localError}</div>}
-        {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Live account access is not configured on this deployment yet. The previews below remain separate from real tenant data.</div>}
+        {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Live account access needs the Laravel API deployment to be configured first.</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}
         {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="off" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
         {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="off" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
@@ -509,7 +512,6 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
         {mode === "mfa" && <div className="mfa-login-fields"><label>{useRecovery ? "Recovery code" : "6-digit code"}<input name="verification" inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" pattern={useRecovery ? undefined : "[0-9]{6}"} minLength={useRecovery ? 16 : 6} maxLength={useRecovery ? 64 : 6} required autoFocus /></label><button className="auth-forgot" type="button" onClick={() => setUseRecovery((current) => !current)}>Use {useRecovery ? "authenticator code" : "a recovery code"}</button></div>}
         <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : mode === "reset" ? "Reset password securely" : "Verify and continue"} <ArrowRight size={17} /></>}</button>
         {mode !== "login" && <button className="auth-back" type="button" onClick={() => { if (mode === "reset") onCancelReset?.(); if (mode === "mfa") onCancelMfa?.(); setMode("login"); setNotice(null); setLocalError(null); }}>Back to sign in</button>}
-        {mode === "login" && onPreview && <div className="auth-preview-launch"><span>Explore read-only product previews</span><div><button type="button" onClick={() => onPreview("platform")}>Super Admin</button><button type="button" onClick={() => onPreview("gym")}>Gym Admin</button><button type="button" onClick={() => onPreview("member")}>Member</button></div></div>}
         <small>{mode === "reset" ? "This one-time reset value was removed from the address and is held only in memory." : mode === "mfa" ? "This five-minute challenge is held only in memory and disappears if you leave or reload." : "IronCore uses an encrypted, HttpOnly session cookie. Your credentials are never stored in this browser."}</small>
       </form>
     </section>
@@ -531,8 +533,6 @@ export function IronCoreApp() {
     disable: (currentPassword, value, recovery) => api.disableMfa(currentPassword, value, recovery),
   }) : undefined, [api]);
   const defaultReportRange = useMemo(() => initialReportRange(), []);
-  const [demoPortal, setDemoPortal] = useState<"platform" | "gym" | "member">("platform");
-  const [previewActive, setPreviewActive] = useState(false);
   const [phase, setPhase] = useState<"booting" | "setup" | "anonymous" | "authenticated">(demoMode ? "anonymous" : "booting");
   const [initialSetup, setInitialSetup] = useState<InitialSetupStatus | null>(null);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
@@ -677,17 +677,12 @@ export function IronCoreApp() {
   }, [activationChecked, loadSession, memberActivation, mfaChallenge, passwordReset]);
 
   const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
-    if (!api) return { gym_name: "Forge Fitness", member_first_name: "Amelia", masked_email: "a*****@example.com", existing_account: false };
+    if (!api) throw new Error("Live account activation needs the Laravel API deployment to be configured first.");
     return api.previewMemberAccountActivation(gymId, token);
   }, [api]);
 
   const acceptMemberActivation = useCallback(async (gymId: string, token: string, password?: string): Promise<void> => {
-    if (!api) {
-      setMemberActivation(null);
-      setDemoPortal("member");
-      setPreviewActive(true);
-      return;
-    }
+    if (!api) throw new Error("Live account activation needs the Laravel API deployment to be configured first.");
     const result = await api.acceptMemberAccountActivation(gymId, token, password);
     if (result.authentication === "mfa_challenge") setMfaChallenge(result);
     setMemberActivation(null);
@@ -964,11 +959,7 @@ export function IronCoreApp() {
   }
 
   async function resetAccountPassword(secret: PasswordResetSecret, password: string): Promise<void> {
-    if (!api) {
-      setPasswordReset(null);
-      setDemoPortal("member");
-      return;
-    }
+    if (!api) throw new Error("Live account recovery needs the Laravel API deployment to be configured first.");
     const result = await api.resetPassword(secret.email, secret.token, password);
     setUser(null);
     setSelectedGym(null);
@@ -1383,54 +1374,12 @@ export function IronCoreApp() {
 
   const reportData: ReportData = { ...reports, onApply: applyReportFilters, onReload: reloadReport };
 
-  if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => { setMemberActivation(null); if (demoMode) setDemoPortal("platform"); }} />;
-  if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
-  if (mfaChallenge) return <LoginScreen key={mfaChallenge.challenge_token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} challenge={mfaChallenge} onVerifyMfa={verifyMfa} onCancelMfa={() => { setMfaChallenge(null); setAuthError(null); setPhase(demoMode ? "authenticated" : "anonymous"); }} busy={authBusy} error={authError} />;
-  if (demoMode && previewActive) {
-    const sharedPreview = { liveOperations: demoOperations, liveStaff: demoStaff, liveFinance: demoFinance, liveEngagement: demoEngagement, liveCoaching: demoCoaching, liveReports: reportData };
-    if (demoPortal === "member") return <MemberPortal data={demoMemberPortal} actions={{
-      readOnly: true,
-      onReload: () => undefined,
-      onLogout: () => setPreviewActive(false),
-      onChangePassword: async () => undefined,
-      onPortalSwitch: () => setDemoPortal("platform"),
-      portalSwitchLabel: "Back to Super Admin",
-      onUpdateProfile: async () => undefined,
-      onEnsureCredential: async () => ({ ...demoMemberPortal.credential!, credential: "preview-disabled" }),
-      onRotateCredential: async () => ({ ...demoMemberPortal.credential!, credential: "preview-disabled" }),
-      onSubmitPayment: async () => null,
-      onLoadPaymentReceipt: async () => new Blob(),
-      onBookClass: async () => undefined,
-      onCancelBooking: async () => undefined,
-      onLogWorkout: async () => undefined,
-      onRecordProgress: async () => undefined,
-      onUpdatePreferences: async () => undefined,
-    }} />;
-    if (demoPortal === "gym") return <IronCoreDashboard key="gym-preview"
-      {...sharedPreview}
-      portalMode="gym"
-      operator={{ name: "Aisha Khan", role: "Gym Owner" }}
-      activeGym={{ id: "demo-gym", name: "Forge Fitness" }}
-      gymOptions={[{ id: "demo-gym", name: "Forge Fitness" }]}
-      liveMembers={{ rows: demoMembers, total: 2841, loading: false, error: null, onSearch: () => undefined, onReload: () => undefined }}
-      liveSaasBilling={{ ...demoSaasBilling, actorRole: "gym_owner" }}
-      tenantViews={["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", "coaching", "payments", "billing", "reports", "staff"]}
-      onPortalSwitch={() => setDemoPortal("member")}
-      portalSwitchLabel="Preview member portal"
-      onLogout={() => setPreviewActive(false)}
-    />;
-    return <IronCoreDashboard key="platform-preview"
-      {...sharedPreview}
-      portalMode="platform"
-      liveSaasBilling={demoSaasBilling}
-      onPortalSwitch={() => setDemoPortal("gym")}
-      portalSwitchLabel="Preview gym portal"
-      onLogout={() => setPreviewActive(false)}
-    />;
-  }
+  if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => setMemberActivation(null)} />;
+  if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase("anonymous"); }} busy={authBusy} error={authError} />;
+  if (mfaChallenge) return <LoginScreen key={mfaChallenge.challenge_token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} challenge={mfaChallenge} onVerifyMfa={verifyMfa} onCancelMfa={() => { setMfaChallenge(null); setAuthError(null); setPhase("anonymous"); }} busy={authBusy} error={authError} />;
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
   if (phase === "setup") return <InitialSuperAdminSetup available={Boolean(initialSetup?.setup_available)} busy={authBusy} error={authError} onCreate={createInitialSuperAdmin} />;
-  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} liveApiConfigured={Boolean(api)} onPreview={demoMode ? (portal) => { setDemoPortal(portal); setPreviewActive(true); setAuthError(null); } : undefined} />;
+  if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} liveApiConfigured={Boolean(api)} />;
   if (user.platform_role === "super_admin" && !selectedGym) return <PlatformPortal data={{
     user,
     gyms,

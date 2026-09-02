@@ -42,21 +42,17 @@ test("authenticated mode exposes only integrated tenant modules", async () => {
   for (const resource of ["branches", "membership-plans", "memberships"]) assert.match(client, new RegExp(`tenantCollection<.*>\\(gymId, "${resource}"\\)`));
   assert.match(operations, /Number\(match\[1\]\) \* 100/);
   assert.match(app, /NEXT_PUBLIC_IRONCORE_DEMO_MODE/);
-  assert.match(app, /liveSaasBilling=\{demoSaasBilling\}/);
+  assert.doesNotMatch(app, /auth-preview-launch|previewActive|sharedPreview/);
 });
 
-test("preview navigation renders operations and attendance keeps readable columns", async () => {
+test("attendance keeps readable columns without exposing preview navigation", async () => {
   const app = await read("app/ironcore-app.tsx");
   const dashboard = await read("app/ironcore-dashboard.tsx");
   const operations = await read("app/tenant-operations.tsx");
   const engagement = await read("app/engagement-management.tsx");
   const styles = await read("app/globals.css");
 
-  assert.match(app, /const demoOperations: OperationData/);
-  assert.match(app, /sharedPreview = \{ liveOperations: demoOperations/);
-  for (const record of ["Manchester Central", "Unlimited", "demo-membership-1"]) {
-    assert.match(app, new RegExp(record));
-  }
+  assert.doesNotMatch(app, /sharedPreview|setPreviewActive|Explore read-only product previews/);
   for (const view of ["branches", "plans", "memberships"]) {
     assert.match(dashboard, new RegExp(`view === "${view}" && liveOperations`));
   }
@@ -90,8 +86,7 @@ test("gym-client portal has a distinct tenant dashboard without expanding browse
   assert.match(dashboard, /PostgreSQL RLS remain authoritative/);
   assert.match(app, /\["gym-dashboard", "members", "branches"/);
   assert.match(app, /portalMode="gym"/);
-  assert.match(app, /Preview gym portal/);
-  assert.match(app, /Back to Super Admin/);
+  assert.match(app, /Back to platform/);
   assert.match(gymOverview, /Selected-gym data only/);
   assert.match(gymOverview, /availableViews\.includes\(view\)/);
   assert.doesNotMatch(gymOverview, /fetch\(|localStorage|sessionStorage|gym_id/);
