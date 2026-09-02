@@ -18,6 +18,7 @@ import {
   IronCoreApi,
   IronCoreApiError,
   type AuthenticatedUser,
+  type InitialSetupStatus,
   type GymSummary,
   type IronCoreRole,
   type MemberRecord,
@@ -380,6 +381,61 @@ function Brand() {
   return <div className="auth-brand"><span><i /><strong>IC</strong></span><b>IRONCORE</b></div>;
 }
 
+function InitialSuperAdminSetup({ available, busy, error, onCreate }: {
+  available: boolean;
+  busy: boolean;
+  error: string | null;
+  onCreate: (input: { setup_key: string; name: string; email: string; password: string; password_confirmation: string }) => Promise<void>;
+}) {
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const password = String(data.get("password"));
+    const confirmation = String(data.get("password_confirmation"));
+    if (password !== confirmation) {
+      setLocalError("The password confirmation does not match.");
+      return;
+    }
+    setLocalError(null);
+    await onCreate({
+      setup_key: String(data.get("setup_key")),
+      name: String(data.get("name")),
+      email: String(data.get("email")),
+      password,
+      password_confirmation: confirmation,
+    });
+  }
+
+  return <main className="auth-page">
+    <section className="auth-story">
+      <Brand />
+      <div><p className="eyebrow">First-time setup</p><h1>Secure the IronCore platform.</h1><p>Create the owner account that will manage gyms, subscriptions and platform security.</p></div>
+      <ul><li><ShieldCheck size={17} /> One-time platform claim</li><li><LockKeyhole size={17} /> Strong encrypted credentials</li><li><Building2 size={17} /> Tenant roles stay separate</li></ul>
+    </section>
+    <section className="auth-form-side">
+      <form className="auth-card initial-setup-card" onSubmit={submit}>
+        <div className="auth-mobile-brand"><Brand /></div>
+        <p className="eyebrow">Platform ownership</p>
+        <h2>Create the first Super Admin</h2>
+        <p>This screen closes permanently after the first Super Admin is created.</p>
+        {(error || localError) && <div className="form-error" role="alert">{error || localError}</div>}
+        {!available && <div className="form-error" role="alert">Owner setup is not configured. Add the setup-key hash to the Laravel deployment, then reload this page.</div>}
+        <label>Owner setup key<input name="setup_key" type="password" autoComplete="off" required minLength={32} maxLength={512} disabled={!available} autoFocus /></label>
+        <label>Full name<input name="name" type="text" autoComplete="name" required minLength={2} maxLength={160} disabled={!available} /></label>
+        <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="owner@yourcompany.com" disabled={!available} /></label>
+        <label>New password<span className="initial-password-control"><input name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={12} maxLength={255} disabled={!available} /><button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={`${showPassword ? "Hide" : "Show"} password`}>{showPassword ? "Hide" : "Show"}</button></span></label>
+        <label>Confirm password<input name="password_confirmation" type={showPassword ? "text" : "password"} autoComplete="new-password" required minLength={12} maxLength={255} disabled={!available} /></label>
+        <small className="initial-password-help">Use 12+ characters with upper and lower case letters, a number and a symbol.</small>
+        <button className="primary-button auth-submit" disabled={busy || !available} type="submit">{busy ? <><LoaderCircle className="spin" size={17} /> Creating secure account</> : <>Create Super Admin <ArrowRight size={17} /></>}</button>
+        <small>The setup key and password are sent only to the configured Laravel API and are never stored in this browser.</small>
+      </form>
+    </section>
+  </main>;
+}
+
 function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error, liveApiConfigured = true, onPreview }: {
   onLogin: (email: string, password: string) => Promise<void>;
   onRequestReset: (email: string) => Promise<void>;
@@ -441,14 +497,14 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
       <ul><li><ShieldCheck size={17} /> Tenant-isolated workspaces</li><li><LockKeyhole size={17} /> Encrypted session authentication</li><li><Building2 size={17} /> Built for multi-location scale</li></ul>
     </section>
     <section className="auth-form-side">
-      <form className="auth-card" onSubmit={submit}>
+      <form className="auth-card" onSubmit={submit} autoComplete="off">
         <div className="auth-mobile-brand"><Brand /></div>
         <p className="eyebrow">{mode === "login" ? "Welcome back" : mode === "mfa" ? "Multi-factor authentication" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
         {(mode === "login" || mode === "mfa" ? error : localError) && <div className="form-error" role="alert">{mode === "login" || mode === "mfa" ? error : localError}</div>}
         {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Live account access is not configured on this deployment yet. The previews below remain separate from real tenant data.</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}
-        {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="email" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
-        {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="current-password" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
+        {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="off" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
+        {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="off" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
         {mode === "reset" && <div className="recovery-fields"><label>New password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={255} autoFocus /></label><label>Confirm new password<input name="password_confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><small>Use 12+ characters with upper and lower case letters, a number and a symbol.</small></div>}
         {mode === "mfa" && <div className="mfa-login-fields"><label>{useRecovery ? "Recovery code" : "6-digit code"}<input name="verification" inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" pattern={useRecovery ? undefined : "[0-9]{6}"} minLength={useRecovery ? 16 : 6} maxLength={useRecovery ? 64 : 6} required autoFocus /></label><button className="auth-forgot" type="button" onClick={() => setUseRecovery((current) => !current)}>Use {useRecovery ? "authenticator code" : "a recovery code"}</button></div>}
         <button className="primary-button auth-submit" disabled={working} type="submit">{working ? <><LoaderCircle className="spin" size={17} /> Securing account</> : <>{mode === "login" ? "Sign in securely" : mode === "forgot" ? "Send reset instructions" : mode === "reset" ? "Reset password securely" : "Verify and continue"} <ArrowRight size={17} /></>}</button>
@@ -477,7 +533,8 @@ export function IronCoreApp() {
   const defaultReportRange = useMemo(() => initialReportRange(), []);
   const [demoPortal, setDemoPortal] = useState<"platform" | "gym" | "member">("platform");
   const [previewActive, setPreviewActive] = useState(false);
-  const [phase, setPhase] = useState<"booting" | "anonymous" | "authenticated">(demoMode ? "anonymous" : "booting");
+  const [phase, setPhase] = useState<"booting" | "setup" | "anonymous" | "authenticated">(demoMode ? "anonymous" : "booting");
+  const [initialSetup, setInitialSetup] = useState<InitialSetupStatus | null>(null);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [gyms, setGyms] = useState<GymAccess[]>([]);
   const [platformPlans, setPlatformPlans] = useState<SaasPlanRecord[]>([]);
@@ -560,6 +617,15 @@ export function IronCoreApp() {
     setPlatformLoading(true);
     setPlatformError(null);
     try {
+      const setup = await api.initialSetupStatus();
+      setInitialSetup(setup);
+      if (setup.setup_required) {
+        setUser(null);
+        setGyms([]);
+        setSelectedGym(null);
+        setPhase("setup");
+        return;
+      }
       let identity = await api.me();
       const invitation = pendingInvitation();
       if (invitation) {
@@ -866,6 +932,18 @@ export function IronCoreApp() {
     }
     catch (error) { setAuthError(apiMessage(error, "Sign-in failed.")); }
     finally { setAuthBusy(false); }
+  }
+
+  async function createInitialSuperAdmin(input: { setup_key: string; name: string; email: string; password: string; password_confirmation: string }): Promise<void> {
+    if (!api) return;
+    setAuthBusy(true); setAuthError(null);
+    try {
+      await api.createInitialSuperAdmin(input);
+      setPhase("booting");
+      await loadSession();
+    } catch (error) {
+      setAuthError(apiMessage(error, "The Super Admin account could not be created."));
+    } finally { setAuthBusy(false); }
   }
 
   async function verifyMfa(challenge: MfaChallenge, value: string, recovery: boolean): Promise<void> {
@@ -1351,6 +1429,7 @@ export function IronCoreApp() {
     />;
   }
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
+  if (phase === "setup") return <InitialSuperAdminSetup available={Boolean(initialSetup?.setup_available)} busy={authBusy} error={authError} onCreate={createInitialSuperAdmin} />;
   if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} liveApiConfigured={Boolean(api)} onPreview={demoMode ? (portal) => { setDemoPortal(portal); setPreviewActive(true); setAuthError(null); } : undefined} />;
   if (user.platform_role === "super_admin" && !selectedGym) return <PlatformPortal data={{
     user,

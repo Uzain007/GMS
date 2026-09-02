@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.48.0 — Tenant-safe branch management workspace |
-| Last verified | 31 August 2026 |
+| MAD version | 0.49.0 — One-time platform-owner setup |
+| Last verified | 2 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Post-Milestone 26 branch management workflow implemented locally; approval pending |
+| Active milestone | IronCore Beta v0.1 initial Super Admin onboarding implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -755,6 +755,13 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - The plaintext challenge is never a cache key or database value. Verification is serialized with a cache lock, limited to five failed codes and deleted before a session or bearer token is issued.
 - Password reset, MFA enablement/disablement and any other authentication-generation change invalidate older challenges because the cached generation must equal the locked user row.
 
+### Initial platform-owner setup lock
+
+- A fresh installation reports only whether a platform Super Admin exists and whether a valid setup-key digest is configured. It never returns the digest or any configured value.
+- The deployment secret manager stores only the lowercase SHA-256 digest of a high-entropy owner setup key. The owner enters the plaintext key once; it is held only in the request and compared in constant time.
+- Creation is serialized across API replicas with the platform-wide Redis lock `ironcore:platform:initial-super-admin`, then rechecks for a platform Super Admin inside the lock. An existing Super Admin permanently closes public setup, preventing setup from becoming a role-escalation or account-recovery path; existing tenant identities cannot be upgraded through this route.
+- Successful setup creates exactly one platform-owned `super_admin`, records platform audit evidence, regenerates the encrypted browser session and never creates a `gym_user` tenant role.
+
 ## Active relationships
 
 - `Gym belongsToMany User` through `gym_user` with `role`, `status`, `joined_at` and timestamps.
@@ -799,6 +806,8 @@ All successful JSON payloads are versioned under `/api/v1`.
 
 | Method | Endpoint | Middleware / permission | Purpose |
 | --- | --- | --- | --- |
+| GET | `/setup/super-admin` | public setup-status throttle; no-store response | Report whether the installation has no platform Super Admin and whether its server-side setup-key digest is configured |
+| POST | `/setup/super-admin` | stateful browser origin + initial-setup throttle + configured owner key; only while no Super Admin exists | Atomically create the first platform `super_admin`, audit the claim and start one regenerated encrypted web session |
 | POST | `/auth/login` | login throttle + stateful Sanctum middleware for browser origins | Start an encrypted server-side web session by default; issue a scoped bearer token only when a native client explicitly sends `use_bearer_token: true` |
 | POST | `/auth/mfa/challenge` | public MFA-challenge throttle; opaque five-minute challenge | Complete a pending login with one non-replayed TOTP value or consume one recovery code before any session/token is issued |
 | POST | `/auth/forgot-password` | recovery throttle; public | Always acknowledge a syntactically valid normalized email identically, while Laravel conditionally sends a one-time reset fragment |
@@ -937,6 +946,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - A tenant role is valid only within its own `(gym_id, user_id)` membership.
 - `super_admin` is a platform role and must not be stored as a tenant pivot role.
+- Initial owner setup can assign `super_admin` only while no Super Admin exists; tenant identities do not block platform ownership setup, existing identities cannot be upgraded through this route, and it is never a replacement for account recovery.
 - Role changes, cash/manual payment creation, bank-transfer review, membership price changes and refunds require audit evidence.
 - Receptionists and managers may record payments but cannot issue refunds or manage provider onboarding; only a gym owner or super admin may do so.
 - Only `super_admin` manages the platform plan catalogue. A gym owner may start or manage its selected gym subscription; managers have read-only billing visibility.
@@ -971,6 +981,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 ## Web authentication and tenant-selection contract
 
+- Before normal session bootstrap, configured API mode reads the no-store initial-setup status. An installation without a platform Super Admin renders the owner onboarding form; once platform ownership exists, the unchanged login/recovery flow renders.
+- The setup key and new password stay in form/component memory, are never placed in a URL or browser storage, and are submitted only through the stateful CSRF-protected API path. Validation requires a normalized email and the same strong-password contract used by account recovery.
 - The signed-out web entry is always the real account login screen. Representative Super Admin, Gym Admin and Member previews are explicit secondary choices and never replace, prefill or grant an authenticated session.
 - The Next.js web/PWA uses Sanctum's stateful cookie flow: it first requests `/sanctum/csrf-cookie`, sends `X-XSRF-TOKEN` on mutations and includes credentials on API requests.
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
@@ -1061,6 +1073,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The object-storage runtime gate uses disposable non-secret credentials and an ephemeral S3-compatible emulator. It executes the production member-export and expiry jobs over HTTP, checks the private tenant-prefixed object, stored digest/size and byte deletion, and never contacts production storage. Provider encryption, bucket policy, lifecycle configuration and restore evidence remain deployment-environment gates.
 - The synthetic database restore drill proves repository schema/data restoration mechanics and forced-RLS continuity without production data or credentials. It does not prove a provider's encrypted backup schedule, point-in-time recovery, retention, cross-region recovery, RPO/RTO or operational cutover; those remain deployment-environment gates.
 - Before a production release runs migrations or receives traffic, `php artisan ironcore:production-preflight` must pass against Laravel's resolved configuration. The command fails closed on debug/non-production mode, an invalid application key, non-HTTPS public origins, unsafe cross-origin session/CORS/Sanctum settings, missing trusted proxies, a privileged/non-PostgreSQL runtime identity, non-Redis cache/session/queues, insecure database or Redis transport, non-private object storage configuration, partially configured optional Stripe flows, non-delivering mail, local-only logging or partially configured notification adapters.
+- A new production installation must place only a valid SHA-256 setup-key digest in `INITIAL_SUPER_ADMIN_SETUP_KEY_HASH` before traffic is enabled and deliver the plaintext high-entropy key directly to the owner. The already-closed endpoint remains unavailable after the first Super Admin exists; the plaintext value is never committed, logged or stored by IronCore.
 - Production web builds must separately run `npm run preflight:production-web`. It rejects representative demo mode, missing/non-public HTTPS API origins and missing immutable full-SHA release identity. This build-time check receives public deployment metadata only and never accepts a backend or provider secret.
 - Both preflights report only stable configuration names and requirements; they never print configured values. Passing them proves configuration shape only. Provider sandbox execution, service connectivity, provider backup/storage controls, monitored topology, privacy approval, branch protection and production capacity evidence remain separate launch gates.
 - The hosted backend gate runs password recovery and tenant notification jobs through Redis against a disposable loopback-only SMTP/HTTPS transport. SMTP authentication, HTTPS bearer authorization, email/SMS/push payloads and provider IDs use synthetic CI-only values; no production provider or credential is contacted.
@@ -1075,6 +1088,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| IronCore Beta v0.1 — initial Super Admin onboarding | Implemented locally; approval pending | Replaces the fixed demo seeder credential with a stateful, CSRF-protected, rate-limited one-time owner setup; a hash-only deployment key, Redis serialization, no-Super-Admin guard, strong password validation and platform audit evidence preserve existing tenant roles and login flows. |
 | Milestone 1 — responsive super-admin interface | Complete | Representative browser data and automated UI contracts |
 | Milestone 2 — Laravel API, authentication and base tenancy | Complete with hardening carried into M3 | Sanctum, gym CRUD, roles, audit foundation |
 | MAD and repository enforcement | Active | Root `AGENTS.md` requires this document before source changes |

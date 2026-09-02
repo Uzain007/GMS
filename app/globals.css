@@ -123,6 +123,13 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:3px soli
 .recovery-fields { display:grid; gap:12px; }.recovery-fields>small { margin-top:-4px; color:#918e99; font-size:7.5px; line-height:1.5; }
 .mfa-login-fields { display:grid; gap:2px; }.mfa-login-fields .auth-forgot { margin-top:6px; }
 .auth-card>small { display:block; margin-top:16px; color:#989aa5; font-size:8px; line-height:1.6; text-align:center; }
+.initial-setup-card>label{margin-top:16px}
+.initial-password-control{position:relative;display:block;width:100%}
+.initial-password-control input{width:100%;padding-right:64px}
+.initial-password-control button{position:absolute;top:50%;right:7px;min-width:48px;min-height:34px;transform:translateY(-50%);border:0;border-radius:7px;background:transparent;color:#6843c2;font:inherit;font-size:var(--text-xs);font-weight:720;cursor:pointer}
+.initial-password-control button:hover{background:#f1ecfb}
+.initial-password-control button:focus-visible{outline:2px solid #805fe0;outline-offset:1px}
+.initial-setup-card .initial-password-help{margin-top:10px;text-align:left}
 .auth-mobile-brand { display:none; margin-bottom:30px; }
 .form-error { margin:12px 0; border:1px solid #f0cac5; border-radius:9px; background:#fff3f1; padding:10px 12px; color:#aa493f; font-size:9px; line-height:1.5; }
 .spin { animation:spin .9s linear infinite; }

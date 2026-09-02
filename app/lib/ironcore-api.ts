@@ -27,6 +27,8 @@ export type SessionAuthentication = {
 };
 
 export type AuthenticationResult = SessionAuthentication | MfaChallenge;
+export type InitialSetupStatus = { setup_required: boolean; setup_available: boolean };
+export type InitialSuperAdmin = { setup_key: string; name: string; email: string; password: string; password_confirmation: string };
 export type MfaStatus = { enabled: boolean; setup_pending: boolean; confirmed_at: string | null; recovery_codes_remaining: number };
 export type MfaSetup = { secret: string; otpauth_uri: string; issuer: string; account: string };
 export type MfaRecoveryCodes = { recovery_codes: string[]; recovery_codes_remaining: number };
@@ -283,6 +285,18 @@ export class IronCoreApi {
 
   async csrf(): Promise<void> {
     await this.request<void>("/sanctum/csrf-cookie");
+  }
+
+  async initialSetupStatus(): Promise<InitialSetupStatus> {
+    return (await this.request<ApiEnvelope<InitialSetupStatus>>("/api/v1/setup/super-admin")).data;
+  }
+
+  async createInitialSuperAdmin(input: InitialSuperAdmin): Promise<SessionAuthentication> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<SessionAuthentication>>("/api/v1/setup/super-admin", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })).data;
   }
 
   async login(email: string, password: string): Promise<AuthenticationResult> {

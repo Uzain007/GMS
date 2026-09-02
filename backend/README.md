@@ -19,10 +19,13 @@ php artisan migrate --seed
 php artisan serve
 ```
 
+Fresh installations no longer create a fixed demo login. Before opening the site, generate a high-entropy one-time owner setup key, place only its SHA-256 hex digest in `INITIAL_SUPER_ADMIN_SETUP_KEY_HASH`, and give the plaintext key directly to the owner. The web app will guide the owner through creating the first Super Admin; the setup endpoint closes permanently as soon as a Super Admin exists. Tenant accounts created before platform ownership do not block this setup.
+
 The API is available below `/api/v1`. Authentication uses Laravel Sanctum. Every tenant request must resolve a gym and pass server-side membership checks; sending a different `X-Gym-ID` is never sufficient to gain access.
 
 ## Current endpoints
 
+- `GET|POST /api/v1/setup/super-admin` — first owner only, while no Super Admin exists
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
 - `POST /api/v1/auth/logout`

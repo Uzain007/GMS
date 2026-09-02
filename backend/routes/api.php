@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\ClassBookingController;
 use App\Http\Controllers\Api\V1\ClassSessionController;
 use App\Http\Controllers\Api\V1\GymController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\InitialSuperAdminController;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\MemberController;
 use App\Http\Controllers\Api\V1\MemberDataExportController;
@@ -38,6 +39,11 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     Route::get('/health/readiness', [HealthController::class, 'readiness'])
         ->middleware('throttle:health');
+
+    Route::get('/setup/super-admin', [InitialSuperAdminController::class, 'status'])
+        ->middleware('throttle:initial-setup-status');
+    Route::post('/setup/super-admin', [InitialSuperAdminController::class, 'store'])
+        ->middleware('throttle:initial-setup');
 
     // Stripe signs the raw request before a narrow provider-account RLS lookup
     // resolves the event into the normal tenant context.

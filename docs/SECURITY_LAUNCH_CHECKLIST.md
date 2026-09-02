@@ -7,6 +7,7 @@ The release owner must record evidence for every item before production traffic.
 - [ ] `APP_DEBUG=false`; no secrets, provider payloads, card data or notification destinations appear in logs.
 - [ ] HTTPS is enforced; proxy trust, HSTS, exact CORS/Sanctum origins, secure/HttpOnly/SameSite cookies and CSRF are verified.
 - [ ] Super-admin accounts use strong MFA/SSO controls; owner/manager/receptionist/trainer/member permissions are least privilege.
+- [ ] Fresh-install owner setup uses a directly transferred high-entropy key whose SHA-256 digest alone is in the secret manager; exactly one Super Admin is created, the second claim is refused and no fixed demo credential exists.
 - [ ] Login, report, webhook and readiness rate limits are active and observed behind the real proxy/CDN.
 - [ ] Stripe webhook signatures, idempotency, narrow opaque-account/customer lookup and separate Connect/Billing secrets are verified.
 - [ ] PostgreSQL PITR, encrypted backups and an isolated restore drill meet the agreed RPO/RTO.

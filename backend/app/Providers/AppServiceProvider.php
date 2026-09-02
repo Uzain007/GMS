@@ -22,6 +22,16 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(5)->by(mb_strtolower((string) $request->input('email')).'|'.$request->ip()),
         ]);
 
+        RateLimiter::for('initial-setup-status', fn (Request $request) => [
+            Limit::perMinute(30)->by($request->ip()),
+        ]);
+
+        RateLimiter::for('initial-setup', fn (Request $request) => [
+            // Setup-key guesses are bounded by source IP. The key itself never
+            // enters limiter storage, cache keys or application logs.
+            Limit::perMinute(5)->by($request->ip()),
+        ]);
+
         RateLimiter::for('recovery', fn (Request $request) => [
             Limit::perMinute(5)->by(mb_strtolower((string) $request->input('email')).'|'.$request->ip()),
         ]);

@@ -4,6 +4,7 @@ IronCore is a multi-tenant gym-management SaaS for platform owners, gym teams an
 
 ## Included in this milestone
 
+- One-time first-owner onboarding with no fixed or seeded Super Admin credential
 - Real session login and role routing for Super Admin, Gym Admin and Member accounts
 - API-backed Super Admin portal for tenant onboarding, explicit gym access and SaaS-plan publication
 - Dedicated gym-client portal with a selected-gym dashboard for members, live operations, collections, classes, team and subscription health
