@@ -390,6 +390,9 @@ test("operational readiness and launch assets do not expose infrastructure detai
   const health = await read("app/Http/Controllers/Api/V1/HealthController.php");
   const routes = await read("routes/api.php");
   const limiter = await read("app/Providers/AppServiceProvider.php");
+  const dockerfile = await read("Dockerfile");
+  const caddy = await read("docker/Caddyfile");
+  const supervisor = await read("docker/supervisord.conf");
   const load = await readFile(new URL("../scripts/load/report-overview.k6.js", import.meta.url), "utf8");
   const runbook = await readFile(new URL("../docs/DEPLOYMENT_RUNBOOK.md", import.meta.url), "utf8");
 
@@ -399,6 +402,13 @@ test("operational readiness and launch assets do not expose infrastructure detai
   assert.doesNotMatch(health, /getMessage|trace|connectionName/);
   assert.match(routes, /health\/readiness/);
   assert.match(limiter, /Limit::perMinute\(60\)/);
+  assert.match(dockerfile, /apk add --no-cache caddy supervisor/);
+  assert.match(dockerfile, /CMD \["supervisord", "-c", "\/etc\/supervisord\.conf"\]/);
+  assert.match(caddy, /:\{\$PORT:8000\}/);
+  assert.match(caddy, /root \* \/var\/www\/html\/public/);
+  assert.match(caddy, /php_fastcgi 127\.0\.0\.1:9000/);
+  assert.match(supervisor, /command=php-fpm -F/);
+  assert.match(supervisor, /command=caddy run --config \/etc\/caddy\/Caddyfile/);
   assert.match(load, /IRONCORE_ACCESS_TOKEN/);
   assert.doesNotMatch(load, /sk_live_|Bearer [A-Za-z0-9]/);
   assert.match(runbook, /point-in-time recovery/i);

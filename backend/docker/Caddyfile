@@ -1,0 +1,18 @@
+{
+	auto_https off
+	admin off
+}
+
+# Railway terminates HTTPS before forwarding traffic to this container. The
+# injected PORT is authoritative; 8000 is only a safe local image fallback.
+:{$PORT:8000} {
+	root * /var/www/html/public
+	encode zstd gzip
+	php_fastcgi 127.0.0.1:9000
+	file_server
+
+	log {
+		output stdout
+		format json
+	}
+}

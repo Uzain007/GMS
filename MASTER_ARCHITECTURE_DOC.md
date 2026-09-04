@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.51.0 — Real-login-only signed-out entry |
-| Last verified | 2 September 2026 |
+| MAD version | 0.52.0 — Railway public API container |
+| Last verified | 4 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | IronCore Beta v0.1 demo login access removed locally; approval pending |
+| Active milestone | Railway public Laravel web process implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -1055,6 +1055,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Production uses separate frontend, Laravel API, PostgreSQL 17, Redis and S3-compatible storage services; free frontend hosting is not a safe substitute for the stateful API/database/queue stack.
 - HTTPS, exact CORS/Sanctum origins, secure cookies, trusted proxy configuration and environment-only secrets are mandatory before launch.
 - Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release.
+- The production backend image runs Caddy and PHP-FPM under Supervisor. Caddy binds to Railway's injected `PORT` (with `8000` only as an image-local fallback), serves Laravel exclusively from `public/` and forwards PHP requests to the private PHP-FPM listener. Local Docker Compose retains its explicit `php artisan serve` override.
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
 - Backups, point-in-time recovery, restore drills, provider webhook monitoring, failed-job alerts, centralised logs and error tracking are production launch gates.
 - Load validation targets report cache behaviour, bounded query latency, authentication throttles and tenant isolation. Load scripts use synthetic tenant IDs/tokens supplied only through environment variables and never contain committed credentials.
@@ -1088,6 +1089,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| IronCore Beta v0.1 — Railway public API container | Implemented locally; approval pending | The backend image now supervises Caddy plus PHP-FPM, listens on Railway's dynamic `PORT`, serves only Laravel's public directory and preserves the existing local Compose command overrides. `/up` remains process liveness and `/api/v1/health/readiness` remains the PostgreSQL/Redis readiness gate. |
 | IronCore Beta v0.1 — demo login removal | Implemented locally; approval pending | The public login contains only real email/password and recovery actions. Demo role buttons, credential autofill and API-unavailable preview/activation fallbacks are absent; all roles continue through the unchanged Laravel session and permission flow. |
 | IronCore Beta v0.1 — password-reset email delivery | Implemented locally; approval pending | Keeps the existing non-enumerating, hash-only, expiring and single-use recovery contract while adding a local SMTP inbox, a dedicated Redis queue worker, production-provider environment settings and role-wide recovery/login regression coverage. No tenant schema or permission boundary changes. |
 | IronCore Beta v0.1 — initial Super Admin onboarding | Implemented locally; approval pending | Replaces the fixed demo seeder credential with a stateful, CSRF-protected, rate-limited one-time owner setup; a hash-only deployment key, Redis serialization, no-Super-Admin guard, strong password validation and platform audit evidence preserve existing tenant roles and login flows. |
