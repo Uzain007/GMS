@@ -41,6 +41,9 @@ test("member portal is role-routed, mobile installable and restores the persiste
   assert.match(portal, /const qrPlaintext = renderedCredential \?\? data\.credential\?\.credential \?\? null/);
   assert.match(portal, /setRenderedCredential\(result\.credential\)/);
   assert.match(portal, /QRCode\.toDataURL/);
+  assert.match(portal, /import Image from "next\/image"/);
+  assert.match(portal, /<Image[^>]*member-qr-image[^>]*unoptimized/s);
+  assert.doesNotMatch(portal, /<img[^>]*member-qr-image/s);
   assert.match(portal, /qrRenderError/);
   assert.match(portal, /Retry QR/);
   assert.match(portal, /const displayCredential = membershipAccessReady \? qrPlaintext : null/);
