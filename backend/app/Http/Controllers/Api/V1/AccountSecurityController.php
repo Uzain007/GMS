@@ -9,6 +9,7 @@ use App\Http\Requests\ResetPasswordRequest;
 use App\Jobs\SendPasswordResetLink;
 use App\Models\User;
 use App\Services\MfaChallengeService;
+use App\Services\GymOwnerAccountService;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,11 @@ class AccountSecurityController extends Controller
         ], 202);
     }
 
-    public function resetPassword(ResetPasswordRequest $request, MfaChallengeService $mfaChallenges): JsonResponse
+    public function resetPassword(
+        ResetPasswordRequest $request,
+        MfaChallengeService $mfaChallenges,
+        GymOwnerAccountService $owners,
+    ): JsonResponse
     {
         if (! $request->hasSession()) {
             return response()->json([
@@ -64,6 +69,7 @@ class AccountSecurityController extends Controller
                         'password' => $password,
                         'remember_token' => Str::random(60),
                         'auth_version' => $lockedUser->auth_version + 1,
+                        'must_change_password' => false,
                     ])->save();
 
                     // Recovery is a high-risk credential event: no existing
@@ -90,6 +96,8 @@ class AccountSecurityController extends Controller
             ]);
         }
 
+        $owners->markSetupCompleted($resetUser);
+
         if ($resetUser->mfaEnabled()) {
             // Email recovery replaces the password but never downgrades an
             // enrolled second factor or silently creates a full session.
@@ -109,7 +117,7 @@ class AccountSecurityController extends Controller
         ]);
     }
 
-    public function changePassword(ChangePasswordRequest $request): JsonResponse
+    public function changePassword(ChangePasswordRequest $request, GymOwnerAccountService $owners): JsonResponse
     {
         /** @var User $requestUser */
         $requestUser = $request->user();
@@ -129,6 +137,7 @@ class AccountSecurityController extends Controller
                 'password' => (string) $request->validated('password'),
                 'remember_token' => Str::random(60),
                 'auth_version' => $lockedUser->auth_version + 1,
+                'must_change_password' => false,
             ])->save();
 
             if ($currentTokenId !== null) {
@@ -148,6 +157,7 @@ class AccountSecurityController extends Controller
         }
 
         event(new PasswordReset($user));
+        $owners->markSetupCompleted($user);
 
         return response()->json([
             'message' => 'Your password was changed. Other signed-in sessions have been revoked.',

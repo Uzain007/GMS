@@ -48,6 +48,8 @@ class AuthController extends Controller
             ], 202)->withHeaders(['Cache-Control' => 'no-store', 'Pragma' => 'no-cache']);
         }
 
+        $user->forceFill(['last_login_at' => now()])->save();
+
         if ($usesBearerToken) {
             $user->tokens()->where('name', $deviceName)->delete();
             $token = $user->createToken($deviceName, ['app:use'])->plainTextToken;
@@ -108,9 +110,11 @@ class AuthController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'must_change_password' => (bool) $user->must_change_password,
             'platform_role' => $user->platform_role?->value,
             'gyms' => $user->relationLoaded('gyms')
-                ? $user->gyms->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
+                ? $user->gyms->filter(fn ($gym) => $gym->pivot->status === 'active')
+                    ->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
                 : [],
         ];
     }

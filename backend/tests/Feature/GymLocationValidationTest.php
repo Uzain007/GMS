@@ -26,8 +26,7 @@ class GymLocationValidationTest extends TestCase
             'country_code' => 'pk',
             'timezone' => 'Asia/Karachi',
             'owner' => [
-                'name' => 'Gym Owner',
-                'email' => 'karachi-owner@example.test',
+                'create_login_account' => false,
             ],
         ])->assertCreated()
             ->assertJsonPath('data.country_code', 'PK')
@@ -62,8 +61,7 @@ class GymLocationValidationTest extends TestCase
             'country_code' => 'XX',
             'timezone' => 'GMT +5',
             'owner' => [
-                'name' => 'Invalid Owner',
-                'email' => 'invalid-location-owner@example.test',
+                'create_login_account' => false,
             ],
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['country_code', 'timezone']);
@@ -74,8 +72,7 @@ class GymLocationValidationTest extends TestCase
             'country_code' => 'GB',
             'timezone' => 'Europe/London',
             'owner' => [
-                'name' => 'Valid Owner',
-                'email' => 'valid-location-owner@example.test',
+                'create_login_account' => false,
             ],
         ])->assertCreated();
 

@@ -194,6 +194,7 @@ class MfaController extends Controller
             $request->validated('recovery_code'),
         );
         $user = $result['user'];
+        $user->forceFill(['last_login_at' => now()])->save();
 
         if ($result['uses_bearer_token']) {
             $user->tokens()->where('name', $result['device_name'])->delete();
@@ -258,9 +259,11 @@ class MfaController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'must_change_password' => (bool) $user->must_change_password,
             'platform_role' => $user->platform_role?->value,
             'gyms' => $user->relationLoaded('gyms')
-                ? $user->gyms->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
+                ? $user->gyms->filter(fn ($gym) => $gym->pivot->status === 'active')
+                    ->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
                 : [],
         ];
     }

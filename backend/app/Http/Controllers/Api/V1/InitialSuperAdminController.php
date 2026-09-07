@@ -90,6 +90,7 @@ class InitialSuperAdminController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'must_change_password' => false,
                     'platform_role' => UserRole::SuperAdmin->value,
                     'gyms' => [],
                 ],

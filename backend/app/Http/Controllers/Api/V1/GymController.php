@@ -3,19 +3,18 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\GymStatus;
-use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGymRequest;
 use App\Http\Requests\UpdateGymRequest;
 use App\Http\Resources\GymResource;
 use App\Models\Gym;
-use App\Models\User;
 use App\Services\AuditService;
+use App\Services\GymOwnerAccountService;
 use App\Tenancy\TenantContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class GymController extends Controller
@@ -37,9 +36,10 @@ class GymController extends Controller
         StoreGymRequest $request,
         AuditService $audit,
         TenantContext $context,
-    ): GymResource {
+        GymOwnerAccountService $owners,
+    ): JsonResponse {
         Gate::authorize('create', Gym::class);
-        $gym = DB::transaction(function () use ($request, $audit, $context): Gym {
+        [$gym, $ownerAccount] = DB::transaction(function () use ($request, $audit, $context, $owners): array {
             $data = $request->validated();
             $gym = Gym::query()->create([
                 'name' => $data['name'],
@@ -52,22 +52,24 @@ class GymController extends Controller
                 'trial_ends_at' => now()->addDays(14),
             ]);
 
-            $owner = User::query()->firstOrCreate(
-                ['email' => mb_strtolower($data['owner']['email'])],
-                ['name' => $data['owner']['name'], 'password' => Hash::make(Str::password(32))]
-            );
-            $context->run($gym, function () use ($gym, $owner, $audit, $request): void {
-                // RLS requires the newly-created gym context before pivot/audit writes.
-                $gym->users()->syncWithoutDetaching([
-                    $owner->id => ['role' => UserRole::GymOwner->value, 'status' => 'active', 'joined_at' => now()],
-                ]);
+            $ownerAccount = $context->run($gym, function () use ($gym, $data, $owners, $audit, $request): ?array {
+                // RLS requires the newly-created gym context before owner/pivot
+                // or audit writes; the browser's owner fields grant no authority.
+                $owner = $data['owner']['create_login_account']
+                    ? $owners->create($data['owner'], $request->user(), $request)
+                    : null;
                 $audit->record('gym.created', $gym, $request->user(), after: $gym->toArray(), request: $request);
+
+                return $owner;
             });
 
-            return $gym;
+            return [$gym, $ownerAccount];
         });
 
-        return new GymResource($gym);
+        return response()->json([
+            'data' => (new GymResource($gym))->resolve($request),
+            'meta' => ['owner_account' => $ownerAccount],
+        ], 201);
     }
 
     public function show(TenantContext $context): GymResource

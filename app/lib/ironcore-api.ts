@@ -10,6 +10,7 @@ export type AuthenticatedUser = {
   id: string;
   name: string;
   email: string;
+  must_change_password: boolean;
   platform_role: IronCoreRole | null;
   gyms: Array<{ id: string; name: string; role: IronCoreRole }>;
 };
@@ -63,8 +64,53 @@ export type NewGym = {
   base_currency: GymSummary["base_currency"];
   country_code: string;
   timezone: string;
-  owner: { name: string; email: string };
+  owner: {
+    create_login_account: boolean;
+    name?: string;
+    email?: string;
+    phone?: string;
+    setup_method?: "invite" | "temporary_password";
+    temporary_password?: string;
+    temporary_password_confirmation?: string;
+    require_password_change?: boolean;
+  };
 };
+
+export type GymOwnerAccount = {
+  user_id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  account_status: "active" | "suspended";
+  setup_status: "invite_pending" | "password_change_required" | "complete";
+  setup_method: "invite" | "temporary_password" | "existing_account" | null;
+  invite_sent_at: string | null;
+  setup_completed_at: string | null;
+  last_login_at: string | null;
+  must_change_password: boolean;
+  role: "gym_owner";
+};
+
+export type NewGymOwnerAccount = {
+  name: string;
+  email: string;
+  phone: string;
+  setup_method: "invite" | "temporary_password";
+  temporary_password?: string;
+  temporary_password_confirmation?: string;
+  require_password_change?: boolean;
+  reason?: string;
+};
+
+export type UpdateGymOwnerAccount = {
+  name: string;
+  email: string;
+  phone: string;
+  status: "active" | "suspended";
+  reason: string;
+};
+
+export type CreatedGym = { gym: GymSummary; owner_account: GymOwnerAccount | null };
 
 export type MemberRecord = {
   id: string;
@@ -397,12 +443,13 @@ export class IronCoreApi {
     return (await this.request<Paginated<GymSummary>>("/api/v1/gyms?per_page=100")).data;
   }
 
-  async createGym(input: NewGym): Promise<GymSummary> {
+  async createGym(input: NewGym): Promise<CreatedGym> {
     await this.csrf();
-    return (await this.request<ApiEnvelope<GymSummary>>("/api/v1/gyms", {
+    const response = await this.request<{ data: GymSummary; meta: { owner_account: GymOwnerAccount | null } }>("/api/v1/gyms", {
       method: "POST",
       body: JSON.stringify(input),
-    })).data;
+    });
+    return { gym: response.data, owner_account: response.meta.owner_account };
   }
 
   async gym(gymId: string): Promise<GymSummary> {
@@ -420,6 +467,45 @@ export class IronCoreApi {
       { method: "PATCH", body: JSON.stringify(input) },
       gymId,
     )).data;
+  }
+
+  async gymOwnerAccount(gymId: string): Promise<GymOwnerAccount | null> {
+    return (await this.request<ApiEnvelope<GymOwnerAccount | null>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/owner-account`, {}, gymId,
+    )).data;
+  }
+
+  async createGymOwnerAccount(gymId: string, input: NewGymOwnerAccount): Promise<GymOwnerAccount> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<GymOwnerAccount>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/owner-account`,
+      { method: "POST", body: JSON.stringify(input) }, gymId,
+    )).data;
+  }
+
+  async updateGymOwnerAccount(gymId: string, input: UpdateGymOwnerAccount): Promise<GymOwnerAccount> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<GymOwnerAccount>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/owner-account`,
+      { method: "PATCH", body: JSON.stringify(input) }, gymId,
+    )).data;
+  }
+
+  async sendGymOwnerReset(gymId: string, reason: string): Promise<GymOwnerAccount> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<GymOwnerAccount>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/owner-account/password-reset`,
+      { method: "POST", body: JSON.stringify({ reason }) }, gymId,
+    )).data;
+  }
+
+  async generateGymOwnerTemporaryPassword(gymId: string, reason: string): Promise<{ account: GymOwnerAccount; temporary_password: string }> {
+    await this.csrf();
+    const response = await this.request<{ data: GymOwnerAccount; meta: { temporary_password: string } }>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/owner-account/temporary-password`,
+      { method: "POST", body: JSON.stringify({ reason }) }, gymId,
+    );
+    return { account: response.data, temporary_password: response.meta.temporary_password };
   }
 
   async gymBankTransferSetting(gymId: string): Promise<GymBankTransferSetting | null> {

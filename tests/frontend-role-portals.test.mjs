@@ -32,7 +32,10 @@ test("Super Admin portal uses platform APIs and explicit tenant selection", asyn
   assert.match(api, /async createGym\(input: NewGym\)/);
   assert.match(api, /async platformSaasPlans\(\)/);
   assert.match(api, /async createSaasPlan\(input: NewSaasPlan\)/);
-  assert.match(portal, /onCreateGym: \(input: NewGym\) => Promise<void>/);
+  assert.match(portal, /onCreateGym: \(input: NewGym\) => Promise<CreatedGym>/);
+  assert.match(portal, /Gym Owner Account/);
+  assert.match(api, /generateGymOwnerTemporaryPassword/);
+  assert.match(routes, /owner-account\/temporary-password/);
   assert.match(portal, /onCreatePlan: \(input: NewSaasPlan\) => Promise<void>/);
   assert.match(portal, /onOpenGym: \(gym: GymSummary\) => void/);
   assert.match(routes, /Route::post\('\/gyms'/);

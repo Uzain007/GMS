@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.53.0 — SaaS tenant-status automation |
+| MAD version | 0.54.0 — Super Admin gym-owner account lifecycle |
 | Last verified | 7 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | SaaS payment-to-tenant lifecycle automation implemented locally; approval pending |
+| Active milestone | Secure gym-owner account creation and management implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -82,6 +82,8 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | `email_verified_at` | timestamp | yes | — |
 | `password` | varchar | no | hashed cast |
 | `auth_version` | unsigned integer | no | default 1; monotonic server-side session revocation generation |
+| `must_change_password` | boolean | no | default false; temporary credentials cannot access platform/tenant data until replaced |
+| `last_login_at` | timestamp | yes | last fully completed password/MFA login; no credential detail |
 | `mfa_secret` | encrypted text | yes | 160-bit Base32 TOTP secret; present during pending setup and never returned after confirmation |
 | `mfa_confirmed_at` | timestamp | yes | non-null only after a valid authenticator code confirms enrollment |
 | `mfa_last_used_step` | unsigned bigint | yes | highest accepted 30-second TOTP counter; prevents same-code replay under a row lock |
@@ -132,7 +134,9 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | `user_id` | uuid | no | FK `users.id` cascade delete; primary key position 2 |
 | `role` | varchar(40) | no | tenant role |
 | `status` | varchar(30) | no | default `active` |
+| `setup_method` | varchar(40) | yes | `invite`, `temporary_password` or `existing_account` owner-onboarding evidence |
 | `joined_at` | timestamp | yes | — |
+| `invite_sent_at`, `setup_completed_at` | timestamp | yes | tenant-specific owner setup lifecycle evidence |
 | `created_at`, `updated_at` | timestamp | yes | — |
 
 Indexes: primary `(gym_id, user_id)`, `(gym_id, role, status)`, `(user_id, status)`.
@@ -764,7 +768,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 
 ## Active relationships
 
-- `Gym belongsToMany User` through `gym_user` with `role`, `status`, `joined_at` and timestamps.
+- `Gym belongsToMany User` through `gym_user` with `role`, `status`, owner setup lifecycle fields, `joined_at` and timestamps.
 - `User belongsToMany Gym` through `gym_user`.
 - `User hasMany UserMfaRecoveryCode`; recovery rows are platform-owned one-time authentication evidence and never tenant data.
 - `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan`, `MemberImport` and `MemberDataExport`; it has one tenant-scoped encrypted GymBankTransferSetting.
@@ -822,9 +826,12 @@ All successful JSON payloads are versioned under `/api/v1`.
 | POST | `/auth/logout` | `auth:sanctum`, authentication-version gate, database identity | Invalidate the current web session or revoke the current bearer token |
 | GET | `/health/readiness` | public, generic response, `health` throttle | Verify Laravel can reach PostgreSQL and Redis without exposing configuration or tenant data |
 | GET | `/gyms` | authentication, database identity, `GymPolicy::viewAny` | List all gyms for super admin or active assigned gyms for a tenant user |
-| POST | `/gyms` | `auth:sanctum`, `super_admin`, `GymPolicy::create` | Create a trial gym and owner membership |
+| POST | `/gyms` | `auth:sanctum`, completed-password gate, `super_admin`, `GymPolicy::create` | Create a trial gym and optionally create its owner login by secure setup email or mandatory-change temporary password |
 | GET | `/gyms/{gym}` | `auth:sanctum`, `tenant`, `GymPolicy::view` | Read one authorised gym |
 | PATCH | `/gyms/{gym}` | `auth:sanctum`, `tenant`, manager role, `GymPolicy::update` | Update gym identity/settings with audit reason |
+| GET/POST/PATCH | `/gyms/{gym}/owner-account` | tenant; authenticated `super_admin` only | Read, create or reason-update the selected gym's owner profile, login email and tenant-specific active/suspended access |
+| POST | `/gyms/{gym}/owner-account/password-reset` | tenant; authenticated `super_admin`; mandatory reason | Queue a secure expiring password reset/setup email without exposing or replacing the current password |
+| POST | `/gyms/{gym}/owner-account/temporary-password` | tenant; authenticated `super_admin`; mandatory reason | Revoke existing credentials, generate one response-only temporary password and require replacement before portal access |
 | GET/POST | `/gyms/{gym}/branches` | tenant; reads all tenant roles, writes owner/manager | List or create branches |
 | GET/PATCH | `/gyms/{gym}/branches/{branch}` | tenant; reads all tenant roles, writes owner/manager | Read or update a tenant-resolved branch |
 | DELETE | `/gyms/{gym}/branches/{branch}` | tenant; owner/manager/super admin | Audited removal of an empty non-primary branch only; linked branches must be deactivated to retain history |
@@ -956,6 +963,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Payment amounts, providers and methods are not edited in place. Corrections use reasoned refunds or future explicit void/replacement workflows so ledger history remains intact.
 - Bank-transfer approval holds both the payment and invoice under row locks. Pending/rejected transfers never change an invoice balance; only Paid settlement does. Duplicate decisions fail validation.
 - Staff invitations cannot grant `super_admin`.
+- Only an authenticated `super_admin` may create or manage a gym-owner login from the platform portal. The owner role is written only inside the explicitly selected gym context; suspension changes only that tenant assignment and never grants the Super Admin an owner session or credential.
+- Existing passwords are never returned or recoverable. Secure owner reset links use the existing one-time broker token, while a generated temporary password is returned once with `no-store`, advances `auth_version`, revokes sessions/tokens and blocks every non-security endpoint until the owner replaces it.
+- Owner login-email changes require a reason, global uniqueness validation, credential-generation rotation and audit evidence. The tenant staff contact row is synchronized inside forced RLS; no route supports impersonation.
 - Gym managers may grant only receptionist/trainer roles; owner/manager grants require a gym owner or super admin.
 - Gym managers cannot update, suspend, demote or otherwise mutate an owner or another manager, including updates that omit the `role` field.
 - Members may access only the member profile explicitly linked to their authenticated `user_id`.
@@ -988,6 +998,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
 - The Laravel session identifier is regenerated after login and invalidated on logout. The session cookie remains encrypted and HttpOnly; bearer tokens are never written to `localStorage` or `sessionStorage`.
 - Login, member activation and successful password reset copy the current server-side `auth_version` into the encrypted session. No client-provided version is trusted, and a stale or missing version is logged out before any tenant route runs.
+- A login completed with a temporary owner credential returns only `must_change_password` identity state. The web renders a dedicated replacement form and does not request gym/platform collections; Laravel independently returns `423 password_change_required` from every non-security authenticated route until the strong password change succeeds.
 - For an MFA-enabled identity, primary credential or recovery verification returns an opaque five-minute challenge instead of a user/session payload. The browser keeps it only in component memory, sends one authenticator/recovery value in the request body and clears the challenge on success, cancellation, navigation or reload.
 - Authenticator enrollment returns a Base32 secret and `otpauth://` URI once for local QR rendering. The browser does not persist the secret or recovery codes; closing the setup result requires starting setup again with the current password.
 - Recovery accepts only a normalized email and always renders generic acknowledgement. A reset fragment is copied into volatile component state and immediately removed from the address; passwords and tokens are never stored in local storage, session storage or URL query parameters.
@@ -995,6 +1006,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Authenticated users load `/auth/me` and the authorised `/gyms` collection. Super administrators always make an explicit gym selection before accessing tenant records; a non-platform user may be auto-selected only when exactly one active gym is available.
 - Password and MFA challenge completion bind `ironcore.current_user_id` only while serializing that identity's own active `gym_user` assignments, then clear it in `finally`. This preserves forced RLS before tenant selection and ensures Gym Admin, Trainer and Member login payloads contain their authorised portal without exposing another user's assignments.
 - An authenticated `super_admin` first enters the API-backed platform portal. Its tenant registry, explicit gym opening, gym onboarding and SaaS-plan publication use the existing `/gyms` and `/platform/saas-plans` APIs; it never uses representative platform totals as live records.
+- Super Admin gym onboarding explicitly chooses no login, secure setup email or a manually entered temporary password. Manage Gym reads the tenant's real owner role/profile and exposes reasoned email, suspension/reactivation and credential-recovery actions; generated passwords are held only in component memory and shown once.
 - Gym owners and managers enter the selected tenant portal according to their server-returned membership role. Linked members enter the dedicated self-service portal; the browser does not offer a role selector that could override `/auth/me`.
 - Every operational web request carries the selected gym in both `/gyms/{gym}` and `X-Gym-ID`. Laravel independently verifies the authenticated role/membership and binds PostgreSQL RLS; matching client identifiers do not grant authority.
 - Member search is server-side, prefix/index compatible and capped at 25 records per browser page in the current UI. The client ignores superseded responses to prevent an earlier tenant/search result replacing newer state.
@@ -1165,6 +1177,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Post-Milestone 26 — member roster workflow | Implemented locally; approval pending | Members now exposes Import members, Export members and CSV/XLSX template downloads. Laravel previews CSV/XLS/XLSX with totals and explicit duplicate/contact/branch/plan errors, blocks invalid confirmation, creates optional membership snapshots for valid plan references, and streams selected-tenant or Super-Admin-only cross-gym exports with audit evidence. |
 | Post-Milestone 26 — member activation form presentation | Implemented locally; approval pending | The existing one-time activation/security flow now uses a full-width single-column password form, labelled show/hide controls, balanced spacing and responsive desktop/mobile presentation without changing token handling or acceptance rules. |
 | Post-Milestone 26 — branch management workflow | Implemented locally; approval pending | Gym Admin branches now open a unified workspace for details, audited status changes, staff/trainer and member home-branch assignment, branch classes and attendance, plus deletion of empty non-primary branches. Inactive branches retain history and reject new check-ins, classes and bookings. |
+| IronCore Beta — Super Admin gym-owner account lifecycle | Implemented locally; approval pending | Replaces unusable random owner credentials with explicit secure invite or temporary-password onboarding, a mandatory first-login password gate, selected-tenant owner profile/access management, reasoned recovery/email/status actions, one-response password display, credential revocation and cross-gym denial. |
 
 ## Change control
 

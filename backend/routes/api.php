@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\BankTransferSettingController;
 use App\Http\Controllers\Api\V1\ClassBookingController;
 use App\Http\Controllers\Api\V1\ClassSessionController;
 use App\Http\Controllers\Api\V1\GymController;
+use App\Http\Controllers\Api\V1\GymOwnerAccountController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InitialSuperAdminController;
 use App\Http\Controllers\Api\V1\InvoiceController;
@@ -76,7 +77,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/gyms/{gym}/member-account-invitations/accept', [MemberAccountInvitationController::class, 'accept'])
         ->middleware('throttle:member-activation');
 
-    Route::middleware(['auth:sanctum', 'auth.version', 'database.identity'])->group(function (): void {
+    Route::middleware(['auth:sanctum', 'auth.version', 'database.identity', 'password.changed'])->group(function (): void {
         Route::get('/gyms', [GymController::class, 'index']);
         Route::post('/gyms', [GymController::class, 'store'])->middleware('role:super_admin');
 
@@ -98,6 +99,16 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/gyms/{gym}', [GymController::class, 'show']);
             Route::patch('/gyms/{gym}', [GymController::class, 'update'])
                 ->middleware('role:super_admin,gym_owner,gym_manager');
+            Route::get('/gyms/{gym}/owner-account', [GymOwnerAccountController::class, 'show'])
+                ->middleware('role:super_admin');
+            Route::post('/gyms/{gym}/owner-account', [GymOwnerAccountController::class, 'store'])
+                ->middleware('role:super_admin');
+            Route::patch('/gyms/{gym}/owner-account', [GymOwnerAccountController::class, 'update'])
+                ->middleware('role:super_admin');
+            Route::post('/gyms/{gym}/owner-account/password-reset', [GymOwnerAccountController::class, 'resetPassword'])
+                ->middleware('role:super_admin');
+            Route::post('/gyms/{gym}/owner-account/temporary-password', [GymOwnerAccountController::class, 'temporaryPassword'])
+                ->middleware('role:super_admin');
             Route::get('/gyms/{gym}/bank-transfer-settings', [BankTransferSettingController::class, 'show'])
                 ->middleware('role:super_admin,gym_owner,gym_manager');
             Route::patch('/gyms/{gym}/bank-transfer-settings', [BankTransferSettingController::class, 'update'])

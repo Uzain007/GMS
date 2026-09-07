@@ -1,17 +1,17 @@
 "use client";
 
 import {
-  Archive, ArrowRight, Building2, ChevronDown, CircleDollarSign, Download, Eye, LayoutDashboard, LoaderCircle,
-  LogOut, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UsersRound, X,
+  Archive, ArrowRight, Building2, ChevronDown, CircleDollarSign, Copy, Download, Eye, KeyRound, LayoutDashboard, LoaderCircle,
+  LogOut, Mail, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UserRound, UsersRound, X,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
 import {
   countryOptions, defaultTimezoneForCountry, normalizeCountryCode, normalizeTimezone, timezoneOptions,
 } from "./gym-location-options";
 import type {
-  AuthenticatedUser, GymSummary, NewGym, NewSaasPlan, NewSaasPlanPrice,
-  SaasPlanRecord, UpdateGym, UpdateSaasPlan,
+  AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan, NewSaasPlanPrice,
+  SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
 } from "./lib/ironcore-api";
 import { SearchableSelect } from "./searchable-select";
 import { decimalToMinor } from "./tenant-operations";
@@ -26,8 +26,13 @@ export type PlatformPortalData = {
   error: string | null;
   onReload: () => void;
   onOpenGym: (gym: GymSummary) => void;
-  onCreateGym: (input: NewGym) => Promise<void>;
+  onCreateGym: (input: NewGym) => Promise<CreatedGym>;
   onUpdateGym: (gymId: string, input: UpdateGym) => Promise<void>;
+  onLoadGymOwner: (gymId: string) => Promise<GymOwnerAccount | null>;
+  onCreateGymOwner: (gymId: string, input: NewGymOwnerAccount) => Promise<GymOwnerAccount>;
+  onUpdateGymOwner: (gymId: string, input: UpdateGymOwnerAccount) => Promise<GymOwnerAccount>;
+  onSendGymOwnerReset: (gymId: string, reason: string) => Promise<GymOwnerAccount>;
+  onGenerateGymOwnerTemporaryPassword: (gymId: string, reason: string) => Promise<{ account: GymOwnerAccount; temporary_password: string }>;
   onCreatePlan: (input: NewSaasPlan) => Promise<void>;
   onUpdatePlan: (planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice) => Promise<void>;
   onExportMembers: () => Promise<void>;
@@ -70,6 +75,9 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
   const [error, setError] = useState<string | null>(null);
   const [countryCode, setCountryCode] = useState("GB");
   const [timezone, setTimezone] = useState("Europe/London");
+  const [createOwner, setCreateOwner] = useState(true);
+  const [setupMethod, setSetupMethod] = useState<"invite" | "temporary_password">("invite");
+  const [created, setCreated] = useState<CreatedGym | null>(null);
 
   function changeCountry(nextCountryCode: string) {
     setCountryCode(nextCountryCode);
@@ -81,15 +89,24 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
     const form = new FormData(event.currentTarget);
     setBusy(true); setError(null);
     try {
-      await onCreate({
+      const result = await onCreate({
         name: String(form.get("name")),
         legal_name: String(form.get("legal_name")) || undefined,
         base_currency: String(form.get("base_currency")) as GymSummary["base_currency"],
         country_code: String(form.get("country_code")).toUpperCase(),
         timezone: String(form.get("timezone")),
-        owner: { name: String(form.get("owner_name")), email: String(form.get("owner_email")) },
+        owner: {
+          create_login_account: createOwner,
+          name: createOwner ? String(form.get("owner_name")) : undefined,
+          email: createOwner ? String(form.get("owner_email")) : undefined,
+          phone: createOwner ? String(form.get("owner_phone")) : undefined,
+          setup_method: createOwner ? setupMethod : undefined,
+          temporary_password: setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined,
+          temporary_password_confirmation: setupMethod === "temporary_password" ? String(form.get("temporary_password_confirmation")) : undefined,
+          require_password_change: setupMethod === "temporary_password" ? true : undefined,
+        },
       });
-      onClose();
+      setCreated(result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The gym could not be created.");
     } finally {
@@ -97,14 +114,38 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
     }
   }
 
-  return <ModalShell title="Create a gym" eyebrow="Platform tenant onboarding" onClose={onClose}>
+  return <ModalShell title={created ? `${created.gym.name} created` : "Create a gym"} eyebrow="Platform tenant onboarding" onClose={onClose}>
+    {created ? <div className="owner-create-result" role="status">
+      <span><ShieldCheck size={22} /></span>
+      <h3>Gym created securely</h3>
+      <p>{created.owner_account
+        ? created.owner_account.setup_method === "invite"
+          ? `A secure setup email was queued for ${created.owner_account.email}.`
+          : created.owner_account.setup_method === "temporary_password"
+            ? `${created.owner_account.name} can sign in with the temporary password and must replace it before entering the gym portal.`
+            : `${created.owner_account.name}'s existing IronCore login was linked to this gym, and a secure password setup email was queued.`
+        : "No owner login was created. You can add one from Manage gym."}</p>
+      <button className="primary-button" type="button" onClick={onClose}>Done</button>
+    </div> :
     <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}
       <div className="field-pair"><label>Gym name<input name="name" maxLength={160} required autoFocus /></label><label>Legal name<input name="legal_name" maxLength={200} /></label></div>
       <div className="field-trio"><label>Currency<select name="base_currency" defaultValue="GBP">{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
-      <div className="field-pair"><label>Gym owner name<input name="owner_name" maxLength={160} required /></label><label>Gym owner email<input name="owner_email" type="email" maxLength={254} required /></label></div>
-      <div className="modal-note"><ShieldCheck size={17} />Laravel creates the trial gym and tenant owner membership atomically. The browser never assigns tenant authority.</div>
+      <fieldset className="owner-account-fields"><legend>Gym Owner Account</legend>
+        <label className="owner-toggle"><input type="checkbox" checked={createOwner} onChange={(event) => setCreateOwner(event.target.checked)} /> Create login account</label>
+        {createOwner && <>
+          <div className="field-pair"><label>Owner full name<input name="owner_name" maxLength={160} required /></label><label>Owner email<input name="owner_email" type="email" maxLength={254} autoComplete="off" required /></label></div>
+          <label>Owner phone<input name="owner_phone" type="tel" maxLength={40} required placeholder="+44 7700 900000" /></label>
+          <div className="owner-setup-options" role="radiogroup" aria-label="Owner account setup method">
+            <label><input type="radio" name="setup_method" value="invite" checked={setupMethod === "invite"} onChange={() => setSetupMethod("invite")} /><span><Mail size={17} /><strong>Send secure invite</strong><small>Email a one-time password setup link.</small></span></label>
+            <label><input type="radio" name="setup_method" value="temporary_password" checked={setupMethod === "temporary_password"} onChange={() => setSetupMethod("temporary_password")} /><span><KeyRound size={17} /><strong>Set temporary password</strong><small>Share it privately; the owner must replace it.</small></span></label>
+          </div>
+          {setupMethod === "temporary_password" && <div className="field-pair"><label>Temporary password<input name="temporary_password" type="password" autoComplete="new-password" minLength={12} maxLength={255} required /></label><label>Confirm temporary password<input name="temporary_password_confirmation" type="password" autoComplete="new-password" minLength={12} maxLength={255} required /></label></div>}
+          <label className="owner-toggle owner-required"><input type="checkbox" checked readOnly /> Require password change on first login</label>
+        </>}
+      </fieldset>
+      <div className="modal-note"><ShieldCheck size={17} />Passwords are hashed by Laravel. Super Admin can manage access but can never view or impersonate the owner&apos;s saved password.</div>
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={16} /> Creating…</> : <>Create gym <ArrowRight size={16} /></>}</button></div>
-    </form>
+    </form>}
   </ModalShell>;
 }
 
@@ -157,15 +198,26 @@ function CreatePlanModal({ onClose, onCreate }: { onClose: () => void; onCreate:
   </ModalShell>;
 }
 
-function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
+function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCreateOwner, onUpdateOwner, onSendReset, onGenerateTemporary }: {
   gym: GymSummary;
   onClose: () => void;
   onOpen: () => void;
   onUpdate: PlatformPortalData["onUpdateGym"];
+  onLoadOwner: PlatformPortalData["onLoadGymOwner"];
+  onCreateOwner: PlatformPortalData["onCreateGymOwner"];
+  onUpdateOwner: PlatformPortalData["onUpdateGymOwner"];
+  onSendReset: PlatformPortalData["onSendGymOwnerReset"];
+  onGenerateTemporary: PlatformPortalData["onGenerateGymOwnerTemporaryPassword"];
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [owner, setOwner] = useState<GymOwnerAccount | null | undefined>(undefined);
+  const [ownerEditing, setOwnerEditing] = useState(false);
+  const [ownerAction, setOwnerAction] = useState<"reset" | "temporary" | null>(null);
+  const [ownerSetupMethod, setOwnerSetupMethod] = useState<"invite" | "temporary_password">("invite");
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const initialCountryCode = normalizeCountryCode(gym.country_code);
   const [countryCode, setCountryCode] = useState(initialCountryCode);
   const [timezone, setTimezone] = useState(() => normalizeTimezone(gym.timezone, initialCountryCode));
@@ -174,6 +226,14 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
     setCountryCode(nextCountryCode);
     setTimezone(defaultTimezoneForCountry(nextCountryCode));
   }
+
+  useEffect(() => {
+    let active = true;
+    void onLoadOwner(gym.id).then((account) => { if (active) setOwner(account); }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : "The owner account could not be loaded.");
+    });
+    return () => { active = false; };
+  }, [gym.id, onLoadOwner]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
@@ -190,8 +250,55 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
     finally { setBusy(false); }
   }
 
+  async function submitOwner(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const next = owner ? await onUpdateOwner(gym.id, {
+        name: String(form.get("owner_name")), email: String(form.get("owner_email")), phone: String(form.get("owner_phone")),
+        status: String(form.get("owner_status")) as "active" | "suspended", reason: String(form.get("reason")),
+      }) : await onCreateOwner(gym.id, {
+        name: String(form.get("owner_name")), email: String(form.get("owner_email")), phone: String(form.get("owner_phone")),
+        setup_method: ownerSetupMethod,
+        temporary_password: ownerSetupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined,
+        temporary_password_confirmation: ownerSetupMethod === "temporary_password" ? String(form.get("temporary_password_confirmation")) : undefined,
+        require_password_change: ownerSetupMethod === "temporary_password" ? true : undefined,
+        reason: String(form.get("reason")),
+      });
+      setOwner(next); setOwnerEditing(false);
+      setNotice(owner ? "Owner account updated and audited." : ownerSetupMethod === "invite" ? "Owner login created and secure setup email queued." : "Owner login created with a temporary password.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The owner account could not be saved."); }
+    finally { setBusy(false); }
+  }
+
+  async function submitOwnerAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ownerAction) return;
+    const reason = String(new FormData(event.currentTarget).get("reason"));
+    setBusy(true); setError(null); setNotice(null); setTemporaryPassword(null);
+    try {
+      if (ownerAction === "reset") {
+        setOwner(await onSendReset(gym.id, reason));
+        setNotice("A secure password reset/setup email was queued for the owner.");
+      } else {
+        const result = await onGenerateTemporary(gym.id, reason);
+        setOwner(result.account); setTemporaryPassword(result.temporary_password);
+      }
+      setOwnerAction(null);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The owner security action failed."); }
+    finally { setBusy(false); }
+  }
+
+  async function copyTemporaryPassword() {
+    if (!temporaryPassword) return;
+    try { await navigator.clipboard.writeText(temporaryPassword); setNotice("Temporary password copied. Share it through a private channel."); }
+    catch { setError("Your browser blocked copying. Copy the temporary password manually now."); }
+  }
+
   return <ModalShell title={editing ? `Edit ${gym.name}` : gym.name} eyebrow={editing ? "Audited tenant settings" : "Gym details"} onClose={onClose}>
     {error && <div className="form-error" role="alert">{error}</div>}
+    {notice && <div className="form-success" role="status">{notice}</div>}
     {editing ? <form onSubmit={submit}>
       <div className="field-pair"><label>Gym name<input name="name" required maxLength={160} defaultValue={gym.name} /></label><label>Legal name<input name="legal_name" maxLength={200} defaultValue={gym.legal_name ?? ""} /></label></div>
       <div className="field-trio"><label>Currency<select name="base_currency" defaultValue={gym.base_currency}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
@@ -203,6 +310,30 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate }: {
       <dl className="platform-detail-grid"><div><dt>Status</dt><dd>{readable(gym.status)}</dd></div><div><dt>Currency</dt><dd>{gym.base_currency}</dd></div><div><dt>Country</dt><dd>{gym.country_code}</dd></div><div><dt>Timezone</dt><dd>{gym.timezone}</dd></div><div><dt>Slug</dt><dd>{gym.slug}</dd></div><div><dt>Legal name</dt><dd>{gym.legal_name ?? "Not set"}</dd></div></dl>
       <div className="platform-management-actions"><button className="secondary-button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit gym</button><button className="secondary-button" onClick={onOpen}><ArrowRight size={15} /> Open gym</button></div>
       <div className="modal-note"><Archive size={17} />Use Edit gym to activate, deactivate or archive this tenant. IronCore retains the audit and billing history.</div>
+      <section className="owner-account-panel" aria-labelledby="owner-account-title">
+        <div className="owner-account-heading"><div><p className="eyebrow">Gym Owner Account</p><h3 id="owner-account-title">Owner login and access</h3></div>{owner !== undefined && <button className="secondary-button" type="button" onClick={() => { setOwnerEditing(true); setOwnerAction(null); setTemporaryPassword(null); }}><Pencil size={15} /> {owner ? "Edit owner" : "Create owner login"}</button>}</div>
+        {owner === undefined ? <div className="table-state"><LoaderCircle className="spin" size={18} /> Loading owner account…</div> : owner ? <>
+          <dl className="platform-detail-grid owner-detail-grid"><div><dt>Owner</dt><dd>{owner.name}</dd></div><div><dt>Login email</dt><dd>{owner.email}</dd></div><div><dt>Phone</dt><dd>{owner.phone ?? "Not set"}</dd></div><div><dt>Account status</dt><dd>{readable(owner.account_status)}</dd></div><div><dt>Invite / setup</dt><dd>{readable(owner.setup_status)}</dd></div><div><dt>Last login</dt><dd>{owner.last_login_at ? new Date(owner.last_login_at).toLocaleString() : "Never"}</dd></div><div><dt>Role</dt><dd>Gym Owner / Gym Admin</dd></div><div><dt>Password</dt><dd>Securely hashed · never visible</dd></div></dl>
+          <div className="platform-management-actions owner-security-actions"><button className="secondary-button" type="button" onClick={() => setOwnerAction("reset")}><Mail size={15} /> {owner.setup_status === "invite_pending" ? "Resend invite" : "Reset password by email"}</button><button className="secondary-button" type="button" onClick={() => setOwnerAction("temporary")}><KeyRound size={15} /> Generate temporary password</button></div>
+        </> : <div className="compact-empty-state"><UserRound size={22} /><div><strong>No owner login yet</strong><span>Create one here without changing the gym&apos;s business settings.</span></div></div>}
+
+        {ownerEditing && <form className="owner-account-form" onSubmit={submitOwner}>
+          <div className="field-pair"><label>Owner full name<input name="owner_name" required maxLength={160} defaultValue={owner?.name ?? ""} /></label><label>Login email<input name="owner_email" required type="email" maxLength={254} defaultValue={owner?.email ?? ""} /></label></div>
+          <div className="field-pair"><label>Owner phone<input name="owner_phone" required type="tel" maxLength={40} defaultValue={owner?.phone ?? ""} /></label>{owner ? <label>Account status<select name="owner_status" defaultValue={owner.account_status}><option value="active">Active</option><option value="suspended">Suspended</option></select></label> : <label>Setup method<select value={ownerSetupMethod} onChange={(event) => setOwnerSetupMethod(event.target.value as "invite" | "temporary_password")}><option value="invite">Send secure invite/setup email</option><option value="temporary_password">Set temporary password manually</option></select></label>}</div>
+          {!owner && ownerSetupMethod === "temporary_password" && <div className="field-pair"><label>Temporary password<input name="temporary_password" type="password" minLength={12} maxLength={255} autoComplete="new-password" required /></label><label>Confirm temporary password<input name="temporary_password_confirmation" type="password" minLength={12} maxLength={255} autoComplete="new-password" required /></label></div>}
+          {!owner && ownerSetupMethod === "temporary_password" && <label className="owner-toggle owner-required"><input type="checkbox" checked readOnly /> Require password change on first login</label>}
+          <label>Audit reason<textarea name="reason" required minLength={5} maxLength={500} placeholder={owner ? "Explain the owner profile, email or access change" : "Explain why this owner login is being created"} /></label>
+          <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setOwnerEditing(false)}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Saving…" : owner ? "Save owner account" : "Create owner login"}</button></div>
+        </form>}
+
+        {ownerAction && <form className="owner-action-form" onSubmit={submitOwnerAction}>
+          <p>{ownerAction === "reset" ? "IronCore will email a secure, expiring one-time reset link. The current password remains private." : "IronCore will replace the current password immediately, sign out existing sessions and show the new temporary password once."}</p>
+          <label>Audit reason<textarea name="reason" required minLength={5} maxLength={500} autoFocus /></label>
+          <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setOwnerAction(null)}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Working…" : ownerAction === "reset" ? "Send secure link" : "Generate password"}</button></div>
+        </form>}
+
+        {temporaryPassword && <div className="temporary-password-result" role="status"><ShieldCheck size={19} /><div><strong>Copy this temporary password now</strong><code>{temporaryPassword}</code><small>It will not be shown again. The owner must change it before opening the gym portal.</small></div><button className="secondary-button" type="button" onClick={copyTemporaryPassword}><Copy size={15} /> Copy</button></div>}
+      </section>
     </>}
   </ModalShell>;
 }
@@ -317,7 +448,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
     </section>
     {gymModal && <CreateGymModal onClose={() => setGymModal(false)} onCreate={data.onCreateGym} />}
     {planModal && <CreatePlanModal onClose={() => setPlanModal(false)} onCreate={data.onCreatePlan} />}
-    {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} />}
+    {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} onLoadOwner={data.onLoadGymOwner} onCreateOwner={data.onCreateGymOwner} onUpdateOwner={data.onUpdateGymOwner} onSendReset={data.onSendGymOwnerReset} onGenerateTemporary={data.onGenerateGymOwnerTemporaryPassword} />}
     {selectedPlan && <PlanManagementModal plan={selectedPlan} onClose={() => setSelectedPlan(null)} onUpdate={data.onUpdatePlan} />}
     {securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={data.onChangePassword} mfa={data.mfa} />}
   </div>;

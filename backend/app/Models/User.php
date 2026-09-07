@@ -18,9 +18,9 @@ class User extends Authenticatable
 
     public const SESSION_AUTH_VERSION_KEY = 'ironcore_auth_version';
 
-    protected $attributes = ['auth_version' => 1];
+    protected $attributes = ['auth_version' => 1, 'must_change_password' => false];
 
-    protected $fillable = ['name', 'email', 'password', 'platform_role', 'email_verified_at'];
+    protected $fillable = ['name', 'email', 'password', 'platform_role', 'email_verified_at', 'must_change_password', 'last_login_at'];
 
     protected $hidden = ['password', 'remember_token', 'mfa_secret', 'mfa_last_used_step'];
 
@@ -30,6 +30,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'auth_version' => 'integer',
+            'must_change_password' => 'boolean',
+            'last_login_at' => 'immutable_datetime',
             'mfa_secret' => 'encrypted',
             'mfa_confirmed_at' => 'immutable_datetime',
             'mfa_last_used_step' => 'integer',
@@ -71,7 +73,7 @@ class User extends Authenticatable
     public function gyms(): BelongsToMany
     {
         return $this->belongsToMany(Gym::class)
-            ->withPivot(['role', 'status', 'joined_at'])
+            ->withPivot(['role', 'status', 'joined_at', 'setup_method', 'invite_sent_at', 'setup_completed_at'])
             ->withTimestamps();
     }
 

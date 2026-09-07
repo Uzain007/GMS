@@ -64,6 +64,7 @@ import {
   type MemberAccountActivationPreview,
   type MfaChallenge,
   type NewGym,
+  type CreatedGym,
   type UpdateGym,
   type UpdateSaasPlan,
   type NewSaasPlanPrice,
@@ -440,6 +441,35 @@ function InitialSuperAdminSetup({ available, busy, error, onCreate }: {
   </main>;
 }
 
+function RequiredPasswordChange({ user, onChange, onLogout }: {
+  user: AuthenticatedUser;
+  onChange: (currentPassword: string, password: string) => Promise<void>;
+  onLogout: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const current = String(form.get("current_password"));
+    const password = String(form.get("password"));
+    if (password !== String(form.get("password_confirmation"))) {
+      setError("The new password confirmation does not match.");
+      return;
+    }
+    setBusy(true); setError(null);
+    try { await onChange(current, password); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Your password could not be changed."); }
+    finally { setBusy(false); }
+  }
+
+  return <main className="auth-page required-password-page">
+    <section className="auth-story"><Brand /><div><p className="eyebrow">Secure first sign-in</p><h1>Create your private password.</h1><p>Your temporary credential cannot open platform or gym data.</p></div><ul><li><ShieldCheck size={17} /> Existing sessions are revoked</li><li><LockKeyhole size={17} /> Password stays securely hashed</li><li><Building2 size={17} /> Gym access remains tenant-bound</li></ul></section>
+    <section className="auth-form-side"><form className="auth-card" onSubmit={submit}><div className="auth-mobile-brand"><Brand /></div><p className="eyebrow">Password change required</p><h2>Welcome, {user.name.split(" ")[0]}</h2><p>Replace the temporary password before entering your workspace.</p>{error && <div className="form-error" role="alert">{error}</div>}<label>Temporary password<input name="current_password" type="password" autoComplete="current-password" required maxLength={1024} autoFocus /></label><label>New password<input name="password" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><label>Confirm new password<input name="password_confirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={255} /></label><small>Use 12+ characters with upper and lower case letters, a number and a symbol.</small><button className="primary-button auth-submit" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={17} /> Securing account…</> : <>Change password and continue <ArrowRight size={17} /></>}</button><button className="text-button" type="button" onClick={onLogout}>Sign out</button></form></section>
+  </main>;
+}
+
 function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelReset, challenge, onVerifyMfa, onCancelMfa, busy, error, liveApiConfigured = true }: {
   onLogin: (email: string, password: string) => Promise<void>;
   onRequestReset: (email: string) => Promise<void>;
@@ -627,6 +657,15 @@ export function IronCoreApp() {
         return;
       }
       let identity = await api.me();
+      if (identity.must_change_password) {
+        // A temporary credential receives only the narrow password-change UI;
+        // no platform or tenant collections are requested until it is replaced.
+        setUser(identity);
+        setGyms([]);
+        setSelectedGym(null);
+        setPhase("authenticated");
+        return;
+      }
       const invitation = pendingInvitation();
       if (invitation) {
         try {
@@ -975,6 +1014,7 @@ export function IronCoreApp() {
   async function changePassword(currentPassword: string, password: string): Promise<void> {
     if (!api) return;
     await api.changePassword(currentPassword, password);
+    await loadSession();
   }
 
   async function logout() {
@@ -1017,10 +1057,11 @@ export function IronCoreApp() {
     }
   }
 
-  async function createPlatformGym(input: NewGym): Promise<void> {
+  async function createPlatformGym(input: NewGym): Promise<CreatedGym> {
     if (!api || user?.platform_role !== "super_admin") throw new Error("Only a super administrator can create a gym.");
     const created = await api.createGym(input);
-    setGyms((current) => [...current, { ...created, role: "super_admin" as IronCoreRole }].sort((left, right) => left.name.localeCompare(right.name)));
+    setGyms((current) => [...current, { ...created.gym, role: "super_admin" as IronCoreRole }].sort((left, right) => left.name.localeCompare(right.name)));
+    return created;
   }
 
   async function updatePlatformGym(gymId: string, input: UpdateGym): Promise<void> {
@@ -1380,6 +1421,7 @@ export function IronCoreApp() {
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
   if (phase === "setup") return <InitialSuperAdminSetup available={Boolean(initialSetup?.setup_available)} busy={authBusy} error={authError} onCreate={createInitialSuperAdmin} />;
   if (phase === "anonymous" || !user) return <LoginScreen onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} onCancelReset={() => setPasswordReset(null)} busy={authBusy} error={authError} liveApiConfigured={Boolean(api)} />;
+  if (user.must_change_password) return <RequiredPasswordChange user={user} onChange={changePassword} onLogout={logout} />;
   if (user.platform_role === "super_admin" && !selectedGym) return <PlatformPortal data={{
     user,
     gyms,
@@ -1390,6 +1432,11 @@ export function IronCoreApp() {
     onOpenGym: (gym) => selectGym({ ...gym, role: "super_admin" }),
     onCreateGym: createPlatformGym,
     onUpdateGym: updatePlatformGym,
+    onLoadGymOwner: (gymId) => api!.gymOwnerAccount(gymId),
+    onCreateGymOwner: (gymId, input) => api!.createGymOwnerAccount(gymId, input),
+    onUpdateGymOwner: (gymId, input) => api!.updateGymOwnerAccount(gymId, input),
+    onSendGymOwnerReset: (gymId, reason) => api!.sendGymOwnerReset(gymId, reason),
+    onGenerateGymOwnerTemporaryPassword: (gymId, reason) => api!.generateGymOwnerTemporaryPassword(gymId, reason),
     onCreatePlan: createSaasPlan,
     onUpdatePlan: updateSaasPlan,
     onExportMembers: async () => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformMemberRosterExport(), "ironcore-all-gyms-members.csv"); },
