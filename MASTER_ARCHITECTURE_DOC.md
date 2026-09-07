@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.52.0 — Railway public API container |
-| Last verified | 4 September 2026 |
+| MAD version | 0.53.0 — SaaS tenant-status automation |
+| Last verified | 7 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Railway public Laravel web process implemented locally; approval pending |
+| Active milestone | SaaS payment-to-tenant lifecycle automation implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -563,7 +563,7 @@ Stripe subscriptions are activated only by signed provider events. Cash and bank
 | `reviewed_at`, `review_reason`, `paid_at` | mixed | yes | mandatory decision evidence and settlement time |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status, method and price indexes |
 
-Manual subscription payments never enter the gym-member `payments` table. One pending manual request is allowed per gym. Approval creates a manual platform billing customer, an Active snapshotted gym subscription and a Paid SaaS billing invoice atomically; rejection preserves the evidence without granting service.
+Manual subscription payments never enter the gym-member `payments` table. One pending manual request is allowed per gym. Approval creates a manual platform billing customer, an Active snapshotted gym subscription and a Paid SaaS billing invoice atomically, moves a Trial/Past-due tenant to Active, clears its trial end and records the paid period start/end; rejection preserves the evidence without granting service. Signed paid or failed Stripe invoices apply the same Active/Past-due tenant lifecycle. Suspended and Cancelled tenant states remain explicit Super Admin overrides and are never reopened by billing automation.
 
 ### `subscription_checkout_sessions` — tenant checkout idempotency
 
@@ -1034,6 +1034,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Stripe Connect uses direct charges on each gym's connected account; IronCore SaaS subscription billing remains commercially separate from member funds.
 - IronCore SaaS subscriptions use Customers, recurring Prices, Checkout and the customer portal on the platform Stripe account; connected-account headers are never used for this money flow.
 - Each accepted SaaS contract snapshots tier, features, amount, currency and interval. Provider webhooks, not checkout redirects, authorize active/trial access and dunning transitions.
+- Paid manual approvals and signed paid Stripe invoices synchronize eligible tenants to Active, clear trial state and retain the authoritative subscription period end as the next renewal boundary. Signed payment failures and unpaid subscription states synchronize eligible tenants to Past due. Billing automation never overrides a Super Admin suspension or cancellation, and every effective tenant-status change appends tenant audit evidence.
 - Signed Stripe events resolve an opaque connected account through a SELECT-only RLS policy, bind its gym, verify server-authored metadata and use `(gym_id, provider, event_id)` idempotency before updating a ledger record.
 
 ## Performance and scale contract
@@ -1110,6 +1111,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Payments frontend/API integration | Implemented locally; approval pending | Encrypted gym bank settings, member copy/details/upload journey, Pending Verification and rejection/resubmission, receipt review, cash recording and optional Stripe |
 | Platform SaaS plan catalogue and immutable prices | Implemented locally; approval pending | Platform-owned tiers publish without Stripe, declare cash/bank/card availability and lazily synchronize Stripe IDs only for configured card checkout |
 | Tenant-isolated gym subscriptions and SaaS invoices | Implemented locally; approval pending | Separate platform Stripe/manual identities, reviewed cash/bank evidence, one current subscription, immutable snapshots and invoice history |
+| SaaS payment-to-tenant status automation | Implemented locally; approval pending | Paid cash/bank approvals and signed paid Stripe invoices end trials and activate tenants with exact billing periods; failed/unpaid states become Past due, while manual suspension/cancellation remains authoritative and every effective change is audited. |
 | Stripe Billing signed webhook synchronization | Implemented; core runtime passing; provider gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
 | Platform SaaS subscription frontend/API integration | Implemented; core runtime passing; provider gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
 | Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |

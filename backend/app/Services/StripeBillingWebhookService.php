@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\Currency;
-use App\Enums\GymStatus;
 use App\Enums\PaymentProvider;
 use App\Enums\SaasInvoiceStatus;
 use App\Enums\SaasSubscriptionStatus;
@@ -26,6 +25,7 @@ class StripeBillingWebhookService
     public function __construct(
         private readonly TenantContext $context,
         private readonly StripePlatformBillingService $stripe,
+        private readonly GymSaasStatusService $gymStatus,
     ) {}
 
     /** @return array{duplicate: bool} */
@@ -69,6 +69,7 @@ class StripeBillingWebhookService
                 $record->update(['status' => 'failed', 'error' => mb_substr($exception->getMessage(), 0, 2000)]);
                 throw $exception;
             }
+
             return ['duplicate' => false];
         });
     }
@@ -92,11 +93,13 @@ class StripeBillingWebhookService
                 }
                 $this->syncSubscription($customer, $this->stripe->retrieveSubscription($subscriptionId));
             }
+
             return;
         }
 
         if (str_starts_with($type, 'customer.subscription.')) {
             $this->syncSubscription($customer, $object);
+
             return;
         }
 
@@ -110,14 +113,39 @@ class StripeBillingWebhookService
                     'failure_code' => 'invoice_payment_failed',
                     'failure_message' => 'The latest IronCore subscription invoice could not be collected.',
                 ]);
-                $this->syncGymStatus(SaasSubscriptionStatus::PastDue, null);
+                $this->gymStatus->synchronize(
+                    $this->context->gym(),
+                    SaasSubscriptionStatus::PastDue,
+                    reason: 'Signed Stripe Billing payment-failure synchronization.',
+                );
             }
             if ($subscription && $type === 'invoice.paid') {
-                $subscription->update([
+                // Stripe may emit a zero-value paid invoice when a free trial
+                // starts. Only a genuinely settled billing period ends Trial.
+                $settledPaidPeriod = $invoice->amount_paid_minor > 0;
+                $values = [
                     'latest_invoice_id' => $invoice->provider_invoice_id,
                     'failure_code' => null,
                     'failure_message' => null,
-                ]);
+                ];
+                if ($settledPaidPeriod && ! in_array($subscription->status, [
+                    SaasSubscriptionStatus::Paused,
+                    SaasSubscriptionStatus::Cancelled,
+                    SaasSubscriptionStatus::IncompleteExpired,
+                ], true)) {
+                    $values['status'] = SaasSubscriptionStatus::Active;
+                    $values['trial_ends_at'] = null;
+                    $values['current_period_start'] = $invoice->period_start ?? $subscription->current_period_start;
+                    $values['current_period_end'] = $invoice->period_end ?? $subscription->current_period_end;
+                }
+                $subscription->update($values);
+                $freshSubscription = $subscription->fresh();
+                $this->gymStatus->synchronize(
+                    $this->context->gym(),
+                    $freshSubscription->status,
+                    $freshSubscription->trial_ends_at,
+                    reason: 'Signed Stripe Billing paid-invoice synchronization.',
+                );
             }
         }
     }
@@ -182,7 +210,13 @@ class StripeBillingWebhookService
             ['provider_subscription_id' => $providerSubscriptionId],
             $values,
         );
-        $this->syncGymStatus($status, $subscription->trial_ends_at);
+        $this->gymStatus->synchronize(
+            $this->context->gym(),
+            $status,
+            $subscription->trial_ends_at,
+            reason: 'Signed Stripe Billing subscription synchronization.',
+        );
+
         return $subscription;
     }
 
@@ -220,23 +254,6 @@ class StripeBillingWebhookService
         );
     }
 
-    private function syncGymStatus(SaasSubscriptionStatus $status, ?Carbon $trialEndsAt): void
-    {
-        $gymStatus = match ($status) {
-            SaasSubscriptionStatus::Active => GymStatus::Active,
-            SaasSubscriptionStatus::Trialing => GymStatus::Trial,
-            SaasSubscriptionStatus::Incomplete, SaasSubscriptionStatus::PastDue => GymStatus::PastDue,
-            SaasSubscriptionStatus::Unpaid, SaasSubscriptionStatus::Paused,
-            SaasSubscriptionStatus::Cancelled, SaasSubscriptionStatus::IncompleteExpired => GymStatus::Suspended,
-        };
-        // The tenant remains selectable for owners while suspended so they can
-        // reach billing recovery; product authorization can narrow elsewhere.
-        Gym::query()->whereKey($this->context->id())->update([
-            'status' => $gymStatus,
-            'trial_ends_at' => $status === SaasSubscriptionStatus::Trialing ? $trialEndsAt : null,
-        ]);
-    }
-
     private function resolveGymId(string $providerCustomerId): string
     {
         $pgsql = DB::connection()->getDriverName() === 'pgsql';
@@ -256,6 +273,7 @@ class StripeBillingWebhookService
         if (! $row) {
             throw new RuntimeException('The Stripe Billing customer is not recognised.');
         }
+
         return (string) $row->gym_id;
     }
 
@@ -277,6 +295,7 @@ class StripeBillingWebhookService
     private function subscriptionPriceId(array $payload): string
     {
         $price = $payload['items']['data'][0]['price'] ?? null;
+
         return $this->stringId($price);
     }
 
@@ -294,6 +313,7 @@ class StripeBillingWebhookService
         if (is_string($value)) {
             return trim($value);
         }
+
         return is_array($value) ? trim((string) ($value['id'] ?? '')) : '';
     }
 

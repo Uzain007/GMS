@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Enums\PaymentProvider;
 use App\Enums\PaymentMethod;
+use App\Enums\PaymentProvider;
 use App\Enums\PaymentStatus;
 use App\Enums\SaasInvoiceStatus;
 use App\Enums\SaasPlanStatus;
@@ -12,9 +12,9 @@ use App\Enums\SubscriptionCheckoutStatus;
 use App\Models\Gym;
 use App\Models\GymSubscription;
 use App\Models\PlatformBillingCustomer;
+use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
-use App\Models\SaasBillingInvoice;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\SubscriptionCheckoutSession;
 use App\Models\User;
@@ -32,6 +32,7 @@ class SaasBillingService
     public function __construct(
         private readonly StripePlatformBillingService $stripe,
         private readonly AuditService $audit,
+        private readonly GymSaasStatusService $gymStatus,
     ) {}
 
     public function createPlan(array $data, User $actor, Request $request): SaasPlan
@@ -58,6 +59,7 @@ class SaasBillingService
                 'provider_price_id' => null,
             ]);
             $this->audit->record('platform.saas_plan.created', $plan, $actor, after: $plan->load('prices')->toArray(), reason: 'Initial SaaS plan publication', request: $request);
+
             return $plan->fresh('prices');
         });
     }
@@ -65,6 +67,7 @@ class SaasBillingService
     public function updatePlan(SaasPlan $plan, array $data, User $actor, Request $request): SaasPlan
     {
         $before = $plan->load('prices')->toArray();
+
         return DB::transaction(function () use ($plan, $data, $actor, $request, $before): SaasPlan {
             $priceData = $data['price'] ?? null;
             $plan->update(collect($data)->except(['reason', 'price'])->all());
@@ -84,6 +87,7 @@ class SaasBillingService
             }
             $fresh = $plan->fresh('prices');
             $this->audit->record('platform.saas_plan.updated', $fresh, $actor, $before, $fresh->toArray(), $data['reason'], $request);
+
             return $fresh;
         });
     }
@@ -107,6 +111,7 @@ class SaasBillingService
                 'provider_price_id' => null,
             ]);
             $this->audit->record('platform.saas_price.created', $price, $actor, after: $price->toArray(), reason: $data['reason'], request: $request);
+
             return $price;
         });
     }
@@ -146,6 +151,7 @@ class SaasBillingService
         $existing = SubscriptionCheckoutSession::query()->where('idempotency_key', $idempotencyKey)->first();
         if ($existing) {
             $session = $this->stripe->retrieveCheckout($existing->provider_session_id);
+
             return ['checkout_url' => (string) $session['url'], 'idempotency_reused' => true];
         }
 
@@ -157,6 +163,7 @@ class SaasBillingService
             // Reuse the one active tenant checkout even when a second browser
             // generated a different request key, preventing duplicate contracts.
             $session = $this->stripe->retrieveCheckout($open->provider_session_id);
+
             return ['checkout_url' => (string) $session['url'], 'idempotency_reused' => true];
         }
 
@@ -181,6 +188,7 @@ class SaasBillingService
                 'status' => SubscriptionCheckoutStatus::Open->value,
             ],
         );
+
         return ['checkout_url' => $checkout['checkout_url'], 'idempotency_reused' => false];
     }
 
@@ -340,6 +348,13 @@ class SaasBillingService
                     'review_reason' => $data['reason'],
                     'paid_at' => $periodStart,
                 ]);
+                $this->gymStatus->synchronize(
+                    $gym,
+                    SaasSubscriptionStatus::Active,
+                    actor: $actor,
+                    reason: 'Approved SaaS '.$locked->method->value.' payment: '.$data['reason'],
+                    request: $request,
+                );
             }
 
             $fresh = $locked->fresh()->load('price.plan');
@@ -370,6 +385,7 @@ class SaasBillingService
         if (! $customer) {
             throw ValidationException::withMessages(['subscription' => ['Start a subscription before opening the billing portal.']]);
         }
+
         return $this->stripe->createPortal($customer);
     }
 
@@ -383,6 +399,7 @@ class SaasBillingService
         }
 
         $provider = $this->stripe->createCustomer($gym, $actor->email, $gym->legal_name ?: $gym->name);
+
         return PlatformBillingCustomer::query()->firstOrCreate(
             ['provider' => PaymentProvider::Stripe->value],
             [

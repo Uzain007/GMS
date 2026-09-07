@@ -3,16 +3,21 @@
 namespace Tests\Feature;
 
 use App\Enums\Currency;
+use App\Enums\GymStatus;
+use App\Enums\PaymentProvider;
+use App\Enums\SaasSubscriptionStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
 use App\Models\Gym;
 use App\Models\GymSubscription;
 use App\Models\Payment;
+use App\Models\PlatformBillingCustomer;
 use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\User;
+use App\Services\StripeBillingWebhookService;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
@@ -76,6 +81,8 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         Storage::fake('local');
         config(['filesystems.default' => 'local']);
         [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        $trialEndsAt = now()->addDays(14)->startOfSecond();
+        $gym->update(['status' => GymStatus::Trial, 'trial_ends_at' => $trialEndsAt]);
         [, $otherGym] = $this->tenant(UserRole::GymOwner);
         [$plan, $price] = $this->catalogue(['bank_transfer']);
         Sanctum::actingAs($owner);
@@ -96,6 +103,8 @@ class SaasOptionalPaymentPublishingTest extends TestCase
             ->assertJsonPath('data.has_receipt', true)
             ->assertJsonMissingPath('data.receipt_path');
         $paymentId = $created->json('data.id');
+        $this->assertSame(GymStatus::Trial, $gym->fresh()->status);
+        $this->assertSame($trialEndsAt->timestamp, $gym->fresh()->trial_ends_at?->timestamp);
 
         $this->patchJson(
             "/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments/{$paymentId}/review",
@@ -130,12 +139,188 @@ class SaasOptionalPaymentPublishingTest extends TestCase
             $this->assertSame($price->id, $subscription->saas_plan_price_id);
             $this->assertSame('paid', $invoice->status->value);
             $this->assertSame(7900, $invoice->amount_paid_minor);
+            $this->assertNotNull($subscription->current_period_start);
+            $this->assertSame(
+                $subscription->current_period_start->copy()->addMonthNoOverflow()->timestamp,
+                $subscription->current_period_end?->timestamp,
+            );
+            $this->assertSame($subscription->current_period_end?->timestamp, $invoice->period_end?->timestamp);
         });
+        $this->assertSame(GymStatus::Active, $gym->fresh()->status);
+        $this->assertNull($gym->fresh()->trial_ends_at);
         app(TenantContext::class)->run($gym, function (): void {
             // The SaaS ledger and gym-member payment ledger stay separate, and
             // their tenant audit evidence remains behind forced RLS.
             $this->assertSame(0, Payment::query()->withoutGlobalScopes()->count());
             $this->assertTrue(AuditLog::query()->where('event', 'saas.subscription_payment.approved')->exists());
+            $this->assertTrue(AuditLog::query()->where('event', 'gym.saas_status.synchronized')->exists());
+        });
+    }
+
+    public function test_unpaid_trial_stays_trial_until_a_payment_is_approved(): void
+    {
+        [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        $trialEndsAt = now()->addDays(14)->startOfSecond();
+        $gym->update(['status' => GymStatus::Trial, 'trial_ends_at' => $trialEndsAt]);
+        [, $price] = $this->catalogue(['cash']);
+        Sanctum::actingAs($owner);
+
+        $payment = $this->postJson(
+            "/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments",
+            [
+                'saas_plan_price_id' => $price->id,
+                'method' => 'cash',
+                'idempotency_key' => 'saas-trial-unpaid-0001',
+                'reference' => 'AWAITING-CASH-001',
+            ],
+            ['X-Gym-ID' => $gym->id],
+        )->assertCreated()->assertJsonPath('data.status', 'pending');
+
+        $this->assertSame(GymStatus::Trial, $gym->fresh()->status);
+        $this->assertSame($trialEndsAt->timestamp, $gym->fresh()->trial_ends_at?->timestamp);
+        app(TenantContext::class)->run($gym, function () use ($payment): void {
+            $this->assertNull(SaasSubscriptionPayment::query()->findOrFail($payment->json('data.id'))->gym_subscription_id);
+            $this->assertFalse(AuditLog::query()->where('event', 'gym.saas_status.synchronized')->exists());
+        });
+    }
+
+    public function test_failed_stripe_invoice_moves_active_gym_to_past_due(): void
+    {
+        [, $gym] = $this->tenant(UserRole::GymOwner);
+        [$plan, $price] = $this->catalogue(['stripe']);
+        [$customer, $subscription] = $this->stripeSubscription($gym, $plan, $price);
+        $periodStart = now()->subMonth()->startOfSecond();
+        $periodEnd = now()->startOfSecond();
+
+        app(StripeBillingWebhookService::class)->process([
+            'id' => 'evt_invoice_failed_status_001',
+            'type' => 'invoice.payment_failed',
+            'data' => ['object' => [
+                'id' => 'in_failed_status_001',
+                'customer' => $customer->provider_customer_id,
+                'subscription' => $subscription->provider_subscription_id,
+                'status' => 'open',
+                'currency' => 'gbp',
+                'amount_due' => 7900,
+                'amount_paid' => 0,
+                'amount_remaining' => 7900,
+                'period_start' => $periodStart->timestamp,
+                'period_end' => $periodEnd->timestamp,
+            ]],
+        ], '{"event":"failed-status"}');
+
+        $this->assertSame(GymStatus::PastDue, $gym->fresh()->status);
+        app(TenantContext::class)->run($gym, function () use ($subscription): void {
+            $this->assertSame(SaasSubscriptionStatus::PastDue, $subscription->fresh()->status);
+            $this->assertTrue(AuditLog::query()->where('event', 'gym.saas_status.synchronized')->exists());
+        });
+    }
+
+    public function test_paid_stripe_invoice_ends_trial_and_sets_the_renewal_period(): void
+    {
+        [, $gym] = $this->tenant(UserRole::GymOwner);
+        $trialEndsAt = now()->addDays(7)->startOfSecond();
+        $gym->update(['status' => GymStatus::Trial, 'trial_ends_at' => $trialEndsAt]);
+        [$plan, $price] = $this->catalogue(['stripe']);
+        [$customer, $subscription] = $this->stripeSubscription($gym, $plan, $price);
+        app(TenantContext::class)->run($gym, fn () => $subscription->update([
+            'status' => SaasSubscriptionStatus::Trialing,
+            'trial_ends_at' => $trialEndsAt,
+        ]));
+        $periodStart = now()->startOfSecond();
+        $periodEnd = $periodStart->copy()->addMonthNoOverflow();
+
+        app(StripeBillingWebhookService::class)->process([
+            'id' => 'evt_invoice_zero_trial_001',
+            'type' => 'invoice.paid',
+            'data' => ['object' => [
+                'id' => 'in_zero_trial_001',
+                'customer' => $customer->provider_customer_id,
+                'subscription' => $subscription->provider_subscription_id,
+                'status' => 'paid',
+                'currency' => 'gbp',
+                'amount_due' => 0,
+                'amount_paid' => 0,
+                'amount_remaining' => 0,
+                'period_start' => $periodStart->timestamp,
+                'period_end' => $periodEnd->timestamp,
+                'status_transitions' => ['paid_at' => $periodStart->timestamp],
+            ]],
+        ], '{"event":"zero-trial"}');
+
+        $this->assertSame(GymStatus::Trial, $gym->fresh()->status);
+        $this->assertSame($trialEndsAt->timestamp, $gym->fresh()->trial_ends_at?->timestamp);
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(
+            SaasSubscriptionStatus::Trialing,
+            $subscription->fresh()->status,
+        ));
+
+        app(StripeBillingWebhookService::class)->process([
+            'id' => 'evt_invoice_paid_trial_001',
+            'type' => 'invoice.paid',
+            'data' => ['object' => [
+                'id' => 'in_paid_trial_001',
+                'customer' => $customer->provider_customer_id,
+                'subscription' => $subscription->provider_subscription_id,
+                'status' => 'paid',
+                'currency' => 'gbp',
+                'amount_due' => 7900,
+                'amount_paid' => 7900,
+                'amount_remaining' => 0,
+                'period_start' => $periodStart->timestamp,
+                'period_end' => $periodEnd->timestamp,
+                'status_transitions' => ['paid_at' => $periodStart->timestamp],
+            ]],
+        ], '{"event":"paid-trial"}');
+
+        $this->assertSame(GymStatus::Active, $gym->fresh()->status);
+        $this->assertNull($gym->fresh()->trial_ends_at);
+        app(TenantContext::class)->run($gym, function () use ($subscription, $periodStart, $periodEnd): void {
+            $fresh = $subscription->fresh();
+            $this->assertSame(SaasSubscriptionStatus::Active, $fresh->status);
+            $this->assertNull($fresh->trial_ends_at);
+            $this->assertSame($periodStart->timestamp, $fresh->current_period_start?->timestamp);
+            $this->assertSame($periodEnd->timestamp, $fresh->current_period_end?->timestamp);
+        });
+    }
+
+    public function test_manual_suspension_is_not_overwritten_by_a_paid_invoice(): void
+    {
+        [, $gym] = $this->tenant(UserRole::GymOwner);
+        [$plan, $price] = $this->catalogue(['stripe']);
+        [$customer, $subscription] = $this->stripeSubscription($gym, $plan, $price);
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/v1/gyms/{$gym->id}", [
+            'status' => GymStatus::Suspended->value,
+            'reason' => 'Manual risk suspension remains authoritative.',
+        ], ['X-Gym-ID' => $gym->id])->assertSuccessful()->assertJsonPath('data.status', 'suspended');
+
+        $periodStart = now()->startOfSecond();
+        $periodEnd = $periodStart->copy()->addMonthNoOverflow();
+        app(StripeBillingWebhookService::class)->process([
+            'id' => 'evt_invoice_paid_suspended_001',
+            'type' => 'invoice.paid',
+            'data' => ['object' => [
+                'id' => 'in_paid_suspended_001',
+                'customer' => $customer->provider_customer_id,
+                'subscription' => $subscription->provider_subscription_id,
+                'status' => 'paid',
+                'currency' => 'gbp',
+                'amount_due' => 7900,
+                'amount_paid' => 7900,
+                'amount_remaining' => 0,
+                'period_start' => $periodStart->timestamp,
+                'period_end' => $periodEnd->timestamp,
+                'status_transitions' => ['paid_at' => $periodStart->timestamp],
+            ]],
+        ], '{"event":"paid-suspended"}');
+
+        $this->assertSame(GymStatus::Suspended, $gym->fresh()->status);
+        app(TenantContext::class)->run($gym, function () use ($subscription, $periodEnd): void {
+            $fresh = $subscription->fresh();
+            $this->assertSame(SaasSubscriptionStatus::Active, $fresh->status);
+            $this->assertSame($periodEnd->timestamp, $fresh->current_period_end?->timestamp);
         });
     }
 
@@ -239,8 +424,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         $this->assertSame('prod_optional', $plan->fresh()->provider_product_id);
         $this->assertSame('price_optional', $price->fresh()->provider_price_id);
         Http::assertSentCount(4);
-        Http::assertSent(fn (HttpRequest $request): bool =>
-            str_ends_with($request->url(), '/v1/checkout/sessions')
+        Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/v1/checkout/sessions')
             && ! $request->hasHeader('Stripe-Account')
         );
     }
@@ -284,6 +468,39 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         ]);
 
         return [$plan, $price];
+    }
+
+    /** @return array{PlatformBillingCustomer, GymSubscription} */
+    private function stripeSubscription(Gym $gym, SaasPlan $plan, SaasPlanPrice $price): array
+    {
+        return app(TenantContext::class)->run($gym, function () use ($gym, $plan, $price): array {
+            $customer = PlatformBillingCustomer::query()->create([
+                'provider' => PaymentProvider::Stripe,
+                'provider_customer_id' => 'cus_status_'.substr($gym->id, 0, 8),
+                'billing_email' => 'billing-'.$gym->id.'@example.test',
+                'billing_name' => $gym->name,
+                'country_code' => 'GB',
+                'default_currency' => Currency::GBP,
+            ]);
+            $subscription = GymSubscription::query()->create([
+                'billing_customer_id' => $customer->id,
+                'saas_plan_id' => $plan->id,
+                'saas_plan_price_id' => $price->id,
+                'provider' => PaymentProvider::Stripe,
+                'provider_subscription_id' => 'sub_status_'.substr($gym->id, 0, 8),
+                'status' => SaasSubscriptionStatus::Active,
+                'plan_code_snapshot' => $plan->code,
+                'plan_name_snapshot' => $plan->name,
+                'feature_limits_snapshot' => $plan->feature_limits,
+                'currency' => Currency::GBP,
+                'amount_minor' => $price->amount_minor,
+                'billing_interval' => $price->billing_interval,
+                'current_period_start' => now()->subMonth(),
+                'current_period_end' => now(),
+            ]);
+
+            return [$customer, $subscription];
+        });
     }
 
     /** @return array<string, mixed> */
