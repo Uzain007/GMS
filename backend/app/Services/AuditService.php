@@ -27,6 +27,7 @@ class AuditService
                 ? $this->context->id()
                 : ($subject instanceof Gym ? $subject->getKey() : null),
             'actor_id' => $actor?->getKey(),
+            'actor_role' => $this->actorRole($actor),
             'event' => $event,
             'auditable_type' => $subject?->getMorphClass(),
             'auditable_id' => $subject?->getKey(),
@@ -37,5 +38,20 @@ class AuditService
             'user_agent' => mb_substr((string) $request?->userAgent(), 0, 500),
             'created_at' => now(),
         ]);
+    }
+
+    private function actorRole(?User $actor): ?string
+    {
+        if (! $actor) {
+            return null;
+        }
+        if ($actor->platform_role) {
+            return $actor->platform_role->value;
+        }
+        if (! $this->context->hasTenant()) {
+            return null;
+        }
+
+        return $actor->roleForGym($this->context->id())?->value;
     }
 }

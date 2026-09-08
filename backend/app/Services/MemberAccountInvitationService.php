@@ -8,6 +8,7 @@ use App\Models\Gym;
 use App\Models\Member;
 use App\Models\MemberAccountInvitation;
 use App\Models\User;
+use App\Jobs\SendAccountInvitation;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,7 @@ class MemberAccountInvitationService
     {
         $plainToken = Str::random(64);
 
-        return DB::transaction(function () use ($memberId, $expiresInHours, $actor, $request, $plainToken): array {
+        $result = DB::transaction(function () use ($memberId, $expiresInHours, $actor, $request, $plainToken): array {
             $member = Member::query()->lockForUpdate()->findOrFail($memberId);
             $email = mb_strtolower(trim((string) $member->email));
 
@@ -77,6 +78,11 @@ class MemberAccountInvitationService
 
             return [$invitation, $plainToken];
         });
+
+        $member = Member::query()->findOrFail($memberId);
+        SendAccountInvitation::dispatch($member->email, $this->context->id(), $this->context->gym()->name, $plainToken, 'member')->afterCommit();
+
+        return $result;
     }
 
     /** @return array{gym_name: string, member_first_name: string, masked_email: string, existing_account: bool} */

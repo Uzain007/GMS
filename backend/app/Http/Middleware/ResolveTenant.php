@@ -49,6 +49,10 @@ class ResolveTenant
                 return new JsonResponse(['message' => 'You do not have access to this gym.'], 403);
             }
 
+            if (! $user->isSuperAdmin() && ! $gym->status->allowsLogin()) {
+                return new JsonResponse(['message' => 'You do not have access to this gym.'], 403);
+            }
+
             // The route tenant has now been validated and promoted into the
             // trusted context. Remove the consumed parameter so Laravel's
             // positional controller dispatch cannot shift every nested route

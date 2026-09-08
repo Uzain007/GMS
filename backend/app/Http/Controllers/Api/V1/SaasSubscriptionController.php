@@ -6,6 +6,7 @@ use App\Enums\SaasPlanStatus;
 use App\Enums\SaasSubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StartSaasCheckoutRequest;
+use App\Http\Requests\CorrectSaasSubscriptionPaymentRequest;
 use App\Http\Requests\StoreSaasSubscriptionPaymentRequest;
 use App\Http\Requests\ReviewSaasSubscriptionPaymentRequest;
 use App\Http\Resources\GymSubscriptionResource;
@@ -17,12 +18,19 @@ use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use App\Models\SaasSubscriptionPayment;
+use App\Models\SaasPaymentCorrection;
+use App\Services\AuditService;
+use App\Support\SimplePdfDocument;
 use App\Services\SaasBillingService;
 use App\Services\StripePlatformBillingService;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
+use Shuchkin\SimpleXLSXGen;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -71,10 +79,83 @@ class SaasSubscriptionController extends Controller
     {
         return SaasSubscriptionPaymentResource::collection(
             SaasSubscriptionPayment::query()
-                ->with('price.plan')
+                ->with(['price.plan', 'corrections.correctedBy:id,name'])
                 ->orderByDesc('created_at')
                 ->paginate(25)
         );
+    }
+
+    public function correctManualPayment(
+        CorrectSaasSubscriptionPaymentRequest $request,
+        string $payment,
+        AuditService $audit,
+    ): SaasSubscriptionPaymentResource {
+        $record = SaasSubscriptionPayment::query()->findOrFail($payment);
+        $data = $request->validated();
+        $correction = DB::transaction(function () use ($record, $data, $request, $audit): SaasPaymentCorrection {
+            $correction = SaasPaymentCorrection::query()->create([
+                ...collect($data)->except('reason')->all(),
+                'saas_subscription_payment_id' => $record->id,
+                'corrected_by' => $request->user()->id,
+                'reason' => $data['reason'],
+                'created_at' => now(),
+            ]);
+            $audit->record('saas.payment.correction_recorded', $correction, $request->user(), before: [
+                'reference' => $record->reference, 'method' => $record->method->value,
+            ], after: collect($data)->except('reason')->all(), reason: $data['reason'], request: $request);
+
+            return $correction;
+        });
+
+        return new SaasSubscriptionPaymentResource($record->fresh()->load(['price.plan', 'corrections.correctedBy:id,name']));
+    }
+
+    public function ironCoreReceipt(string $payment): Response
+    {
+        $record = SaasSubscriptionPayment::query()->with(['price.plan', 'invoice', 'corrections'])->findOrFail($payment);
+        abort_unless($record->status->value === 'paid', 422, 'Only paid transactions have an IronCore receipt.');
+        $effectiveMethod = $record->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $record->method->value;
+        $lines = [
+            'Gym: '.app(TenantContext::class)->gym()->name,
+            'SaaS plan: '.$record->price->plan->name,
+            'Invoice number: '.($record->invoice?->number ?? 'Not issued'),
+            'Receipt number: ICR-'.mb_strtoupper(mb_substr(str_replace('-', '', $record->id), 0, 12)),
+            'Payment method: '.str_replace('_', ' ', $effectiveMethod),
+            'Amount: '.number_format($record->amount_minor / 100, 2).' '.$record->currency->value,
+            'Paid date: '.$record->paid_at?->toIso8601String(),
+            'Billing period: '.($record->invoice?->period_start?->toDateString() ?? '—').' to '.($record->invoice?->period_end?->toDateString() ?? '—'),
+            'Status: Paid',
+        ];
+
+        return response(SimplePdfDocument::fromLines($lines, 'IRONCORE · SaaS Receipt'), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="ironcore-saas-receipt.pdf"',
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
+    public function exportPayments(Request $request): Response|StreamedResponse
+    {
+        $format = mb_strtolower((string) $request->query('format', 'csv'));
+        abort_unless(in_array($format, ['csv', 'xlsx', 'pdf'], true), 422, 'Export format must be csv, xlsx or pdf.');
+        $rows = [['Created', 'Gym', 'Plan', 'Method', 'Reference', 'Amount', 'Currency', 'Status', 'Paid date']];
+        SaasSubscriptionPayment::query()->with(['price.plan', 'corrections'])->chunkById(500, function ($payments) use (&$rows): void {
+            foreach ($payments as $payment) {
+                $effectiveMethod = $payment->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $payment->method->value;
+                $effectiveReference = $payment->corrections->reverse()->first(fn ($item) => $item->reference !== null)?->reference ?? $payment->reference;
+                $rows[] = [$payment->created_at?->toIso8601String(), app(TenantContext::class)->gym()->name, $payment->price->plan->name,
+                    $effectiveMethod, $effectiveReference,
+                    $payment->amount_minor, $payment->currency->value, $payment->status->value, $payment->paid_at?->toIso8601String()];
+            }
+        }, 'id');
+        $name = 'ironcore-saas-payments-'.now()->format('Ymd-His');
+        if ($format === 'xlsx') {
+            return response((string) SimpleXLSXGen::fromArray($rows), 200, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition' => "attachment; filename=\"{$name}.xlsx\"", 'Cache-Control' => 'private, no-store']);
+        }
+        if ($format === 'pdf') {
+            return response(SimplePdfDocument::fromLines(array_map(fn (array $row): string => implode(' | ', $row), array_slice($rows, 1)), 'IRONCORE · SaaS Payment Report'), 200, ['Content-Type' => 'application/pdf', 'Content-Disposition' => "attachment; filename=\"{$name}.pdf\"", 'Cache-Control' => 'private, no-store']);
+        }
+        return response()->streamDownload(function () use ($rows): void { $stream = fopen('php://output', 'wb'); fwrite($stream, "\xEF\xBB\xBF"); foreach ($rows as $row) fputcsv($stream, $row); fclose($stream); }, "{$name}.csv", ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'private, no-store']);
     }
 
     public function storeManualPayment(

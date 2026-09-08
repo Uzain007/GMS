@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AccountSecurityController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\BranchController;
@@ -91,6 +92,8 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('role:super_admin');
         Route::get('/platform/members/export', [MemberRosterController::class, 'platformExport'])
             ->middleware('role:super_admin');
+        Route::get('/platform/audit-log', [AuditLogController::class, 'platform'])
+            ->middleware('role:super_admin');
 
         // Invitation acceptance uses the signed token before tenant membership exists.
         Route::post('/gyms/{gym}/staff-invitations/accept', [StaffInvitationController::class, 'accept']);
@@ -99,6 +102,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/gyms/{gym}', [GymController::class, 'show']);
             Route::patch('/gyms/{gym}', [GymController::class, 'update'])
                 ->middleware('role:super_admin,gym_owner,gym_manager');
+            Route::delete('/gyms/{gym}', [GymController::class, 'destroy'])
+                ->middleware('role:super_admin');
             Route::get('/gyms/{gym}/owner-account', [GymOwnerAccountController::class, 'show'])
                 ->middleware('role:super_admin');
             Route::post('/gyms/{gym}/owner-account', [GymOwnerAccountController::class, 'store'])
@@ -267,10 +272,16 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'manualPayments'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/saas-subscription/payment-report', [SaasSubscriptionController::class, 'exportPayments'])
+                    ->middleware('role:super_admin');
                 Route::post('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'storeManualPayment'])
                     ->middleware('role:super_admin,gym_owner');
                 Route::get('/saas-subscription/manual-payments/{payment}/receipt', [SaasSubscriptionController::class, 'manualPaymentReceipt'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/saas-subscription/manual-payments/{payment}/ironcore-receipt', [SaasSubscriptionController::class, 'ironCoreReceipt'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/saas-subscription/manual-payments/{payment}/corrections', [SaasSubscriptionController::class, 'correctManualPayment'])
+                    ->middleware('role:super_admin');
                 Route::patch('/saas-subscription/manual-payments/{payment}/review', [SaasSubscriptionController::class, 'reviewManualPayment'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/checkout', [SaasSubscriptionController::class, 'checkout'])
@@ -340,6 +351,8 @@ Route::prefix('v1')->group(function (): void {
 
                 Route::get('/reports/overview', [ReportController::class, 'overview'])
                     ->middleware(['role:super_admin,gym_owner,gym_manager', 'throttle:reports']);
+                Route::get('/audit-log', [AuditLogController::class, 'tenant'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
             });
         });
     });

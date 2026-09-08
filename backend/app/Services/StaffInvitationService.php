@@ -9,6 +9,7 @@ use App\Models\Gym;
 use App\Models\StaffInvitation;
 use App\Models\StaffProfile;
 use App\Models\User;
+use App\Jobs\SendAccountInvitation;
 use App\Tenancy\TenantContext;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
@@ -67,6 +68,8 @@ class StaffInvitationService
             );
             return $invitation;
         });
+
+        SendAccountInvitation::dispatch($email, $this->context->id(), $this->context->gym()->name, $plainToken, 'staff')->afterCommit();
 
         return [$invitation, $plainToken];
     }

@@ -9,13 +9,15 @@ class GymPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->isSuperAdmin() || $user->gyms()->wherePivot('status', 'active')->exists();
+        return $user->isSuperAdmin() || $user->gyms()->wherePivot('status', 'active')
+            ->whereNotIn('gyms.status', ['suspended', 'cancelled'])->exists();
     }
 
     public function view(User $user, Gym $gym): bool
     {
         return $user->isSuperAdmin() || $user->gyms()
             ->wherePivot('status', 'active')
+            ->whereNotIn('gyms.status', ['suspended', 'cancelled'])
             ->whereKey($gym->getKey())
             ->exists();
     }

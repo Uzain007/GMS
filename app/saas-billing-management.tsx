@@ -9,6 +9,7 @@ import {
 import type {
   GymSubscriptionRecord, IronCoreRole, NewSaasPlan, SaasBillingInvoiceRecord,
   SaasPaymentOptions, SaasPlanRecord, SaasSubscriptionPaymentRecord,
+  NewSaasPaymentCorrection,
 } from "./lib/ironcore-api";
 
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
@@ -29,6 +30,9 @@ export type SaasBillingData = {
   onManualPayment: (priceId: string, method: "cash" | "bank_transfer", reference: string, idempotencyKey: string, receipt?: File) => Promise<void>;
   onReviewManualPayment: (paymentId: string, decision: "approve" | "reject", reason: string) => Promise<void>;
   onLoadManualReceipt: (paymentId: string) => Promise<Blob>;
+  onCorrectManualPayment?: (paymentId: string, input: NewSaasPaymentCorrection) => Promise<void>;
+  onLoadIronCoreReceipt?: (paymentId: string) => Promise<Blob>;
+  onExportPayments?: (format: "csv" | "xlsx" | "pdf") => Promise<Blob>;
   onPortal: () => Promise<string>;
   onCreatePlan?: (input: NewSaasPlan) => Promise<void>;
 };
@@ -37,6 +41,35 @@ function money(minor: number, currency: Currency): string {
   return new Intl.NumberFormat("en-GB", {
     style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 2,
   }).format(minor / 100);
+}
+
+function PaymentCorrectionModal({ payment, onClose, onSubmit }: { payment: SaasSubscriptionPaymentRecord; onClose: () => void; onSubmit: NonNullable<SaasBillingData["onCorrectManualPayment"]> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(null);
+    try {
+      const metadataText = String(form.get("metadata")).trim();
+      let metadata: Record<string, string> | undefined;
+      if (metadataText) {
+        const parsed = JSON.parse(metadataText) as unknown;
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("Metadata must be a JSON object.");
+        metadata = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value)]));
+      }
+      await onSubmit(payment.id, {
+        reference: String(form.get("reference")).trim() || null,
+        method: String(form.get("method")) as "cash" | "bank_transfer",
+        internal_notes: String(form.get("internal_notes")).trim() || null,
+        metadata: metadata ?? null,
+        reason: String(form.get("reason")).trim(),
+      });
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The correction could not be recorded."); }
+    finally { setBusy(false); }
+  }
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="saas-correction-title"><button className="modal-scrim" onClick={onClose} aria-label="Close correction dialog" /><form className="modal-card" onSubmit={submit}><div className="modal-heading"><span><FileText size={21} /></span><div><p className="eyebrow">Append-only financial history</p><h2 id="saas-correction-title">Record payment correction</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{error && <div className="form-error" role="alert">{error}</div>}<div className="field-pair"><label>Corrected reference<input name="reference" maxLength={160} defaultValue={payment.effective_reference ?? payment.reference ?? ""} /></label><label>Corrected method<select name="method" defaultValue={payment.effective_method ?? payment.method}><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option></select></label></div><label>Internal notes<textarea name="internal_notes" maxLength={2000} rows={3} /></label><label>Metadata (JSON object)<textarea name="metadata" rows={3} placeholder={'{"source":"bank statement"}'} /></label><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} rows={3} /></label><div className="modal-safety"><ShieldCheck size={17} /><span><strong>The original transaction remains unchanged</strong><small>This creates a separate correction record and audit entry.</small></span></div><div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Recording…" : "Record correction"}</button></div></form></div>;
 }
 
 function readable(value: string): string {
@@ -203,6 +236,7 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [modal, setModal] = useState(false);
   const [manualChoice, setManualChoice] = useState<ManualChoice | null>(null);
   const [reviewing, setReviewing] = useState<SaasSubscriptionPaymentRecord | null>(null);
+  const [correcting, setCorrecting] = useState<SaasSubscriptionPaymentRecord | null>(null);
   const canManage = !data.readOnly && ["super_admin", "gym_owner"].includes(data.actorRole);
   const current = data.subscription;
   const nextRenewal = current?.current_period_end ?? current?.trial_ends_at ?? null;
@@ -243,9 +277,25 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     } finally { setBusy(null); }
   }
 
+  async function downloadGenerated(payment: SaasSubscriptionPaymentRecord) {
+    if (!data.onLoadIronCoreReceipt) return;
+    setBusy(`generated-${payment.id}`); setNotice(null);
+    try { const blob = await data.onLoadIronCoreReceipt(payment.id); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `ironcore-saas-receipt-${payment.id}.pdf`; link.click(); URL.revokeObjectURL(url); }
+    catch (reason) { setNotice(reason instanceof Error ? reason.message : "The IronCore receipt could not be downloaded."); }
+    finally { setBusy(null); }
+  }
+
+  async function exportPayments(format: "csv" | "xlsx" | "pdf") {
+    if (!data.onExportPayments) return;
+    setBusy(`export-${format}`); setNotice(null);
+    try { const blob = await data.onExportPayments(format); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `ironcore-saas-payments.${format}`; link.click(); URL.revokeObjectURL(url); }
+    catch (reason) { setNotice(reason instanceof Error ? reason.message : "The billing report could not be exported."); }
+    finally { setBusy(null); }
+  }
+
   return <section className="saas-workspace">
-    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym&apos;s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current?.provider === "stripe" && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
-    <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym&apos;s connected account. This subscription is collected only by IronCore&apos;s platform account.</small></span></div>
+    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym’s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current?.provider === "stripe" && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
+    <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym’s connected account. This subscription is collected only by IronCore’s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
     {data.loading && <div className="table-state"><LoaderCircle className="spin" size={21} /><span>Loading protected billing records…</span></div>}
@@ -279,11 +329,12 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     })}</section>
     {!data.loading && visiblePlans.length === 0 && <div className="empty-state panel"><Sparkles size={25} /><strong>No active SaaS plans</strong><span>A super administrator can publish the first immutable platform price.</span></div>}
 
-    <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>Manual payment reviews</h3></div><small>Separate platform ledger</small></div><table className="data-table"><thead><tr><th>Plan</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}</small></td><td>{readable(payment.method)}</td><td>{payment.reference ?? "—"}</td><td><strong>{money(payment.amount_minor, payment.currency)}</strong></td><td><span className={`status ${payment.status}`}><i />{readable(payment.status)}</span></td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No manual SaaS payments</strong><span>Cash and bank-transfer requests appear here without entering the member-payment ledger.</span></div>}</section>
+    <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>Manual payment reviews</h3></div>{data.actorRole === "super_admin" && data.onExportPayments ? <div className="report-export-actions">{(["csv", "xlsx", "pdf"] as const).map((format) => <button key={format} className="secondary-button" disabled={busy !== null} onClick={() => void exportPayments(format)}><Download size={14} /> {format.toUpperCase()}</button>)}</div> : <small>Separate platform ledger</small>}</div><table className="data-table"><thead><tr><th>Plan</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}{payment.corrections?.length ? ` · ${payment.corrections.length} correction(s)` : ""}</small></td><td>{readable(payment.effective_method ?? payment.method)}</td><td>{payment.effective_reference ?? payment.reference ?? "—"}</td><td><strong>{money(payment.amount_minor, payment.currency)}</strong></td><td><span className={`status ${payment.status}`}><i />{readable(payment.status)}</span></td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Proof</button>}{payment.status === "paid" && data.onLoadIronCoreReceipt && <button className="table-action" disabled={busy === `generated-${payment.id}`} onClick={() => void downloadGenerated(payment)}><Download size={13} /> IronCore receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}{data.actorRole === "super_admin" && data.onCorrectManualPayment && <button className="table-action" onClick={() => setCorrecting(payment)}>Correct</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No manual SaaS payments</strong><span>Cash and bank-transfer requests appear here without entering the member-payment ledger.</span></div>}</section>
 
     <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Platform subscription records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period end</th><th>Amount</th><th>Status</th><th>Document</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number ?? "Pending number"}</strong></td><td>{date(invoice.period_end)}</td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span></td><td>{invoice.hosted_invoice_url?.startsWith("https://") ? <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a> : "—"}</td></tr>)}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after a cash, bank-transfer or Stripe subscription is approved.</span></div>}</section>
     {modal && data.onCreatePlan && <PlanModal currency={data.baseCurrency} onClose={() => setModal(false)} onCreate={data.onCreatePlan} />}
     {manualChoice && <ManualPaymentModal choice={manualChoice} onClose={() => setManualChoice(null)} onSubmit={data.onManualPayment} />}
     {reviewing && <ManualReviewModal payment={reviewing} onClose={() => setReviewing(null)} onSubmit={data.onReviewManualPayment} />}
+    {correcting && data.onCorrectManualPayment && <PaymentCorrectionModal payment={correcting} onClose={() => setCorrecting(null)} onSubmit={data.onCorrectManualPayment} />}
   </section>;
 }

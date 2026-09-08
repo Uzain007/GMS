@@ -38,6 +38,18 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
         }
 
+        [$hasAnyGym, $hasAccessibleGym] = $user->isSuperAdmin()
+            ? [false, true]
+            : $identity->run($user, fn (): array => [
+                $user->gyms()->exists(),
+                $user->gyms()->wherePivot('status', 'active')->whereNotIn('gyms.status', ['suspended', 'cancelled'])->exists(),
+            ]);
+        if ($hasAnyGym && ! $hasAccessibleGym) {
+            // Suspended and archived tenant accounts receive the same generic
+            // response as invalid credentials, without disclosing lifecycle state.
+            throw ValidationException::withMessages(['email' => ['The supplied credentials are invalid.']]);
+        }
+
         $deviceName = (string) $request->string('device_name', 'native-client');
         if ($user->mfaEnabled()) {
             // Correct primary credentials do not establish authentication for
@@ -113,7 +125,7 @@ class AuthController extends Controller
             'must_change_password' => (bool) $user->must_change_password,
             'platform_role' => $user->platform_role?->value,
             'gyms' => $user->relationLoaded('gyms')
-                ? $user->gyms->filter(fn ($gym) => $gym->pivot->status === 'active')
+                ? $user->gyms->filter(fn ($gym) => $gym->pivot->status === 'active' && $gym->status->allowsLogin())
                     ->map(fn ($gym) => ['id' => $gym->id, 'name' => $gym->name, 'role' => $gym->pivot->role])->values()
                 : [],
         ];

@@ -9,6 +9,7 @@ use App\Models\Concerns\BelongsToGym;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SaasSubscriptionPayment extends Model
 {
@@ -63,5 +64,10 @@ class SaasSubscriptionPayment extends Model
     public function reviewedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function corrections(): HasMany
+    {
+        return $this->hasMany(SaasPaymentCorrection::class, 'saas_subscription_payment_id')->oldest('created_at');
     }
 }

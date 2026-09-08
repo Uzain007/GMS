@@ -133,8 +133,12 @@ class GymOwnerAccountManagementTest extends TestCase
 
         $this->withHeaders($this->browserHeaders())->getJson("/api/v1/gyms/{$otherGym->id}", ['X-Gym-ID' => $otherGym->id])
             ->assertForbidden();
-        $this->assertDatabaseHas('audit_logs', ['gym_id' => $gymId, 'event' => 'gym.owner_account.updated']);
-        $this->assertDatabaseHas('audit_logs', ['gym_id' => $gymId, 'event' => 'gym.owner_account.temporary_password_generated']);
+        app(TenantContext::class)->run(Gym::query()->findOrFail($gymId), function () use ($gymId): void {
+            // Keep verification behind the same forced-RLS tenant boundary as
+            // the owner-account writes exercised above.
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gymId, 'event' => 'gym.owner_account.updated']);
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gymId, 'event' => 'gym.owner_account.temporary_password_generated']);
+        });
     }
 
     public function test_gym_can_be_created_without_an_owner_then_receive_one_from_manage_gym(): void

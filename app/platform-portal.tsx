@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Archive, ArrowRight, Building2, ChevronDown, CircleDollarSign, Copy, Download, Eye, KeyRound, LayoutDashboard, LoaderCircle,
+  Archive, ArrowRight, Building2, CheckCircle2, ChevronDown, CircleDollarSign, Copy, Download, Eye, EyeOff, FileClock, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Mail, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UserRound, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -10,13 +10,14 @@ import {
   countryOptions, defaultTimezoneForCountry, normalizeCountryCode, normalizeTimezone, timezoneOptions,
 } from "./gym-location-options";
 import type {
-  AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan, NewSaasPlanPrice,
-  SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
+  AuditLogFilters, AuditLogRecord, AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan, NewSaasPlanPrice,
+  Paginated, SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
 } from "./lib/ironcore-api";
 import { SearchableSelect } from "./searchable-select";
 import { decimalToMinor } from "./tenant-operations";
+import { AuditLogManagement } from "./audit-log-management";
 
-type PlatformView = "overview" | "gyms" | "members" | "plans" | "settings";
+type PlatformView = "overview" | "gyms" | "members" | "plans" | "audit" | "settings";
 
 export type PlatformPortalData = {
   user: AuthenticatedUser;
@@ -28,6 +29,7 @@ export type PlatformPortalData = {
   onOpenGym: (gym: GymSummary) => void;
   onCreateGym: (input: NewGym) => Promise<CreatedGym>;
   onUpdateGym: (gymId: string, input: UpdateGym) => Promise<void>;
+  onDeleteGym: (gymId: string, confirmation: string, reason: string) => Promise<void>;
   onLoadGymOwner: (gymId: string) => Promise<GymOwnerAccount | null>;
   onCreateGymOwner: (gymId: string, input: NewGymOwnerAccount) => Promise<GymOwnerAccount>;
   onUpdateGymOwner: (gymId: string, input: UpdateGymOwnerAccount) => Promise<GymOwnerAccount>;
@@ -36,6 +38,8 @@ export type PlatformPortalData = {
   onCreatePlan: (input: NewSaasPlan) => Promise<void>;
   onUpdatePlan: (planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice) => Promise<void>;
   onExportMembers: () => Promise<void>;
+  onLoadAudit: (filters: AuditLogFilters) => Promise<Paginated<AuditLogRecord>>;
+  onExportAudit: (format: "csv" | "xlsx" | "pdf", filters: AuditLogFilters) => Promise<void>;
   onChangePassword: (currentPassword: string, password: string) => Promise<void>;
   onLogout: () => void;
   mfa?: MfaActions;
@@ -70,7 +74,7 @@ function ModalShell({ title, eyebrow, onClose, children }: {
   </div>;
 }
 
-function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: PlatformPortalData["onCreateGym"] }) {
+function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; onCreate: PlatformPortalData["onCreateGym"]; onOpen: (gym: GymSummary) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [countryCode, setCountryCode] = useState("GB");
@@ -78,6 +82,9 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
   const [createOwner, setCreateOwner] = useState(true);
   const [setupMethod, setSetupMethod] = useState<"invite" | "temporary_password">("invite");
   const [created, setCreated] = useState<CreatedGym | null>(null);
+  const [createdTemporaryPassword, setCreatedTemporaryPassword] = useState<string | null>(null);
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   function changeCountry(nextCountryCode: string) {
     setCountryCode(nextCountryCode);
@@ -89,6 +96,7 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
     const form = new FormData(event.currentTarget);
     setBusy(true); setError(null);
     try {
+      const temporaryPassword = setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined;
       const result = await onCreate({
         name: String(form.get("name")),
         legal_name: String(form.get("legal_name")) || undefined,
@@ -101,12 +109,13 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
           email: createOwner ? String(form.get("owner_email")) : undefined,
           phone: createOwner ? String(form.get("owner_phone")) : undefined,
           setup_method: createOwner ? setupMethod : undefined,
-          temporary_password: setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined,
+          temporary_password: temporaryPassword,
           temporary_password_confirmation: setupMethod === "temporary_password" ? String(form.get("temporary_password_confirmation")) : undefined,
           require_password_change: setupMethod === "temporary_password" ? true : undefined,
         },
       });
       setCreated(result);
+      setCreatedTemporaryPassword(temporaryPassword ?? null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The gym could not be created.");
     } finally {
@@ -116,16 +125,24 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
 
   return <ModalShell title={created ? `${created.gym.name} created` : "Create a gym"} eyebrow="Platform tenant onboarding" onClose={onClose}>
     {created ? <div className="owner-create-result" role="status">
-      <span><ShieldCheck size={22} /></span>
-      <h3>Gym created securely</h3>
-      <p>{created.owner_account
+      <span className="owner-create-success-icon"><CheckCircle2 size={24} /></span>
+      <div className="owner-create-heading"><h3>{created.gym.name} created</h3><p>Gym created successfully</p></div>
+      <dl className="owner-create-summary">
+        <div><dt>Gym name</dt><dd>{created.gym.name}</dd></div>
+        <div><dt>Owner name</dt><dd>{created.owner_account?.name ?? "Not created"}</dd></div>
+        <div><dt>Owner login email</dt><dd>{created.owner_account?.email ?? "Not created"}</dd></div>
+        <div><dt>Account setup</dt><dd>{created.owner_account?.setup_method ? readable(created.owner_account.setup_method) : "No login account"}</dd></div>
+        <div><dt>Password change required</dt><dd>{created.owner_account?.must_change_password ? "Yes" : "No"}</dd></div>
+      </dl>
+      <p className="owner-create-message">{created.owner_account
         ? created.owner_account.setup_method === "invite"
           ? `A secure setup email was queued for ${created.owner_account.email}.`
           : created.owner_account.setup_method === "temporary_password"
             ? `${created.owner_account.name} can sign in with the temporary password and must replace it before entering the gym portal.`
             : `${created.owner_account.name}'s existing IronCore login was linked to this gym, and a secure password setup email was queued.`
         : "No owner login was created. You can add one from Manage gym."}</p>
-      <button className="primary-button" type="button" onClick={onClose}>Done</button>
+      {createdTemporaryPassword && <div className="one-time-secret-panel"><KeyRound size={19} /><div><span>Shown once only</span><code>{showTemporaryPassword ? createdTemporaryPassword : "•".repeat(16)}</code><small>Copy it now. IronCore cannot recover it after this window closes.</small></div><div className="one-time-secret-actions"><button className="icon-button" type="button" onClick={() => setShowTemporaryPassword((value) => !value)} aria-label={showTemporaryPassword ? "Hide temporary password" : "Show temporary password"}>{showTemporaryPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button><button className="secondary-button" type="button" onClick={async () => { try { await navigator.clipboard.writeText(createdTemporaryPassword); setCopied(true); } catch { setError("Your browser blocked copying. Select the temporary password and copy it manually."); } }}><Copy size={15} /> {copied ? "Copied" : "Copy"}</button></div></div>}
+      <div className="owner-create-actions"><button className="secondary-button" type="button" onClick={() => { onOpen(created.gym); onClose(); }}>Open gym</button><button className="primary-button" type="button" onClick={onClose}>Done</button></div>
     </div> :
     <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}
       <div className="field-pair"><label>Gym name<input name="name" maxLength={160} required autoFocus /></label><label>Legal name<input name="legal_name" maxLength={200} /></label></div>
@@ -139,7 +156,7 @@ function CreateGymModal({ onClose, onCreate }: { onClose: () => void; onCreate: 
             <label><input type="radio" name="setup_method" value="invite" checked={setupMethod === "invite"} onChange={() => setSetupMethod("invite")} /><span><Mail size={17} /><strong>Send secure invite</strong><small>Email a one-time password setup link.</small></span></label>
             <label><input type="radio" name="setup_method" value="temporary_password" checked={setupMethod === "temporary_password"} onChange={() => setSetupMethod("temporary_password")} /><span><KeyRound size={17} /><strong>Set temporary password</strong><small>Share it privately; the owner must replace it.</small></span></label>
           </div>
-          {setupMethod === "temporary_password" && <div className="field-pair"><label>Temporary password<input name="temporary_password" type="password" autoComplete="new-password" minLength={12} maxLength={255} required /></label><label>Confirm temporary password<input name="temporary_password_confirmation" type="password" autoComplete="new-password" minLength={12} maxLength={255} required /></label></div>}
+          {setupMethod === "temporary_password" && <div className="field-pair"><label>Temporary password<span className="password-input-wrap"><input name="temporary_password" type={showTemporaryPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={255} required /><button className="password-visibility-button" type="button" onClick={() => setShowTemporaryPassword((value) => !value)} aria-label={showTemporaryPassword ? "Hide temporary password" : "Show temporary password"}>{showTemporaryPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></label><label>Confirm temporary password<span className="password-input-wrap"><input name="temporary_password_confirmation" type={showTemporaryPassword ? "text" : "password"} autoComplete="new-password" minLength={12} maxLength={255} required /><button className="password-visibility-button" type="button" onClick={() => setShowTemporaryPassword((value) => !value)} aria-label={showTemporaryPassword ? "Hide confirmed password" : "Show confirmed password"}>{showTemporaryPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></label></div>}
           <label className="owner-toggle owner-required"><input type="checkbox" checked readOnly /> Require password change on first login</label>
         </>}
       </fieldset>
@@ -198,7 +215,7 @@ function CreatePlanModal({ onClose, onCreate }: { onClose: () => void; onCreate:
   </ModalShell>;
 }
 
-function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCreateOwner, onUpdateOwner, onSendReset, onGenerateTemporary }: {
+function GymManagementModal({ gym, onClose, onOpen, onUpdate, onDelete, onLoadOwner, onCreateOwner, onUpdateOwner, onSendReset, onGenerateTemporary }: {
   gym: GymSummary;
   onClose: () => void;
   onOpen: () => void;
@@ -208,6 +225,7 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCre
   onUpdateOwner: PlatformPortalData["onUpdateGymOwner"];
   onSendReset: PlatformPortalData["onSendGymOwnerReset"];
   onGenerateTemporary: PlatformPortalData["onGenerateGymOwnerTemporaryPassword"];
+  onDelete?: PlatformPortalData["onDeleteGym"];
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -218,6 +236,8 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCre
   const [ownerAction, setOwnerAction] = useState<"reset" | "temporary" | null>(null);
   const [ownerSetupMethod, setOwnerSetupMethod] = useState<"invite" | "temporary_password">("invite");
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+  const [hardDelete, setHardDelete] = useState(false);
+  const [lifecycleTarget, setLifecycleTarget] = useState<GymSummary["status"] | null>(null);
   const initialCountryCode = normalizeCountryCode(gym.country_code);
   const [countryCode, setCountryCode] = useState(initialCountryCode);
   const [timezone, setTimezone] = useState(() => normalizeTimezone(gym.timezone, initialCountryCode));
@@ -296,6 +316,28 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCre
     catch { setError("Your browser blocked copying. Copy the temporary password manually now."); }
   }
 
+  async function submitHardDelete(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!onDelete) return;
+    const form = new FormData(event.currentTarget);
+    setBusy(true); setError(null);
+    try {
+      await onDelete(gym.id, String(form.get("confirmation")), String(form.get("reason")));
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The gym could not be permanently deleted."); }
+    finally { setBusy(false); }
+  }
+
+  async function submitLifecycle(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!lifecycleTarget) return;
+    const reason = String(new FormData(event.currentTarget).get("reason"));
+    setBusy(true); setError(null);
+    try { await onUpdate(gym.id, { status: lifecycleTarget, reason }); onClose(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The gym lifecycle change could not be saved."); }
+    finally { setBusy(false); }
+  }
+
   return <ModalShell title={editing ? `Edit ${gym.name}` : gym.name} eyebrow={editing ? "Audited tenant settings" : "Gym details"} onClose={onClose}>
     {error && <div className="form-error" role="alert">{error}</div>}
     {notice && <div className="form-success" role="status">{notice}</div>}
@@ -308,7 +350,7 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCre
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel edit</button><button className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save gym"}</button></div>
     </form> : <>
       <dl className="platform-detail-grid"><div><dt>Status</dt><dd>{readable(gym.status)}</dd></div><div><dt>Currency</dt><dd>{gym.base_currency}</dd></div><div><dt>Country</dt><dd>{gym.country_code}</dd></div><div><dt>Timezone</dt><dd>{gym.timezone}</dd></div><div><dt>Slug</dt><dd>{gym.slug}</dd></div><div><dt>Legal name</dt><dd>{gym.legal_name ?? "Not set"}</dd></div></dl>
-      <div className="platform-management-actions"><button className="secondary-button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit gym</button><button className="secondary-button" onClick={onOpen}><ArrowRight size={15} /> Open gym</button></div>
+      <div className="platform-management-actions"><button className="secondary-button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit gym</button>{gym.status !== "cancelled" && <button className="secondary-button" onClick={onOpen}><ArrowRight size={15} /> Open gym</button>}{gym.status === "suspended" ? <button className="secondary-button" type="button" onClick={() => setLifecycleTarget("active")}><Power size={15} /> Reactivate</button> : gym.status !== "cancelled" && <button className="secondary-button" type="button" onClick={() => setLifecycleTarget("suspended")}><Power size={15} /> Suspend access</button>}{gym.status !== "cancelled" && <button className="secondary-button" type="button" onClick={() => setLifecycleTarget("cancelled")}><Archive size={15} /> Archive gym</button>}{gym.status === "cancelled" && onDelete && <button className="danger-button" type="button" onClick={() => setHardDelete(true)}><Archive size={15} /> Permanently delete test gym</button>}</div>
       <div className="modal-note"><Archive size={17} />Use Edit gym to activate, deactivate or archive this tenant. IronCore retains the audit and billing history.</div>
       <section className="owner-account-panel" aria-labelledby="owner-account-title">
         <div className="owner-account-heading"><div><p className="eyebrow">Gym Owner Account</p><h3 id="owner-account-title">Owner login and access</h3></div>{owner !== undefined && <button className="secondary-button" type="button" onClick={() => { setOwnerEditing(true); setOwnerAction(null); setTemporaryPassword(null); }}><Pencil size={15} /> {owner ? "Edit owner" : "Create owner login"}</button>}</div>
@@ -332,8 +374,10 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onLoadOwner, onCre
           <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setOwnerAction(null)}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Working…" : ownerAction === "reset" ? "Send secure link" : "Generate password"}</button></div>
         </form>}
 
-        {temporaryPassword && <div className="temporary-password-result" role="status"><ShieldCheck size={19} /><div><strong>Copy this temporary password now</strong><code>{temporaryPassword}</code><small>It will not be shown again. The owner must change it before opening the gym portal.</small></div><button className="secondary-button" type="button" onClick={copyTemporaryPassword}><Copy size={15} /> Copy</button></div>}
+        {temporaryPassword && <div className="temporary-password-result" role="status"><ShieldCheck size={19} /><div><strong>Copy this temporary password now</strong><code>{temporaryPassword}</code><small>It will not be shown again. The owner must change it before opening the gym portal.</small></div><button className="secondary-button" type="button" onClick={copyTemporaryPassword}><Copy size={15} /> Copy</button><button className="icon-button one-time-secret-dismiss" type="button" onClick={() => setTemporaryPassword(null)} aria-label="Dismiss temporary password"><X size={16} /></button></div>}
       </section>
+      {lifecycleTarget && <form className="owner-action-form" onSubmit={submitLifecycle}><p><strong>{lifecycleTarget === "active" ? "Reactivate gym access" : lifecycleTarget === "suspended" ? "Suspend gym access" : "Archive and close gym"}</strong><br />{lifecycleTarget === "active" ? "Eligible gym users will regain access." : "All gym user logins will be blocked while historical data remains intact."}</p><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} autoFocus /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setLifecycleTarget(null)}>Cancel</button><button className={lifecycleTarget === "active" ? "primary-button" : "danger-button"} disabled={busy}>{busy ? "Saving…" : "Confirm status change"}</button></div></form>}
+      {hardDelete && <form className="owner-action-form destructive-confirmation" onSubmit={submitHardDelete}><p><strong>Permanent deletion is only allowed for an empty test gym.</strong> Any financial, membership, attendance, or meaningful audit history blocks this action.</p><label>Type the exact gym name<input name="confirmation" required autoComplete="off" /></label><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setHardDelete(false)}>Cancel</button><button className="danger-button" disabled={busy}>{busy ? "Checking…" : "Permanently delete"}</button></div></form>}
     </>}
   </ModalShell>;
 }
@@ -409,7 +453,8 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [memberExportBusy, setMemberExportBusy] = useState(false);
   const [memberExportError, setMemberExportError] = useState<string | null>(null);
-  const filteredGyms = useMemo(() => data.gyms.filter((gym) => `${gym.name} ${gym.slug} ${gym.country_code} ${gym.status}`.toLowerCase().includes(query.toLowerCase())), [data.gyms, query]);
+  const [archivedGyms, setArchivedGyms] = useState(false);
+  const filteredGyms = useMemo(() => data.gyms.filter((gym) => (archivedGyms ? gym.status === "cancelled" : gym.status !== "cancelled") && `${gym.name} ${gym.slug} ${gym.country_code} ${gym.status}`.toLowerCase().includes(query.toLowerCase())), [archivedGyms, data.gyms, query]);
   const activeGyms = data.gyms.filter((gym) => gym.status === "active").length;
   const trials = data.gyms.filter((gym) => gym.status === "trial").length;
   const attention = data.gyms.filter((gym) => ["past_due", "suspended"].includes(gym.status)).length;
@@ -418,6 +463,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
     { id: "gyms", label: "Gyms", icon: Building2 },
     { id: "members", label: "Global members", icon: UsersRound },
     { id: "plans", label: "SaaS plans", icon: CircleDollarSign },
+    { id: "audit", label: "Audit Log", icon: FileClock },
     { id: "settings", label: "Settings", icon: Settings },
   ];
 
@@ -440,15 +486,16 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
           <section className="platform-metrics"><article><Building2 /><span><small>Total gyms</small><strong>{data.gyms.length}</strong></span></article><article><ShieldCheck /><span><small>Active</small><strong>{activeGyms}</strong></span></article><article><UsersRound /><span><small>On trial</small><strong>{trials}</strong></span></article><article><CircleDollarSign /><span><small>Need attention</small><strong>{attention}</strong></span></article></section>
           <section className="platform-grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Tenant registry</p><h3>Recently available gyms</h3></div><button className="secondary-button" onClick={() => navigate("gyms")}>View all</button></div><div className="platform-quick-list">{data.gyms.slice(0, 5).map((gym) => <button key={gym.id} onClick={() => data.onOpenGym(gym)}><span>{initials(gym.name)}</span><div><strong>{gym.name}</strong><small>{gym.country_code} · {readable(gym.status)}</small></div><ArrowRight size={16} /></button>)}{!data.loading && data.gyms.length === 0 && <p>No gyms have been created yet.</p>}</div></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Product catalogue</p><h3>Active SaaS plans</h3></div><button className="secondary-button" onClick={() => navigate("plans")}>Manage</button></div><div className="platform-plan-summary"><strong>{data.plans.filter((plan) => plan.status === "active").length}</strong><span>active tiers</span><p>Prices are immutable and controlled only by Super Admin accounts.</p><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={16} /> Publish plan</button></div></article></section>
         </>}
-        {view === "gyms" && <><section className="module-heading"><div><p className="eyebrow">Tenant registry</p><h2>Gyms</h2><p>View, edit, activate, deactivate or safely archive a gym with a recorded reason.</p></div><button className="primary-button" onClick={() => setGymModal(true)}><Plus size={17} /> Create gym</button></section><section className="panel table-scroll">{data.loading ? <div className="table-state"><LoaderCircle className="spin" size={20} /> Loading gyms…</div> : <table className="data-table"><thead><tr><th>Gym</th><th>Country</th><th>Currency</th><th>Status</th><th /></tr></thead><tbody>{filteredGyms.map((gym) => <tr key={gym.id}><td><strong>{gym.name}</strong><small className="table-sub">{gym.slug}</small></td><td>{gym.country_code}</td><td>{gym.base_currency}</td><td><span className={`status ${gym.status}`}><i />{readable(gym.status)}</span></td><td><div className="table-action-group"><button className="table-action" onClick={() => setSelectedGym(gym)}><Eye size={13} /> View / manage</button><button className="table-action" onClick={() => data.onOpenGym(gym)}>Open <ArrowRight size={13} /></button></div></td></tr>)}</tbody></table>}{!data.loading && filteredGyms.length === 0 && <div className="empty-state"><Search size={23} /><strong>No gyms found</strong><span>Change the search or create the first gym.</span></div>}</section></>}
+        {view === "gyms" && <><section className="module-heading"><div><p className="eyebrow">Tenant registry</p><h2>Gyms</h2><p>View, edit, activate, deactivate or safely archive a gym with a recorded reason.</p></div><button className="primary-button" onClick={() => setGymModal(true)}><Plus size={17} /> Create gym</button></section><div className="billing-toggle gym-list-toggle" role="group" aria-label="Gym lifecycle list"><button className={!archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(false)}>Current gyms</button><button className={archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(true)}>Archived gyms</button></div><section className="panel table-scroll">{data.loading ? <div className="table-state"><LoaderCircle className="spin" size={20} /> Loading gyms…</div> : <table className="data-table"><thead><tr><th>Gym</th><th>Country</th><th>Currency</th><th>Status</th><th /></tr></thead><tbody>{filteredGyms.map((gym) => <tr key={gym.id}><td><strong>{gym.name}</strong><small className="table-sub">{gym.slug}</small></td><td>{gym.country_code}</td><td>{gym.base_currency}</td><td><span className={`status ${gym.status}`}><i />{readable(gym.status)}</span></td><td><div className="table-action-group"><button className="table-action" onClick={() => setSelectedGym(gym)}><Eye size={13} /> View / manage</button>{gym.status !== "cancelled" && <button className="table-action" onClick={() => data.onOpenGym(gym)}>Open <ArrowRight size={13} /></button>}</div></td></tr>)}</tbody></table>}{!data.loading && filteredGyms.length === 0 && <div className="empty-state"><Search size={23} /><strong>{archivedGyms ? "No archived gyms" : "No gyms found"}</strong><span>{archivedGyms ? "Archived tenants stay here with their history retained." : "Change the search or create the first gym."}</span></div>}</section></>}
         {view === "members" && <><section className="module-heading"><div><p className="eyebrow">Authorised platform export</p><h2>Global members</h2><p>Export member rosters across all gyms without disabling tenant scopes or PostgreSQL RLS.</p></div><button className="primary-button" disabled={memberExportBusy} onClick={async () => { setMemberExportBusy(true); setMemberExportError(null); try { await data.onExportMembers(); } catch (reason) { setMemberExportError(reason instanceof Error ? reason.message : "The global member export failed."); } finally { setMemberExportBusy(false); } }}><Download size={17} />{memberExportBusy ? "Exporting…" : "Export all gyms"}</button></section>{memberExportError && <div className="form-error" role="alert">{memberExportError}</div>}<section className="panel platform-global-members"><UsersRound size={28} /><strong>Super Admin permission required</strong><p>The downloaded CSV identifies each gym and contains its current member roster. Each gym is entered explicitly on the server; Gym Admin users cannot call this platform endpoint.</p></section></>}
         {view === "plans" && <><section className="module-heading"><div><p className="eyebrow">Platform billing</p><h2>SaaS plans</h2><p>Manage catalogue details and append-only prices without changing accepted subscription history.</p></div><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={17} /> Publish plan</button></section><section className="platform-plan-grid">{data.plans.map((plan) => <article className="panel" key={plan.id}><div><span className={`status ${plan.status}`}><i />{readable(plan.status)}</span><small>{plan.code}</small></div><h3>{plan.name}</h3><p>{plan.description ?? "No description"}</p><ul>{plan.prices.filter((price) => price.active).map((price) => <li key={price.id}><strong>{money(price.amount_minor, price.currency)}</strong><span>/{price.billing_interval === "monthly" ? "month" : "year"}</span></li>)}</ul><small>{plan.feature_limits.members.toLocaleString()} members · {plan.feature_limits.branches.toLocaleString()} branches · {plan.feature_limits.staff.toLocaleString()} staff</small><small>Payments: {plan.payment_methods.map(readable).join(" · ")}</small><div className="platform-card-actions"><button className="secondary-button" onClick={() => setSelectedPlan(plan)}><Eye size={14} /> View / edit</button></div></article>)}{!data.loading && data.plans.length === 0 && <div className="empty-state panel"><CircleDollarSign size={24} /><strong>No plans published</strong><span>Create the first platform plan and immutable price.</span></div>}</section></>}
+        {view === "audit" && <AuditLogManagement gyms={data.gyms} onLoad={data.onLoadAudit} onExport={data.onExportAudit} />}
         {view === "settings" && <><section className="module-heading"><div><p className="eyebrow">Platform settings</p><h2>Settings</h2><p>Tenant currencies and timezones are managed per gym; account security stays platform-wide.</p></div></section><section className="platform-settings-grid"><article className="panel"><CircleDollarSign size={21} /><h3>Tenant currency settings</h3><p>Each gym keeps its own current base currency. Changing Gym A never changes Gym B or any historical transaction snapshot.</p><div className="platform-settings-list">{data.gyms.map((gym) => <button key={gym.id} onClick={() => setSelectedGym(gym)}><span><strong>{gym.name}</strong><small>{gym.timezone}</small></span><b>{gym.base_currency}</b><Pencil size={14} /></button>)}</div></article><article className="panel"><ShieldCheck size={21} /><h3>Account security</h3><p>Manage your password, authenticator and recovery codes separately from tenant business settings.</p><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Open account security</button></article><article className="panel"><Power size={21} /><h3>Provider status</h3><p>Stripe remains optional. Cash and bank transfer continue independently; credentials stay in deployment configuration, never this browser.</p></article></section></>}
       </main>
     </section>
-    {gymModal && <CreateGymModal onClose={() => setGymModal(false)} onCreate={data.onCreateGym} />}
+    {gymModal && <CreateGymModal onClose={() => setGymModal(false)} onCreate={data.onCreateGym} onOpen={data.onOpenGym} />}
     {planModal && <CreatePlanModal onClose={() => setPlanModal(false)} onCreate={data.onCreatePlan} />}
-    {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} onLoadOwner={data.onLoadGymOwner} onCreateOwner={data.onCreateGymOwner} onUpdateOwner={data.onUpdateGymOwner} onSendReset={data.onSendGymOwnerReset} onGenerateTemporary={data.onGenerateGymOwnerTemporaryPassword} />}
+    {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} onDelete={data.onDeleteGym} onLoadOwner={data.onLoadGymOwner} onCreateOwner={data.onCreateGymOwner} onUpdateOwner={data.onUpdateGymOwner} onSendReset={data.onSendGymOwnerReset} onGenerateTemporary={data.onGenerateGymOwnerTemporaryPassword} />}
     {selectedPlan && <PlanManagementModal plan={selectedPlan} onClose={() => setSelectedPlan(null)} onUpdate={data.onUpdatePlan} />}
     {securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={data.onChangePassword} mfa={data.mfa} />}
   </div>;

@@ -92,6 +92,7 @@ class User extends Authenticatable
         // user and role rows still exist for audit/history purposes.
         $role = $this->gyms()
             ->wherePivot('status', 'active')
+            ->whereNotIn('gyms.status', ['suspended', 'cancelled'])
             ->whereKey($gymId)
             ->first()?->pivot?->role;
 

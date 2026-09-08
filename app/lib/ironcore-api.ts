@@ -111,6 +111,8 @@ export type UpdateGymOwnerAccount = {
 };
 
 export type CreatedGym = { gym: GymSummary; owner_account: GymOwnerAccount | null };
+export type AuditLogRecord = { id: string; created_at: string; user: { id: string; name: string; email: string } | null; role: string | null; gym: { id: string; name: string } | null; action: string; resource: string | null; resource_id: string | null; old_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null; reason: string | null; ip_address: string | null; device: string | null };
+export type AuditLogFilters = { from?: string; to?: string; gym_id?: string; actor_id?: string; role?: string; action?: string; resource?: string; search?: string; page?: number; per_page?: number };
 
 export type MemberRecord = {
   id: string;
@@ -192,7 +194,9 @@ export type SaasPlanRecord = { id: string; code: string; name: string; descripti
 export type GymSubscriptionRecord = { id: string; gym_id: string; provider: "manual" | "stripe"; status: "incomplete" | "trialing" | "active" | "past_due" | "unpaid" | "paused" | "cancelled" | "incomplete_expired"; plan_code: string; plan_name: string; feature_limits: SaasFeatureLimits; currency: GymSummary["base_currency"]; amount_minor: number; billing_interval: "monthly" | "yearly"; current_period_start: string | null; current_period_end: string | null; trial_ends_at: string | null; cancel_at_period_end: boolean; cancelled_at: string | null; ended_at: string | null; failure_code: string | null; failure_message: string | null; billing_contact?: { email: string; name: string | null }; created_at: string | null };
 export type SaasBillingInvoiceRecord = { id: string; number: string | null; status: "draft" | "open" | "paid" | "void" | "uncollectible"; currency: GymSummary["base_currency"]; amount_due_minor: number; amount_paid_minor: number; amount_remaining_minor: number; hosted_invoice_url: string | null; invoice_pdf_url: string | null; period_start: string | null; period_end: string | null; due_at: string | null; paid_at: string | null; created_at: string | null };
 export type SaasPaymentOptions = { cash_available: boolean; bank_transfer_available: boolean; stripe_configured: boolean };
-export type SaasSubscriptionPaymentRecord = { id: string; gym_id: string; saas_plan_price_id: string; gym_subscription_id: string | null; method: "cash" | "bank_transfer"; status: "pending" | "paid" | "rejected"; amount_minor: number; currency: GymSummary["base_currency"]; reference: string | null; has_receipt: boolean; receipt_original_name: string | null; reviewed_at: string | null; review_reason: string | null; paid_at: string | null; plan?: { id: string; name: string; code: string; billing_interval: "monthly" | "yearly" }; created_at: string | null };
+export type SaasPaymentCorrectionRecord = { id: string; reference: string | null; method: "cash" | "bank_transfer" | null; internal_notes: string | null; metadata: Record<string, string> | null; reason: string; corrected_by: { id: string; name: string } | null; created_at: string | null };
+export type SaasSubscriptionPaymentRecord = { id: string; gym_id: string; saas_plan_price_id: string; gym_subscription_id: string | null; method: "cash" | "bank_transfer"; effective_method?: "cash" | "bank_transfer"; status: "pending" | "paid" | "rejected"; amount_minor: number; currency: GymSummary["base_currency"]; reference: string | null; effective_reference?: string | null; corrections?: SaasPaymentCorrectionRecord[]; has_receipt: boolean; receipt_original_name: string | null; reviewed_at: string | null; review_reason: string | null; paid_at: string | null; plan?: { id: string; name: string; code: string; billing_interval: "monthly" | "yearly" }; created_at: string | null };
+export type NewSaasPaymentCorrection = { reference?: string | null; method?: "cash" | "bank_transfer" | null; internal_notes?: string | null; metadata?: Record<string, string> | null; reason: string };
 export type NewSaasSubscriptionPayment = { saas_plan_price_id: string; method: "cash" | "bank_transfer"; idempotency_key: string; reference: string; receipt?: File };
 export type NewSaasPlan = { code: string; name: string; description?: string; sort_order?: number; feature_limits: SaasFeatureLimits; payment_methods: SaasPaymentMethod[]; currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly"; amount_minor: number; trial_days?: number };
 export type UpdateSaasPlan = { name?: string; description?: string | null; status?: SaasPlanRecord["status"]; sort_order?: number; feature_limits?: SaasFeatureLimits; payment_methods?: SaasPaymentMethod[]; price?: Omit<NewSaasPlanPrice, "reason">; reason: string };
@@ -467,6 +471,21 @@ export class IronCoreApi {
       { method: "PATCH", body: JSON.stringify(input) },
       gymId,
     )).data;
+  }
+
+  async deleteGym(gymId: string, confirmation: string, reason: string): Promise<void> {
+    await this.csrf();
+    await this.request<void>(`/api/v1/gyms/${encodeURIComponent(gymId)}`, { method: "DELETE", body: JSON.stringify({ confirmation, reason }) }, gymId);
+  }
+
+  platformAuditLog(filters: AuditLogFilters = {}): Promise<Paginated<AuditLogRecord>> {
+    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]));
+    return this.request<Paginated<AuditLogRecord>>(`/api/v1/platform/audit-log?${query}`);
+  }
+
+  async platformAuditExport(format: "csv" | "xlsx" | "pdf", filters: AuditLogFilters = {}): Promise<Blob> {
+    const query = new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)])), format });
+    return (await this.performRequest(`/api/v1/platform/audit-log?${query}`, { headers: { Accept: "application/octet-stream" } })).blob();
   }
 
   async gymOwnerAccount(gymId: string): Promise<GymOwnerAccount | null> {
@@ -807,6 +826,19 @@ export class IronCoreApi {
   async saasSubscriptionPaymentReceipt(gymId: string, paymentId: string): Promise<Blob> {
     const response = await this.performRequest(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-subscription/manual-payments/${encodeURIComponent(paymentId)}/receipt`, {}, gymId);
     return response.blob();
+  }
+
+  async correctSaasSubscriptionPayment(gymId: string, paymentId: string, input: NewSaasPaymentCorrection): Promise<SaasSubscriptionPaymentRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<SaasSubscriptionPaymentRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-subscription/manual-payments/${encodeURIComponent(paymentId)}/corrections`, { method: "POST", body: JSON.stringify(input) }, gymId)).data;
+  }
+
+  async saasIronCoreReceipt(gymId: string, paymentId: string): Promise<Blob> {
+    return (await this.performRequest(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-subscription/manual-payments/${encodeURIComponent(paymentId)}/ironcore-receipt`, { headers: { Accept: "application/pdf" } }, gymId)).blob();
+  }
+
+  async saasPaymentReport(gymId: string, format: "csv" | "xlsx" | "pdf"): Promise<Blob> {
+    return (await this.performRequest(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-subscription/payment-report?format=${format}`, { headers: { Accept: "application/octet-stream" } }, gymId)).blob();
   }
 
   async startSaasCheckout(gymId: string, priceId: string, idempotencyKey: string): Promise<{ checkout_url: string; idempotency_reused: boolean }> {

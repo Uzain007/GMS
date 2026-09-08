@@ -9,4 +9,9 @@ enum GymStatus: string
     case PastDue = 'past_due';
     case Suspended = 'suspended';
     case Cancelled = 'cancelled';
+
+    public function allowsLogin(): bool
+    {
+        return ! in_array($this, [self::Suspended, self::Cancelled], true);
+    }
 }

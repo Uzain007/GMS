@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.54.0 — Super Admin gym-owner account lifecycle |
+| MAD version | 0.55.0 — post-deployment stabilization and audit lifecycle |
 | Last verified | 7 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Secure gym-owner account creation and management implemented locally; approval pending |
+| Active milestone | Owner-account UX, append-only SaaS corrections, audit history and safe gym offboarding implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -173,6 +173,7 @@ Recovery-code plaintext is returned only in the enrollment/regeneration response
 | `id` | uuid | no | primary key |
 | `gym_id` | uuid | yes | FK `gyms.id`, null on tenant deletion; required for tenant events |
 | `actor_id` | uuid | yes | FK `users.id`, null on user deletion |
+| `actor_role` | varchar(40) | yes | immutable role snapshot used by historical filters and exports |
 | `event` | varchar(120) | no | — |
 | `auditable_type` | varchar | yes | polymorphic subject type |
 | `auditable_id` | uuid | yes | polymorphic subject id |
@@ -183,9 +184,9 @@ Recovery-code plaintext is returned only in the enrollment/regeneration response
 | `user_agent` | varchar(500) | yes | — |
 | `created_at` | timestamp | no | defaults to current timestamp |
 
-Indexes: `(gym_id, created_at)`, `(gym_id, event, created_at)`, `(auditable_type, auditable_id)`, `(actor_id, created_at)`.
+Indexes: `(gym_id, created_at)`, `(gym_id, event, created_at)`, `(gym_id, actor_role, created_at)`, `(auditable_type, auditable_id)`, `(actor_id, created_at)`.
 
-Tenant events remain visible only through the selected gym. FORCE-RLS policies permit an authenticated actor to read only their own platform-level MFA enable, recovery-code-regeneration and disable events, while request-bound Super Admin identities may read genuine platform audit history such as SaaS catalogue changes. Neither policy exposes tenant audit rows without an explicit gym context.
+Tenant operators see audit events only through their selected gym. FORCE-RLS policies permit an authenticated actor to read only their own platform-level MFA enable, recovery-code-regeneration and disable events, while a request-bound Super Admin identity may read platform-wide tenant and platform history through the dedicated Audit Log endpoint. Ordinary tenant domain queries remain fail-closed and never disable RLS.
 
 ### `gym_branches` — physical/operational locations
 
@@ -569,6 +570,19 @@ Stripe subscriptions are activated only by signed provider events. Cash and bank
 
 Manual subscription payments never enter the gym-member `payments` table. One pending manual request is allowed per gym. Approval creates a manual platform billing customer, an Active snapshotted gym subscription and a Paid SaaS billing invoice atomically, moves a Trial/Past-due tenant to Active, clears its trial end and records the paid period start/end; rejection preserves the evidence without granting service. Signed paid or failed Stripe invoices apply the same Active/Past-due tenant lifecycle. Suspended and Cancelled tenant states remain explicit Super Admin overrides and are never reopened by billing automation.
 
+### `saas_payment_corrections` — append-only SaaS payment annotations
+
+| Column | Type | Null | Constraints / index |
+| --- | --- | --- | --- |
+| `id`, `gym_id` | uuid | no | tenant identity, gym FK, tenant-leading indexes and forced RLS |
+| `saas_subscription_payment_id` | uuid | no | composite tenant FK to the immutable original payment |
+| `corrected_by` | uuid | no | authenticated Super Admin FK |
+| `reference`, `method` | varchar | yes | optional effective display corrections; original payment remains unchanged |
+| `internal_notes`, `metadata` | text/jsonb | yes | bounded internal correction context |
+| `reason`, `created_at` | text/timestamp | no | mandatory reason and immutable correction time |
+
+Paid SaaS transactions are never edited in place. Each correction is a new tenant-owned row plus an audit event; receipts and reports resolve the latest non-null correction while preserving the original financial evidence and full correction chain.
+
 ### `subscription_checkout_sessions` — tenant checkout idempotency
 
 | Column | Type | Null | Constraints / index |
@@ -788,7 +802,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `SaasPlan hasMany SaasPlanPrice`; both are platform-owned catalogue records and have no tenant data.
 - `PlatformBillingCustomer belongsTo Gym` and has many tenant-scoped subscriptions and SaaS invoices; manual and Stripe identities remain distinct provider rows.
 - `GymSubscription belongsTo PlatformBillingCustomer`, `SaasPlan` and `SaasPlanPrice`; accepted plan, feature and price values are immutable snapshots.
-- `SaasSubscriptionPayment belongsTo SaasPlanPrice`, its submitting/reviewing users and optional approved GymSubscription/SaasBillingInvoice; it is tenant-owned and separate from member payments.
+- `SaasSubscriptionPayment belongsTo SaasPlanPrice`, its submitting/reviewing users and optional approved GymSubscription/SaasBillingInvoice, and has many append-only `SaasPaymentCorrection` rows; both are tenant-owned and separate from member payments.
 - `SubscriptionCheckoutSession belongsTo its creating User` and platform price while remaining tenant-owned through non-null `gym_id`.
 - `SaasBillingInvoice belongsTo PlatformBillingCustomer` and optionally a tenant-scoped GymSubscription.
 - `SaasBillingWebhookEvent` is tenant-owned idempotency evidence and retains only a payload hash.
@@ -801,7 +815,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `WorkoutSession belongsTo WorkoutPlan and Member` and has many WorkoutSetLogs; every session/exercise relation repeats the same tenant key.
 - `MemberProgressMeasurement belongsTo Member` and its recording User, may tenant-safely replace one earlier measurement and may reference the User who voided it; every revision remains chronological evidence.
 - `NotificationPreference belongsTo Member`; `NotificationDelivery belongsTo Member` and optionally its triggering User while retaining encrypted destination evidence.
-- `AuditLog` records an optional actor (`users.id`), optional gym (`gyms.id`) and polymorphic subject.
+- `AuditLog` records an optional actor (`users.id`), actor-role snapshot, optional gym (`gyms.id`) and polymorphic subject. Its existing encrypted before/after fields power platform and tenant audit-history views; no duplicate audit store exists.
 - Tenant deletion cascades role memberships but preserves audit evidence by nulling `audit_logs.gym_id`.
 
 ## Active API endpoint map
@@ -829,6 +843,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | POST | `/gyms` | `auth:sanctum`, completed-password gate, `super_admin`, `GymPolicy::create` | Create a trial gym and optionally create its owner login by secure setup email or mandatory-change temporary password |
 | GET | `/gyms/{gym}` | `auth:sanctum`, `tenant`, `GymPolicy::view` | Read one authorised gym |
 | PATCH | `/gyms/{gym}` | `auth:sanctum`, `tenant`, manager role, `GymPolicy::update` | Update gym identity/settings with audit reason |
+| DELETE | `/gyms/{gym}` | tenant; authenticated `super_admin`; exact-name confirmation and reason | Permanently remove only an archived, empty test tenant with no financial, membership, attendance or meaningful audit history |
 | GET/POST/PATCH | `/gyms/{gym}/owner-account` | tenant; authenticated `super_admin` only | Read, create or reason-update the selected gym's owner profile, login email and tenant-specific active/suspended access |
 | POST | `/gyms/{gym}/owner-account/password-reset` | tenant; authenticated `super_admin`; mandatory reason | Queue a secure expiring password reset/setup email without exposing or replacing the current password |
 | POST | `/gyms/{gym}/owner-account/temporary-password` | tenant; authenticated `super_admin`; mandatory reason | Revoke existing credentials, generate one response-only temporary password and require replacement before portal access |
@@ -848,6 +863,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/members-import-template?format=csv|xlsx` | tenant; owner/manager/receptionist | Download exact headers and one safe example row |
 | GET | `/gyms/{gym}/members-export` | tenant; owner/manager/receptionist | Stream the complete selected-gym roster as CSV under re-established ORM/RLS context |
 | GET | `/platform/members/export` | authenticated `super_admin` only | Dedicated audited cross-gym CSV export that enters each gym explicitly and never disables ordinary tenant scope |
+| GET | `/platform/audit-log[?format=csv\|xlsx\|pdf]` | authenticated `super_admin`; request-bound database identity | Search, filter, paginate or export the existing platform-wide audit history; the default window is 365 days |
 | GET/POST | `/gyms/{gym}/staff` | tenant; owner/manager | List staff or create an immediate trainer profile/account using server-fixed trainer role and a tenant-validated branch |
 | GET/PATCH/DELETE | `/gyms/{gym}/staff/{staff}` | tenant; owner/manager | Read/update staff, or delete an unreferenced trainer; reasons are required and managers cannot modify owner/manager hierarchy |
 | GET/POST/DELETE | `/gyms/{gym}/staff/{staff}/profile-image` | tenant; owner/manager | Stream, replace or remove a validated private trainer image without exposing an object-store URL |
@@ -880,6 +896,9 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/saas-subscription/payment-options` | tenant; owner/manager/super admin | Return safe platform Stripe configuration state while cash/bank remain independent |
 | GET/POST | `/gyms/{gym}/saas-subscription/manual-payments` | tenant; reads owner/manager/super admin; writes owner/super admin | List or submit a tenant-scoped cash/bank SaaS payment using the authoritative price |
 | GET | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/receipt` | tenant; owner/manager/super admin | Stream the authorised private platform bank-transfer receipt |
+| GET | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/ironcore-receipt` | tenant; owner/manager/super admin; Paid only | Download a branded server-generated receipt from immutable payment, invoice and plan snapshots |
+| POST | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/corrections` | tenant; `super_admin`; mandatory reason | Append a reference/method/notes/metadata correction without mutating the original transaction |
+| GET | `/gyms/{gym}/saas-subscription/payment-report?format=csv\|xlsx\|pdf` | tenant; `super_admin` | Export selected-gym platform billing history with effective correction display values |
 | PATCH | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/review` | tenant; `super_admin`; mandatory reason | Approve and atomically activate the manual subscription/invoice, or reject without access |
 | POST | `/gyms/{gym}/saas-subscription/checkout` | tenant; owner/super admin | Create or reuse an idempotent Stripe-hosted subscription Checkout session |
 | POST | `/gyms/{gym}/saas-subscription/portal` | tenant; owner/super admin | Create a short-lived Stripe customer-portal session for payment methods, invoices, plan changes and cancellation |
@@ -918,6 +937,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/PATCH | `/gyms/{gym}/notification-preferences` | tenant; linked member self; owner/manager read for support | Read defaults/current choices or update the member's own communication preferences |
 | GET | `/gyms/{gym}/notification-deliveries` | tenant; owner/manager or linked member self | Cursor-list masked delivery history; never return encrypted destinations |
 | GET | `/gyms/{gym}/reports/overview` | tenant; owner/manager/super admin; `reports` throttle | Return one bounded, currency-specific operational report for the explicitly selected gym |
+| GET | `/gyms/{gym}/audit-log[?format=csv\|xlsx\|pdf]` | tenant; owner/manager/super admin | Search, filter, paginate or export only the selected gym's existing audit history |
 
 ## Role permission arrays
 
@@ -1102,6 +1122,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| Post-deployment stabilization — owner UX, audit, billing corrections and offboarding | Implemented locally; approval pending | One-time owner credentials are copyable only until dismissal; owner/invitation mail uses the shared provider; paid SaaS corrections are append-only; audit history exposes the existing encrypted log; suspended/archived tenants cannot log in; real history blocks hard deletion. |
 | IronCore Beta v0.1 — Railway public API container | Implemented locally; approval pending | The backend image now supervises Caddy plus PHP-FPM, listens on Railway's dynamic `PORT`, serves only Laravel's public directory and preserves the existing local Compose command overrides. `/up` remains process liveness and `/api/v1/health/readiness` remains the PostgreSQL/Redis readiness gate. |
 | IronCore Beta v0.1 — demo login removal | Implemented locally; approval pending | The public login contains only real email/password and recovery actions. Demo role buttons, credential autofill and API-unavailable preview/activation fallbacks are absent; all roles continue through the unchanged Laravel session and permission flow. |
 | IronCore Beta v0.1 — password-reset email delivery | Implemented locally; approval pending | Keeps the existing non-enumerating, hash-only, expiring and single-use recovery contract while adding a local SMTP inbox, a dedicated Redis queue worker, production-provider environment settings and role-wide recovery/login regression coverage. No tenant schema or permission boundary changes. |

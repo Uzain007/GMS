@@ -6,10 +6,12 @@ use App\Enums\GymStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreGymRequest;
 use App\Http\Requests\UpdateGymRequest;
+use App\Http\Requests\DeleteGymRequest;
 use App\Http\Resources\GymResource;
 use App\Models\Gym;
 use App\Services\AuditService;
 use App\Services\GymOwnerAccountService;
+use App\Services\GymLifecycleService;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -97,5 +99,16 @@ class GymController extends Controller
         });
 
         return new GymResource($fresh);
+    }
+
+    public function destroy(
+        DeleteGymRequest $request,
+        TenantContext $context,
+        GymLifecycleService $lifecycle,
+    ): JsonResponse {
+        $gym = $context->gym();
+        $lifecycle->hardDelete($gym, $request->validated('confirmation'), $request->validated('reason'), $request);
+
+        return response()->json(status: 204);
     }
 }
