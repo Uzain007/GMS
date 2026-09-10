@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentProvider;
 use App\Enums\PaymentStatus;
+use App\Enums\RefundStatus;
 use App\Enums\SaasInvoiceStatus;
 use App\Enums\SaasPlanStatus;
 use App\Enums\SaasSubscriptionStatus;
@@ -15,6 +16,7 @@ use App\Models\PlatformBillingCustomer;
 use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
+use App\Models\SaasPaymentRefund;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\SubscriptionCheckoutSession;
 use App\Models\User;
@@ -195,7 +197,7 @@ class SaasBillingService
     /** @return array{payment: SaasSubscriptionPayment, reused: bool} */
     public function createManualPayment(
         Gym $gym,
-        SaasPlanPrice $price,
+        ?SaasPlanPrice $price,
         array $data,
         User $actor,
         Request $request,
@@ -209,6 +211,22 @@ class SaasBillingService
             return ['payment' => $existing, 'reused' => true];
         }
 
+        $invoice = filled($data['saas_billing_invoice_id'] ?? null)
+            ? SaasBillingInvoice::query()->with(['subscription.price.plan'])->findOrFail($data['saas_billing_invoice_id'])
+            : null;
+        if ($invoice) {
+            if (in_array($invoice->status, [SaasInvoiceStatus::Paid, SaasInvoiceStatus::Void, SaasInvoiceStatus::Cancelled], true)
+                || $invoice->amount_remaining_minor < 1) {
+                throw ValidationException::withMessages(['saas_billing_invoice_id' => ['This invoice is not payable.']]);
+            }
+            $price = $invoice->subscription?->price;
+            if (! $price) {
+                throw ValidationException::withMessages(['saas_billing_invoice_id' => ['The invoice has no valid subscription price.']]);
+            }
+        }
+        if (! $price) {
+            throw ValidationException::withMessages(['saas_plan_price_id' => ['Select a SaaS plan price or renewal invoice.']]);
+        }
         $price->loadMissing('plan');
         $this->assertSelectablePrice($gym, $price);
         $method = PaymentMethod::from($data['method']);
@@ -218,7 +236,7 @@ class SaasBillingService
         if ($method === PaymentMethod::BankTransfer && ! $receipt) {
             throw ValidationException::withMessages(['receipt' => ['A bank-transfer receipt is required.']]);
         }
-        if ($this->currentSubscription()) {
+        if (! $invoice && $this->currentSubscription()) {
             throw ValidationException::withMessages(['subscription' => ['Use billing management for the existing subscription.']]);
         }
         if (SaasSubscriptionPayment::query()->where('status', PaymentStatus::Pending->value)->exists()) {
@@ -227,16 +245,19 @@ class SaasBillingService
 
         $stored = null;
         try {
-            $payment = DB::transaction(function () use ($price, $data, $actor, $request, $method, $receipt, &$stored): SaasSubscriptionPayment {
+            $payment = DB::transaction(function () use ($price, $invoice, $data, $actor, $request, $method, $receipt, &$stored): SaasSubscriptionPayment {
                 $payment = SaasSubscriptionPayment::query()->create([
                     'saas_plan_price_id' => $price->getKey(),
+                    'gym_subscription_id' => $invoice?->gym_subscription_id,
+                    'saas_billing_invoice_id' => $invoice?->id,
                     'submitted_by' => $actor->getKey(),
                     'method' => $method,
                     'status' => PaymentStatus::Pending,
-                    'amount_minor' => $price->amount_minor,
-                    'currency' => $price->currency,
+                    'amount_minor' => $invoice?->amount_remaining_minor ?? $price->amount_minor,
+                    'currency' => $invoice?->currency ?? $price->currency,
                     'idempotency_key' => $data['idempotency_key'],
                     'reference' => trim((string) $data['reference']),
+                    'payment_date' => $data['payment_date'] ?? null,
                 ]);
 
                 if ($receipt) {
@@ -253,8 +274,9 @@ class SaasBillingService
                         'saas_plan_price_id' => $price->getKey(),
                         'method' => $method->value,
                         'status' => PaymentStatus::Pending->value,
-                        'amount_minor' => $price->amount_minor,
-                        'currency' => $price->currency->value,
+                        'amount_minor' => $invoice?->amount_remaining_minor ?? $price->amount_minor,
+                        'currency' => ($invoice?->currency ?? $price->currency)->value,
+                        'saas_billing_invoice_id' => $invoice?->id,
                         'has_receipt' => (bool) $receipt,
                     ],
                     request: $request,
@@ -298,16 +320,19 @@ class SaasBillingService
                     'review_reason' => $data['reason'],
                 ]);
             } else {
-                if ($this->currentSubscription()) {
+                $renewal = $locked->invoice && $locked->subscription;
+                if (! $renewal && $this->currentSubscription()) {
                     throw ValidationException::withMessages(['subscription' => ['This gym already has a current SaaS subscription.']]);
                 }
 
-                $customer = $this->manualCustomer($gym, $locked->submittedBy ?? $actor);
+                $customer = $renewal
+                    ? $locked->subscription->customer
+                    : $this->manualCustomer($gym, $locked->submittedBy ?? $actor);
                 $periodStart = now();
                 $periodEnd = $locked->price->billing_interval === 'yearly'
                     ? $periodStart->copy()->addYearNoOverflow()
                     : $periodStart->copy()->addMonthNoOverflow();
-                $subscription = GymSubscription::query()->create([
+                $subscription = $renewal ? $locked->subscription : GymSubscription::query()->create([
                     'billing_customer_id' => $customer->getKey(),
                     'saas_plan_id' => $locked->price->plan->getKey(),
                     'saas_plan_price_id' => $locked->price->getKey(),
@@ -322,9 +347,10 @@ class SaasBillingService
                     'billing_interval' => $locked->price->billing_interval,
                     'current_period_start' => $periodStart,
                     'current_period_end' => $periodEnd,
+                    'next_billing_at' => $periodEnd,
                 ]);
                 $providerInvoiceId = 'manual_invoice_'.$locked->getKey();
-                $invoice = SaasBillingInvoice::query()->create([
+                $invoice = $renewal ? $locked->invoice : SaasBillingInvoice::query()->create([
                     'billing_customer_id' => $customer->getKey(),
                     'gym_subscription_id' => $subscription->getKey(),
                     'provider_invoice_id' => $providerInvoiceId,
@@ -338,7 +364,31 @@ class SaasBillingService
                     'period_end' => $periodEnd,
                     'paid_at' => $periodStart,
                 ]);
-                $subscription->update(['latest_invoice_id' => $providerInvoiceId]);
+                if ($renewal) {
+                    $periodStart = $invoice->period_start ?? $periodStart;
+                    $periodEnd = $invoice->period_end ?? $periodEnd;
+                    $invoice->update([
+                        'status' => SaasInvoiceStatus::Paid,
+                        'amount_paid_minor' => $invoice->amount_due_minor,
+                        'amount_remaining_minor' => 0,
+                        'paid_at' => now(),
+                    ]);
+                    $subscription->update([
+                        'status' => SaasSubscriptionStatus::Active,
+                        'current_period_start' => $periodStart,
+                        'current_period_end' => $periodEnd,
+                        'next_billing_at' => $periodEnd,
+                        'billing_restricted_at' => null,
+                        'billing_override_until' => null,
+                        'billing_override_by' => null,
+                        'billing_override_reason' => null,
+                        'failure_code' => null,
+                        'failure_message' => null,
+                        'latest_invoice_id' => $invoice->provider_invoice_id,
+                    ]);
+                } else {
+                    $subscription->update(['latest_invoice_id' => $providerInvoiceId]);
+                }
                 $locked->update([
                     'gym_subscription_id' => $subscription->getKey(),
                     'saas_billing_invoice_id' => $invoice->getKey(),
@@ -373,6 +423,100 @@ class SaasBillingService
             );
 
             return $fresh;
+        });
+    }
+
+    public function refundManualPayment(
+        Gym $gym,
+        SaasSubscriptionPayment $payment,
+        array $data,
+        User $actor,
+        Request $request,
+    ): SaasSubscriptionPayment {
+        return DB::transaction(function () use ($gym, $payment, $data, $actor, $request): SaasSubscriptionPayment {
+            $locked = SaasSubscriptionPayment::query()->with(['invoice', 'subscription'])->lockForUpdate()->findOrFail($payment->id);
+            if (! in_array($locked->status, [PaymentStatus::Paid, PaymentStatus::PartiallyRefunded], true)) {
+                throw ValidationException::withMessages(['payment' => ['Only a paid SaaS transaction can be refunded.']]);
+            }
+            $remaining = $locked->amount_minor - $locked->refunded_amount_minor;
+            if ($data['amount_minor'] > $remaining) {
+                throw ValidationException::withMessages(['amount_minor' => ['The refund exceeds the unrefunded payment amount.']]);
+            }
+
+            $totalRefunded = $locked->refunded_amount_minor + $data['amount_minor'];
+            $refund = SaasPaymentRefund::query()->create([
+                'saas_subscription_payment_id' => $locked->id,
+                'recorded_by' => $actor->id,
+                'status' => RefundStatus::Succeeded,
+                'amount_minor' => $data['amount_minor'],
+                'currency' => $locked->currency,
+                'reason' => $data['reason'],
+                'refunded_at' => now(),
+            ]);
+            $locked->update([
+                'refunded_amount_minor' => $totalRefunded,
+                'status' => $totalRefunded === $locked->amount_minor ? PaymentStatus::Refunded : PaymentStatus::PartiallyRefunded,
+            ]);
+
+            if ($locked->invoice) {
+                $paid = max(0, $locked->invoice->amount_paid_minor - $data['amount_minor']);
+                $remainingInvoice = max(0, $locked->invoice->amount_due_minor - $paid);
+                $locked->invoice->update([
+                    'status' => $locked->invoice->due_at?->isPast() ? SaasInvoiceStatus::PastDue : SaasInvoiceStatus::Due,
+                    'amount_paid_minor' => $paid,
+                    'amount_remaining_minor' => $remainingInvoice,
+                    'paid_at' => null,
+                ]);
+                if ($locked->subscription) {
+                    $locked->subscription->update(['status' => SaasSubscriptionStatus::PastDue]);
+                    $this->gymStatus->synchronize($gym, SaasSubscriptionStatus::PastDue, actor: $actor, reason: 'SaaS payment refund: '.$data['reason'], request: $request);
+                }
+            }
+            $this->audit->record('saas.subscription_payment.refunded', $refund, $actor, after: [
+                'payment_id' => $locked->id,
+                'amount_minor' => $data['amount_minor'],
+                'total_refunded_minor' => $totalRefunded,
+            ], reason: $data['reason'], request: $request);
+
+            return $locked->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+        });
+    }
+
+    public function voidInvoice(SaasBillingInvoice $invoice, string $reason, User $actor, Request $request): SaasBillingInvoice
+    {
+        return DB::transaction(function () use ($invoice, $reason, $actor, $request): SaasBillingInvoice {
+            $locked = SaasBillingInvoice::query()->lockForUpdate()->findOrFail($invoice->id);
+            if ($locked->amount_paid_minor > 0 || $locked->status === SaasInvoiceStatus::Paid) {
+                throw ValidationException::withMessages(['invoice' => ['A paid or partially paid invoice cannot be voided; use a refund or correction.']]);
+            }
+            if (in_array($locked->status, [SaasInvoiceStatus::Void, SaasInvoiceStatus::Cancelled], true)) {
+                throw ValidationException::withMessages(['invoice' => ['This invoice is already closed.']]);
+            }
+            $before = $locked->toArray();
+            $locked->update(['status' => SaasInvoiceStatus::Void, 'voided_at' => now(), 'voided_by' => $actor->id, 'void_reason' => $reason]);
+            $this->audit->record('saas.invoice.voided', $locked->fresh(), $actor, $before, $locked->fresh()->toArray(), $reason, $request);
+            return $locked->fresh();
+        });
+    }
+
+    public function overrideBillingRestriction(Gym $gym, array $data, User $actor, Request $request): GymSubscription
+    {
+        return DB::transaction(function () use ($gym, $data, $actor, $request): GymSubscription {
+            $subscription = $this->currentSubscription();
+            if (! $subscription) {
+                throw ValidationException::withMessages(['subscription' => ['No current SaaS subscription exists.']]);
+            }
+            $before = $subscription->toArray();
+            $subscription->update([
+                'status' => SaasSubscriptionStatus::Active,
+                'billing_restricted_at' => null,
+                'billing_override_until' => now()->addDays($data['days']),
+                'billing_override_by' => $actor->id,
+                'billing_override_reason' => $data['reason'],
+            ]);
+            $this->gymStatus->synchronize($gym, SaasSubscriptionStatus::Active, actor: $actor, reason: 'Temporary billing override: '.$data['reason'], request: $request);
+            $this->audit->record('saas.subscription.billing_override', $subscription->fresh(), $actor, $before, $subscription->fresh()->toArray(), $data['reason'], $request);
+            return $subscription->fresh('customer');
         });
     }
 

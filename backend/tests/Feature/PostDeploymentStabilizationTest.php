@@ -69,8 +69,25 @@ class PostDeploymentStabilizationTest extends TestCase
             ->assertOk()->assertHeader('content-type', 'application/pdf');
         $this->get("/api/v1/gyms/{$gym->id}/saas-subscription/payment-report?format=xlsx", ['X-Gym-ID' => $gym->id])
             ->assertOk()->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments/{$payment->id}/refunds", [
+            'amount_minor' => 1900, 'reason' => 'Partial service credit approved by platform finance.',
+        ], ['X-Gym-ID' => $gym->id])->assertOk()
+            ->assertJsonPath('data.status', 'partially_refunded')
+            ->assertJsonPath('data.refunded_amount_minor', 1900);
+        app(TenantContext::class)->run($gym, function () use ($gym, $payment): void {
+            $this->assertDatabaseHas('saas_subscription_payments', [
+                'id' => $payment->id, 'amount_minor' => 7900, 'refunded_amount_minor' => 1900,
+            ]);
+            $this->assertDatabaseHas('saas_payment_refunds', [
+                'gym_id' => $gym->id, 'saas_subscription_payment_id' => $payment->id, 'amount_minor' => 1900,
+            ]);
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gym->id, 'event' => 'saas.subscription_payment.refunded']);
+        });
         $this->postJson("/api/v1/gyms/{$otherGym->id}/saas-subscription/manual-payments/{$payment->id}/corrections", [
             'reason' => 'Attempted cross tenant correction.',
+        ], ['X-Gym-ID' => $otherGym->id])->assertNotFound();
+        $this->postJson("/api/v1/gyms/{$otherGym->id}/saas-subscription/manual-payments/{$payment->id}/refunds", [
+            'amount_minor' => 100, 'reason' => 'Attempted cross tenant refund.',
         ], ['X-Gym-ID' => $otherGym->id])->assertNotFound();
     }
 

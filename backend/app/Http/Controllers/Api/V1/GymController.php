@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateGymRequest;
 use App\Http\Requests\DeleteGymRequest;
 use App\Http\Resources\GymResource;
 use App\Models\Gym;
+use App\Models\GymBranch;
 use App\Services\AuditService;
 use App\Services\GymOwnerAccountService;
 use App\Services\GymLifecycleService;
@@ -57,6 +58,13 @@ class GymController extends Controller
             $ownerAccount = $context->run($gym, function () use ($gym, $data, $owners, $audit, $request): ?array {
                 // RLS requires the newly-created gym context before owner/pivot
                 // or audit writes; the browser's owner fields grant no authority.
+                GymBranch::query()->create([
+                    'name' => 'Primary location',
+                    'code' => 'PRIMARY',
+                    'timezone' => $gym->timezone,
+                    'status' => 'active',
+                    'is_primary' => true,
+                ]);
                 $owner = $data['owner']['create_login_account']
                     ? $owners->create($data['owner'], $request->user(), $request)
                     : null;

@@ -17,7 +17,8 @@ class SaasBillingInvoice extends Model
         'gym_id', 'billing_customer_id', 'gym_subscription_id', 'provider_invoice_id',
         'number', 'status', 'currency', 'amount_due_minor', 'amount_paid_minor',
         'amount_remaining_minor', 'hosted_invoice_url', 'invoice_pdf_url',
-        'period_start', 'period_end', 'due_at', 'paid_at',
+        'available_at', 'period_start', 'period_end', 'due_at', 'grace_ends_at',
+        'paid_at', 'voided_at', 'voided_by', 'void_reason',
     ];
 
     protected $hidden = ['provider_invoice_id'];
@@ -30,10 +31,13 @@ class SaasBillingInvoice extends Model
             'amount_due_minor' => 'integer',
             'amount_paid_minor' => 'integer',
             'amount_remaining_minor' => 'integer',
+            'available_at' => 'datetime',
             'period_start' => 'datetime',
             'period_end' => 'datetime',
             'due_at' => 'datetime',
+            'grace_ends_at' => 'datetime',
             'paid_at' => 'datetime',
+            'voided_at' => 'datetime',
         ];
     }
 
@@ -45,5 +49,10 @@ class SaasBillingInvoice extends Model
     public function subscription(): BelongsTo
     {
         return $this->belongsTo(GymSubscription::class, 'gym_subscription_id');
+    }
+
+    public function voidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by');
     }
 }

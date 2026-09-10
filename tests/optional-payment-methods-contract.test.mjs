@@ -58,3 +58,21 @@ test("web payment statuses use business language", async () => {
   assert.match(repair, /set_config\('ironcore\.current_gym_id'/);
   assert.match(repair, /where\('status', 'succeeded'\).*\['status' => 'paid'\]/s);
 });
+
+test("bank transfers require a real transfer date at both UI and API boundaries", async () => {
+  const [finance, member, saas, memberRequest, paymentRequest, saasRequest] = await Promise.all([
+    read("app/financial-management.tsx"),
+    read("app/member-portal.tsx"),
+    read("app/saas-billing-management.tsx"),
+    read("backend/app/Http/Requests/StoreMemberPaymentRequest.php"),
+    read("backend/app/Http/Requests/StorePaymentRequest.php"),
+    read("backend/app/Http/Requests/StoreSaasSubscriptionPaymentRequest.php"),
+  ]);
+
+  assert.match(finance, /type="date"[^>]*required/);
+  assert.match(member, /type="date"[^>]*required/);
+  assert.match(saas, /type="date"[^>]*required/);
+  assert.match(memberRequest, /required_if:method,bank_transfer/);
+  assert.match(paymentRequest, /required_if:method,bank_transfer/);
+  assert.match(saasRequest, /required_if:method,'.PaymentMethod::BankTransfer->value/);
+});

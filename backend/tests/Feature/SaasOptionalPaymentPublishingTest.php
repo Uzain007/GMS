@@ -16,7 +16,10 @@ use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use App\Models\SaasSubscriptionPayment;
+use App\Models\SaasBillingNotification;
+use App\Models\Member;
 use App\Models\User;
+use App\Services\AutomatedSaasBillingService;
 use App\Services\StripeBillingWebhookService;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,6 +28,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -87,11 +91,24 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         [$plan, $price] = $this->catalogue(['bank_transfer']);
         Sanctum::actingAs($owner);
 
+        $this->post(
+            "/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments",
+            [
+                'saas_plan_price_id' => $price->id,
+                'method' => 'bank_transfer',
+                'idempotency_key' => 'saas-bank-transfer-no-date',
+                'reference' => 'BANK-NO-DATE',
+                'receipt' => UploadedFile::fake()->create('subscription-receipt.pdf', 10, 'application/pdf'),
+            ],
+            ['Accept' => 'application/json', 'X-Gym-ID' => $gym->id],
+        )->assertUnprocessable()->assertJsonValidationErrors('payment_date');
+
         $created = $this->post(
             "/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments",
             [
                 'saas_plan_price_id' => $price->id,
                 'method' => 'bank_transfer',
+                'payment_date' => today()->toDateString(),
                 'idempotency_key' => 'saas-bank-transfer-0001',
                 'reference' => 'BANK-LOCAL-001',
                 'receipt' => UploadedFile::fake()->create('subscription-receipt.pdf', 10, 'application/pdf'),
@@ -427,6 +444,137 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         Http::assertSent(fn (HttpRequest $request): bool => str_ends_with($request->url(), '/v1/checkout/sessions')
             && ! $request->hasHeader('Stripe-Account')
         );
+    }
+
+    public function test_manual_recurring_invoice_grace_restriction_override_and_renewal_are_tenant_safe(): void
+    {
+        Queue::fake();
+        [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        [$plan, $price] = $this->catalogue(['cash', 'bank_transfer']);
+        [$customer] = $this->stripeSubscription($gym, $plan, $price);
+        app(TenantContext::class)->run($gym, function () use ($customer, $plan, $price): void {
+            GymSubscription::query()->delete();
+            GymSubscription::query()->create([
+                'billing_customer_id' => $customer->id, 'saas_plan_id' => $plan->id,
+                'saas_plan_price_id' => $price->id, 'provider' => PaymentProvider::Manual,
+                'provider_subscription_id' => 'manual_recurring_contract', 'status' => SaasSubscriptionStatus::Active,
+                'plan_code_snapshot' => $plan->code, 'plan_name_snapshot' => $plan->name,
+                'feature_limits_snapshot' => $plan->feature_limits, 'currency' => Currency::GBP,
+                'amount_minor' => 7900, 'billing_interval' => 'monthly',
+                'current_period_start' => now()->subMonth(), 'current_period_end' => now()->startOfDay(),
+                'next_billing_at' => now()->startOfDay(), 'grace_period_days' => 15,
+            ]);
+        });
+
+        app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
+        $invoice = app(TenantContext::class)->run($gym, fn () => SaasBillingInvoice::query()->where('status', 'due')->firstOrFail());
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, SaasBillingNotification::query()->count()));
+
+        $this->travel(16)->days();
+        app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
+        $subscription = app(TenantContext::class)->run($gym, fn () => GymSubscription::query()->latest()->firstOrFail());
+        $this->assertNotNull($subscription->billing_restricted_at);
+        $this->assertSame(SaasSubscriptionStatus::PastDue, $subscription->status);
+
+        Sanctum::actingAs($owner);
+        $this->getJson("/api/v1/gyms/{$gym->id}/members", ['X-Gym-ID' => $gym->id])->assertStatus(402);
+
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/billing-override", [
+            'days' => 7, 'reason' => 'Approved short operational extension.',
+        ], ['X-Gym-ID' => $gym->id])->assertSuccessful()->assertJsonPath('data.status', 'active');
+
+        Sanctum::actingAs($owner);
+        $payment = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments", [
+            'saas_billing_invoice_id' => $invoice->id, 'method' => 'cash',
+            'idempotency_key' => 'manual-renewal-payment-0001', 'reference' => 'CASH-RENEWAL-001',
+        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data');
+
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments/{$payment['id']}/review", [
+            'decision' => 'approve', 'reason' => 'Renewal cash verified by finance.',
+        ], ['X-Gym-ID' => $gym->id])->assertSuccessful()->assertJsonPath('data.status', 'paid');
+        app(TenantContext::class)->run($gym, function () use ($invoice): void {
+            $this->assertSame(1, GymSubscription::query()->count());
+            $this->assertSame('paid', $invoice->fresh()->status->value);
+            $this->assertNull(GymSubscription::query()->latest()->firstOrFail()->billing_restricted_at);
+        });
+    }
+
+    public function test_platform_insights_and_global_directory_require_super_admin_and_keep_gym_boundaries(): void
+    {
+        [$ownerA, $gymA] = $this->tenant(UserRole::GymOwner);
+        [, $gymB] = $this->tenant(UserRole::GymOwner);
+        app(TenantContext::class)->run($gymA, fn () => Member::query()->create([
+            'member_number' => 'PLATFORM-A-001',
+            'first_name' => 'Alpha',
+            'last_name' => 'Member',
+            'email' => 'alpha@example.test',
+            'phone' => '+447700900101',
+            'status' => 'active',
+            'joined_at' => now(),
+        ]));
+        app(TenantContext::class)->run($gymB, fn () => Member::query()->create([
+            'member_number' => 'PLATFORM-B-001',
+            'first_name' => 'Beta',
+            'last_name' => 'Member',
+            'email' => 'beta@example.test',
+            'phone' => '+447700900102',
+            'status' => 'active',
+            'joined_at' => now(),
+        ]));
+
+        Sanctum::actingAs($ownerA);
+        $this->getJson('/api/v1/platform/member-directory')->assertForbidden();
+        $this->getJson('/api/v1/platform/billing')->assertForbidden();
+
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $this->getJson("/api/v1/platform/member-directory?gym_id={$gymA->id}")
+            ->assertSuccessful()->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.gym_id', $gymA->id)
+            ->assertJsonMissing(['gym_id' => $gymB->id]);
+        $this->getJson('/api/v1/platform/billing')->assertSuccessful()->assertJsonStructure(['data' => ['metrics', 'subscriptions', 'invoices']]);
+        $this->getJson('/api/v1/platform/analytics')->assertSuccessful()->assertJsonStructure(['data' => ['timeline', 'plan_distribution', 'billing_metrics']]);
+    }
+
+    public function test_unpaid_saas_invoice_void_is_audited_and_cross_tenant_safe(): void
+    {
+        [, $gym] = $this->tenant(UserRole::GymOwner);
+        [, $otherGym] = $this->tenant(UserRole::GymOwner);
+        [$plan, $price] = $this->catalogue(['cash', 'bank_transfer']);
+        [$customer, $subscription] = $this->stripeSubscription($gym, $plan, $price);
+        $invoice = app(TenantContext::class)->run($gym, fn () => SaasBillingInvoice::query()->create([
+            'billing_customer_id' => $customer->id,
+            'gym_subscription_id' => $subscription->id,
+            'provider_invoice_id' => 'manual-void-contract',
+            'number' => 'IC-VOID-001',
+            'status' => 'due',
+            'currency' => Currency::GBP,
+            'amount_due_minor' => 7900,
+            'amount_paid_minor' => 0,
+            'amount_remaining_minor' => 7900,
+            'period_start' => now(),
+            'period_end' => now()->addMonth(),
+            'due_at' => now(),
+        ]));
+
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/gyms/{$gym->id}/saas-billing-invoices/{$invoice->id}/void", [
+            'reason' => 'Duplicate renewal invoice confirmed by platform finance.',
+        ], ['X-Gym-ID' => $gym->id])->assertSuccessful()
+            ->assertJsonPath('data.status', 'void');
+        app(TenantContext::class)->run($gym, function () use ($gym, $invoice): void {
+            $this->assertDatabaseHas('saas_billing_invoices', [
+                'gym_id' => $gym->id, 'id' => $invoice->id, 'status' => 'void',
+            ]);
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gym->id, 'event' => 'saas.invoice.voided']);
+        });
+        $this->postJson("/api/v1/gyms/{$otherGym->id}/saas-billing-invoices/{$invoice->id}/void", [
+            'reason' => 'Attempted cross tenant invoice void.',
+        ], ['X-Gym-ID' => $otherGym->id])->assertNotFound();
     }
 
     /** @return array{User, Gym} */

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Archive, ArrowRight, Building2, CheckCircle2, ChevronDown, CircleDollarSign, Copy, Download, Eye, EyeOff, FileClock, KeyRound, LayoutDashboard, LoaderCircle,
+  Archive, ArrowRight, BarChart3, Building2, CheckCircle2, ChevronDown, CircleDollarSign, Copy, Eye, EyeOff, FileClock, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Mail, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UserRound, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -11,13 +11,14 @@ import {
 } from "./gym-location-options";
 import type {
   AuditLogFilters, AuditLogRecord, AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan, NewSaasPlanPrice,
-  Paginated, SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
+  Paginated, PlatformAnalyticsRecord, PlatformBillingRecord, PlatformMemberPage, SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
 } from "./lib/ironcore-api";
 import { SearchableSelect } from "./searchable-select";
 import { decimalToMinor } from "./tenant-operations";
 import { AuditLogManagement } from "./audit-log-management";
+import { PlatformAnalytics, PlatformBillingDashboard, PlatformMemberDirectory } from "./platform-insights";
 
-type PlatformView = "overview" | "gyms" | "members" | "plans" | "audit" | "settings";
+type PlatformView = "overview" | "gyms" | "members" | "plans" | "billing" | "analytics" | "audit" | "settings";
 
 export type PlatformPortalData = {
   user: AuthenticatedUser;
@@ -37,7 +38,10 @@ export type PlatformPortalData = {
   onGenerateGymOwnerTemporaryPassword: (gymId: string, reason: string) => Promise<{ account: GymOwnerAccount; temporary_password: string }>;
   onCreatePlan: (input: NewSaasPlan) => Promise<void>;
   onUpdatePlan: (planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice) => Promise<void>;
-  onExportMembers: () => Promise<void>;
+  onLoadMembers: (params: URLSearchParams) => Promise<PlatformMemberPage>;
+  onExportMembers: (params: URLSearchParams) => Promise<Blob>;
+  onLoadBilling: (params: URLSearchParams) => Promise<PlatformBillingRecord>;
+  onLoadAnalytics: (params: URLSearchParams) => Promise<PlatformAnalyticsRecord>;
   onLoadAudit: (filters: AuditLogFilters) => Promise<Paginated<AuditLogRecord>>;
   onExportAudit: (format: "csv" | "xlsx" | "pdf", filters: AuditLogFilters) => Promise<void>;
   onChangePassword: (currentPassword: string, password: string) => Promise<void>;
@@ -451,8 +455,6 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
   const [selectedPlan, setSelectedPlan] = useState<SaasPlanRecord | null>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [memberExportBusy, setMemberExportBusy] = useState(false);
-  const [memberExportError, setMemberExportError] = useState<string | null>(null);
   const [archivedGyms, setArchivedGyms] = useState(false);
   const filteredGyms = useMemo(() => data.gyms.filter((gym) => (archivedGyms ? gym.status === "cancelled" : gym.status !== "cancelled") && `${gym.name} ${gym.slug} ${gym.country_code} ${gym.status}`.toLowerCase().includes(query.toLowerCase())), [archivedGyms, data.gyms, query]);
   const activeGyms = data.gyms.filter((gym) => gym.status === "active").length;
@@ -463,6 +465,8 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
     { id: "gyms", label: "Gyms", icon: Building2 },
     { id: "members", label: "Global members", icon: UsersRound },
     { id: "plans", label: "SaaS plans", icon: CircleDollarSign },
+    { id: "billing", label: "Billing dashboard", icon: CircleDollarSign },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "audit", label: "Audit Log", icon: FileClock },
     { id: "settings", label: "Settings", icon: Settings },
   ];
@@ -487,8 +491,10 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
           <section className="platform-grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Tenant registry</p><h3>Recently available gyms</h3></div><button className="secondary-button" onClick={() => navigate("gyms")}>View all</button></div><div className="platform-quick-list">{data.gyms.slice(0, 5).map((gym) => <button key={gym.id} onClick={() => data.onOpenGym(gym)}><span>{initials(gym.name)}</span><div><strong>{gym.name}</strong><small>{gym.country_code} · {readable(gym.status)}</small></div><ArrowRight size={16} /></button>)}{!data.loading && data.gyms.length === 0 && <p>No gyms have been created yet.</p>}</div></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Product catalogue</p><h3>Active SaaS plans</h3></div><button className="secondary-button" onClick={() => navigate("plans")}>Manage</button></div><div className="platform-plan-summary"><strong>{data.plans.filter((plan) => plan.status === "active").length}</strong><span>active tiers</span><p>Prices are immutable and controlled only by Super Admin accounts.</p><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={16} /> Publish plan</button></div></article></section>
         </>}
         {view === "gyms" && <><section className="module-heading"><div><p className="eyebrow">Tenant registry</p><h2>Gyms</h2><p>View, edit, activate, deactivate or safely archive a gym with a recorded reason.</p></div><button className="primary-button" onClick={() => setGymModal(true)}><Plus size={17} /> Create gym</button></section><div className="billing-toggle gym-list-toggle" role="group" aria-label="Gym lifecycle list"><button className={!archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(false)}>Current gyms</button><button className={archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(true)}>Archived gyms</button></div><section className="panel table-scroll">{data.loading ? <div className="table-state"><LoaderCircle className="spin" size={20} /> Loading gyms…</div> : <table className="data-table"><thead><tr><th>Gym</th><th>Country</th><th>Currency</th><th>Status</th><th /></tr></thead><tbody>{filteredGyms.map((gym) => <tr key={gym.id}><td><strong>{gym.name}</strong><small className="table-sub">{gym.slug}</small></td><td>{gym.country_code}</td><td>{gym.base_currency}</td><td><span className={`status ${gym.status}`}><i />{readable(gym.status)}</span></td><td><div className="table-action-group"><button className="table-action" onClick={() => setSelectedGym(gym)}><Eye size={13} /> View / manage</button>{gym.status !== "cancelled" && <button className="table-action" onClick={() => data.onOpenGym(gym)}>Open <ArrowRight size={13} /></button>}</div></td></tr>)}</tbody></table>}{!data.loading && filteredGyms.length === 0 && <div className="empty-state"><Search size={23} /><strong>{archivedGyms ? "No archived gyms" : "No gyms found"}</strong><span>{archivedGyms ? "Archived tenants stay here with their history retained." : "Change the search or create the first gym."}</span></div>}</section></>}
-        {view === "members" && <><section className="module-heading"><div><p className="eyebrow">Authorised platform export</p><h2>Global members</h2><p>Export member rosters across all gyms without disabling tenant scopes or PostgreSQL RLS.</p></div><button className="primary-button" disabled={memberExportBusy} onClick={async () => { setMemberExportBusy(true); setMemberExportError(null); try { await data.onExportMembers(); } catch (reason) { setMemberExportError(reason instanceof Error ? reason.message : "The global member export failed."); } finally { setMemberExportBusy(false); } }}><Download size={17} />{memberExportBusy ? "Exporting…" : "Export all gyms"}</button></section>{memberExportError && <div className="form-error" role="alert">{memberExportError}</div>}<section className="panel platform-global-members"><UsersRound size={28} /><strong>Super Admin permission required</strong><p>The downloaded CSV identifies each gym and contains its current member roster. Each gym is entered explicitly on the server; Gym Admin users cannot call this platform endpoint.</p></section></>}
+        {view === "members" && <PlatformMemberDirectory gyms={data.gyms} load={data.onLoadMembers} exportRows={data.onExportMembers} />}
         {view === "plans" && <><section className="module-heading"><div><p className="eyebrow">Platform billing</p><h2>SaaS plans</h2><p>Manage catalogue details and append-only prices without changing accepted subscription history.</p></div><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={17} /> Publish plan</button></section><section className="platform-plan-grid">{data.plans.map((plan) => <article className="panel" key={plan.id}><div><span className={`status ${plan.status}`}><i />{readable(plan.status)}</span><small>{plan.code}</small></div><h3>{plan.name}</h3><p>{plan.description ?? "No description"}</p><ul>{plan.prices.filter((price) => price.active).map((price) => <li key={price.id}><strong>{money(price.amount_minor, price.currency)}</strong><span>/{price.billing_interval === "monthly" ? "month" : "year"}</span></li>)}</ul><small>{plan.feature_limits.members.toLocaleString()} members · {plan.feature_limits.branches.toLocaleString()} branches · {plan.feature_limits.staff.toLocaleString()} staff</small><small>Payments: {plan.payment_methods.map(readable).join(" · ")}</small><div className="platform-card-actions"><button className="secondary-button" onClick={() => setSelectedPlan(plan)}><Eye size={14} /> View / edit</button></div></article>)}{!data.loading && data.plans.length === 0 && <div className="empty-state panel"><CircleDollarSign size={24} /><strong>No plans published</strong><span>Create the first platform plan and immutable price.</span></div>}</section></>}
+        {view === "billing" && <PlatformBillingDashboard gyms={data.gyms} plans={data.plans} load={data.onLoadBilling} onOpenGym={data.onOpenGym} />}
+        {view === "analytics" && <PlatformAnalytics load={data.onLoadAnalytics} />}
         {view === "audit" && <AuditLogManagement gyms={data.gyms} onLoad={data.onLoadAudit} onExport={data.onExportAudit} />}
         {view === "settings" && <><section className="module-heading"><div><p className="eyebrow">Platform settings</p><h2>Settings</h2><p>Tenant currencies and timezones are managed per gym; account security stays platform-wide.</p></div></section><section className="platform-settings-grid"><article className="panel"><CircleDollarSign size={21} /><h3>Tenant currency settings</h3><p>Each gym keeps its own current base currency. Changing Gym A never changes Gym B or any historical transaction snapshot.</p><div className="platform-settings-list">{data.gyms.map((gym) => <button key={gym.id} onClick={() => setSelectedGym(gym)}><span><strong>{gym.name}</strong><small>{gym.timezone}</small></span><b>{gym.base_currency}</b><Pencil size={14} /></button>)}</div></article><article className="panel"><ShieldCheck size={21} /><h3>Account security</h3><p>Manage your password, authenticator and recovery codes separately from tenant business settings.</p><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Open account security</button></article><article className="panel"><Power size={21} /><h3>Provider status</h3><p>Stripe remains optional. Cash and bank transfer continue independently; credentials stay in deployment configuration, never this browser.</p></article></section></>}
       </main>

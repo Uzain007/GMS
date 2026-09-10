@@ -27,10 +27,13 @@ export type SaasBillingData = {
   error: string | null;
   onReload: () => void;
   onCheckout: (priceId: string, idempotencyKey: string) => Promise<string>;
-  onManualPayment: (priceId: string, method: "cash" | "bank_transfer", reference: string, idempotencyKey: string, receipt?: File) => Promise<void>;
+  onManualPayment: (input: { priceId?: string; invoiceId?: string; method: "cash" | "bank_transfer"; reference: string; paymentDate?: string; idempotencyKey: string; receipt?: File }) => Promise<void>;
   onReviewManualPayment: (paymentId: string, decision: "approve" | "reject", reason: string) => Promise<void>;
   onLoadManualReceipt: (paymentId: string) => Promise<Blob>;
   onCorrectManualPayment?: (paymentId: string, input: NewSaasPaymentCorrection) => Promise<void>;
+  onRefundManualPayment?: (paymentId: string, amountMinor: number, reason: string) => Promise<void>;
+  onVoidInvoice?: (invoiceId: string, reason: string) => Promise<void>;
+  onOverrideBilling?: (days: number, reason: string) => Promise<void>;
   onLoadIronCoreReceipt?: (paymentId: string) => Promise<Blob>;
   onExportPayments?: (format: "csv" | "xlsx" | "pdf") => Promise<Blob>;
   onPortal: () => Promise<string>;
@@ -61,6 +64,8 @@ function PaymentCorrectionModal({ payment, onClose, onSubmit }: { payment: SaasS
       await onSubmit(payment.id, {
         reference: String(form.get("reference")).trim() || null,
         method: String(form.get("method")) as "cash" | "bank_transfer",
+        payment_date: String(form.get("payment_date")) || null,
+        amount_minor: Math.round(Number(form.get("amount")) * 100),
         internal_notes: String(form.get("internal_notes")).trim() || null,
         metadata: metadata ?? null,
         reason: String(form.get("reason")).trim(),
@@ -69,7 +74,7 @@ function PaymentCorrectionModal({ payment, onClose, onSubmit }: { payment: SaasS
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The correction could not be recorded."); }
     finally { setBusy(false); }
   }
-  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="saas-correction-title"><button className="modal-scrim" onClick={onClose} aria-label="Close correction dialog" /><form className="modal-card" onSubmit={submit}><div className="modal-heading"><span><FileText size={21} /></span><div><p className="eyebrow">Append-only financial history</p><h2 id="saas-correction-title">Record payment correction</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{error && <div className="form-error" role="alert">{error}</div>}<div className="field-pair"><label>Corrected reference<input name="reference" maxLength={160} defaultValue={payment.effective_reference ?? payment.reference ?? ""} /></label><label>Corrected method<select name="method" defaultValue={payment.effective_method ?? payment.method}><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option></select></label></div><label>Internal notes<textarea name="internal_notes" maxLength={2000} rows={3} /></label><label>Metadata (JSON object)<textarea name="metadata" rows={3} placeholder={'{"source":"bank statement"}'} /></label><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} rows={3} /></label><div className="modal-safety"><ShieldCheck size={17} /><span><strong>The original transaction remains unchanged</strong><small>This creates a separate correction record and audit entry.</small></span></div><div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Recording…" : "Record correction"}</button></div></form></div>;
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="saas-correction-title"><button className="modal-scrim" onClick={onClose} aria-label="Close correction dialog" /><form className="modal-card" onSubmit={submit}><div className="modal-heading"><span><FileText size={21} /></span><div><p className="eyebrow">Append-only financial history</p><h2 id="saas-correction-title">Record payment correction</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{error && <div className="form-error" role="alert">{error}</div>}<div className="field-pair"><label>Corrected reference<input name="reference" maxLength={160} defaultValue={payment.effective_reference ?? payment.reference ?? ""} /></label><label>Corrected method<select name="method" defaultValue={payment.effective_method ?? payment.method}><option value="cash">Cash</option><option value="bank_transfer">Bank transfer</option></select></label></div><div className="field-pair"><label>Corrected payment date<input name="payment_date" type="date" defaultValue={payment.effective_payment_date ?? payment.payment_date ?? ""} /></label><label>Corrected amount<input name="amount" type="number" min="0.01" step="0.01" defaultValue={(payment.effective_amount_minor ?? payment.amount_minor) / 100} /></label></div><label>Internal notes<textarea name="internal_notes" maxLength={2000} rows={3} /></label><label>Metadata (JSON object)<textarea name="metadata" rows={3} placeholder={'{"source":"bank statement"}'} /></label><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} rows={3} /></label><div className="modal-safety"><ShieldCheck size={17} /><span><strong>The original transaction remains unchanged</strong><small>This creates a separate correction record and audit entry.</small></span></div><div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Recording…" : "Record correction"}</button></div></form></div>;
 }
 
 function readable(value: string): string {
@@ -153,7 +158,8 @@ function PlanModal({ currency, onClose, onCreate }: { currency: Currency; onClos
 }
 
 type ManualChoice = {
-  priceId: string;
+  priceId?: string;
+  invoiceId?: string;
   planName: string;
   method: "cash" | "bank_transfer";
 };
@@ -172,13 +178,9 @@ function ManualPaymentModal({ choice, onClose, onSubmit }: {
     const receipt = form.get("receipt");
     setBusy(true); setError(null);
     try {
-      await onSubmit(
-        choice.priceId,
-        choice.method,
-        String(form.get("reference")).trim(),
-        requestKey(),
-        receipt instanceof File && receipt.size > 0 ? receipt : undefined,
-      );
+      await onSubmit({ priceId: choice.priceId, invoiceId: choice.invoiceId, method: choice.method,
+        reference: String(form.get("reference")).trim(), paymentDate: String(form.get("payment_date")) || undefined,
+        idempotencyKey: requestKey(), receipt: receipt instanceof File && receipt.size > 0 ? receipt : undefined });
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The payment could not be submitted.");
@@ -191,7 +193,7 @@ function ManualPaymentModal({ choice, onClose, onSubmit }: {
       <div className="modal-heading"><span>{choice.method === "cash" ? <Banknote size={21} /> : <FileUp size={21} />}</span><div><p className="eyebrow">Platform subscription</p><h2 id="saas-manual-payment-title">{readable(choice.method)} · {choice.planName}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       {error && <div className="form-error" role="alert">{error}</div>}
       <label>{choice.method === "cash" ? "Cash receipt/reference" : "Bank transfer reference"}<input name="reference" required minLength={2} maxLength={160} autoFocus /></label>
-      {choice.method === "bank_transfer" && <label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label>}
+      {choice.method === "bank_transfer" && <><label>Transfer date<input name="payment_date" type="date" max={new Date().toISOString().slice(0, 10)} required /></label><label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label></>}
       <div className="modal-safety"><ShieldCheck size={17} /><span><strong>Platform review required</strong><small>The subscription activates only after a Super Admin verifies this payment. Member-payment records remain separate.</small></span></div>
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Submitting…" : "Submit for review"}</button></div>
     </form>
@@ -229,6 +231,12 @@ function ManualReviewModal({ payment, onClose, onSubmit }: {
   </div>;
 }
 
+function BillingActionModal({ title, amount, onClose, onSubmit }: { title: string; amount?: { value: number; currency: Currency }; onClose: () => void; onSubmit: (reason: string, value?: number) => Promise<void> }) {
+  const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); setError(null); try { await onSubmit(String(form.get("reason")), amount ? Math.round(Number(form.get("value")) * 100) : Number(form.get("days") || 0)); onClose(); } catch (reason) { setError(reason instanceof Error ? reason.message : "The billing action could not be saved."); } finally { setBusy(false); } }
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-label={title}><button className="modal-scrim" onClick={onClose} aria-label="Close" /><form className="modal-card" onSubmit={submit}><div className="modal-heading"><span><ShieldCheck size={20} /></span><div><p className="eyebrow">Audited billing action</p><h2>{title}</h2></div><button className="icon-button" type="button" onClick={onClose}><X size={18} /></button></div>{error && <div className="form-error">{error}</div>}{amount ? <label>Refund amount<input name="value" type="number" min="0.01" max={amount.value / 100} step="0.01" defaultValue={amount.value / 100} required /><small>{amount.currency}; the original paid transaction remains in history.</small></label> : title.includes("override") ? <label>Override duration (days)<input name="days" type="number" min="1" max="90" defaultValue="7" required /></label> : null}<label>Audit reason<textarea name="reason" minLength={5} maxLength={1000} required autoFocus /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? "Saving…" : "Confirm"}</button></div></form></div>;
+}
+
 export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [interval, setInterval] = useState<"monthly" | "yearly">("monthly");
   const [busy, setBusy] = useState<string | null>(null);
@@ -237,9 +245,18 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [manualChoice, setManualChoice] = useState<ManualChoice | null>(null);
   const [reviewing, setReviewing] = useState<SaasSubscriptionPaymentRecord | null>(null);
   const [correcting, setCorrecting] = useState<SaasSubscriptionPaymentRecord | null>(null);
+  const [refunding, setRefunding] = useState<SaasSubscriptionPaymentRecord | null>(null);
+  const [voiding, setVoiding] = useState<SaasBillingInvoiceRecord | null>(null);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [renderedAt] = useState(() => new Date().getTime());
   const canManage = !data.readOnly && ["super_admin", "gym_owner"].includes(data.actorRole);
   const current = data.subscription;
-  const nextRenewal = current?.current_period_end ?? current?.trial_ends_at ?? null;
+  const nextRenewal = current?.next_billing_at ?? current?.current_period_end ?? current?.trial_ends_at ?? null;
+  const payableInvoice = data.invoices.find((invoice) => ["upcoming", "due", "open", "past_due", "uncollectible"].includes(invoice.status) && invoice.amount_remaining_minor > 0);
+  const currentInvoice = payableInvoice ?? data.invoices[0] ?? null;
+  const graceDaysRemaining = payableInvoice?.grace_ends_at
+    ? Math.max(0, Math.ceil((new Date(payableInvoice.grace_ends_at).getTime() - renderedAt) / 86_400_000))
+    : null;
   const visiblePlans = useMemo(() => data.plans.filter((plan) => plan.status === "active"), [data.plans]);
 
   async function checkout(priceId: string) {
@@ -298,12 +315,15 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym’s connected account. This subscription is collected only by IronCore’s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
+    {current?.billing_restricted_at && <div className="form-error billing-warning" role="alert"><strong>Billing-restricted mode</strong><span>Normal operations were restricted on {date(current.billing_restricted_at)} after the grace period ended. Owners can still review billing and settle the overdue invoice.</span>{data.actorRole === "super_admin" && data.onOverrideBilling && <button className="secondary-button" onClick={() => setOverrideOpen(true)}>Add temporary override</button>}</div>}
+    {!current?.billing_restricted_at && payableInvoice && <div className="form-notice billing-warning" role="status"><strong>{payableInvoice.status === "past_due" ? "Payment overdue" : "Renewal payment available"}</strong><span>Due {date(payableInvoice.due_at)} · Grace ends {date(payableInvoice.grace_ends_at ?? null)}{payableInvoice.status === "past_due" && graceDaysRemaining !== null ? ` · ${graceDaysRemaining} day${graceDaysRemaining === 1 ? "" : "s"} remaining` : ""}</span>{canManage && <div className="finance-actions"><button className="secondary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer" })}><FileUp size={15} /> Bank transfer</button><button className="primary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash" })}><Banknote size={15} /> Record cash</button></div>}</div>}
     {data.loading && <div className="table-state"><LoaderCircle className="spin" size={21} /><span>Loading protected billing records…</span></div>}
 
     <section className="saas-metrics">
       <article className="panel saas-current"><span className="saas-icon violet"><Building2 size={20} /></span><div><small>Current plan</small><strong>{current?.plan_name ?? "No subscription"}</strong><p>{current ? `${money(current.amount_minor, current.currency)} / ${current.billing_interval === "monthly" ? "month" : "year"}` : "Choose a plan and an available payment method."}</p></div><span className={`status ${current?.status ?? "inactive"}`}><i />{readable(current?.status ?? "Not subscribed")}</span></article>
       <article className="panel saas-stat"><span className="saas-icon green"><CalendarDays size={20} /></span><small>{current?.status === "trialing" ? "Trial ends" : "Next renewal"}</small><strong>{date(nextRenewal)}</strong><p>{current?.cancel_at_period_end ? "Cancels at period end" : current?.provider === "stripe" ? "Automatic collection" : current ? "Manual settlement" : "No active billing"}</p></article>
       <article className="panel saas-stat"><span className="saas-icon amber"><FileText size={20} /></span><small>Billing history</small><strong>{data.invoices.length}</strong><p>{data.invoices.filter((invoice) => invoice.status === "paid").length} paid invoices loaded</p></article>
+      <article className="panel saas-stat"><span className="saas-icon violet"><FileText size={20} /></span><small>Current invoice</small><strong>{currentInvoice?.number ?? "None due"}</strong><p>{currentInvoice ? `${money(currentInvoice.amount_remaining_minor, currentInvoice.currency)} outstanding · due ${date(currentInvoice.due_at)}` : "No invoice requires attention"}</p></article>
     </section>
 
     <div className="billing-catalogue-head"><div><p className="eyebrow">Available tiers</p><h2>Choose the right plan</h2></div><div className="billing-toggle" role="group" aria-label="Billing interval"><button className={interval === "monthly" ? "active" : ""} onClick={() => setInterval("monthly")}>Monthly</button><button className={interval === "yearly" ? "active" : ""} onClick={() => setInterval("yearly")}>Yearly</button></div></div>
@@ -329,12 +349,15 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     })}</section>
     {!data.loading && visiblePlans.length === 0 && <div className="empty-state panel"><Sparkles size={25} /><strong>No active SaaS plans</strong><span>A super administrator can publish the first immutable platform price.</span></div>}
 
-    <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>Manual payment reviews</h3></div>{data.actorRole === "super_admin" && data.onExportPayments ? <div className="report-export-actions">{(["csv", "xlsx", "pdf"] as const).map((format) => <button key={format} className="secondary-button" disabled={busy !== null} onClick={() => void exportPayments(format)}><Download size={14} /> {format.toUpperCase()}</button>)}</div> : <small>Separate platform ledger</small>}</div><table className="data-table"><thead><tr><th>Plan</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}{payment.corrections?.length ? ` · ${payment.corrections.length} correction(s)` : ""}</small></td><td>{readable(payment.effective_method ?? payment.method)}</td><td>{payment.effective_reference ?? payment.reference ?? "—"}</td><td><strong>{money(payment.amount_minor, payment.currency)}</strong></td><td><span className={`status ${payment.status}`}><i />{readable(payment.status)}</span></td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Proof</button>}{payment.status === "paid" && data.onLoadIronCoreReceipt && <button className="table-action" disabled={busy === `generated-${payment.id}`} onClick={() => void downloadGenerated(payment)}><Download size={13} /> IronCore receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}{data.actorRole === "super_admin" && data.onCorrectManualPayment && <button className="table-action" onClick={() => setCorrecting(payment)}>Correct</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No manual SaaS payments</strong><span>Cash and bank-transfer requests appear here without entering the member-payment ledger.</span></div>}</section>
+    <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>Manual payment reviews</h3></div>{data.actorRole === "super_admin" && data.onExportPayments ? <div className="report-export-actions">{(["csv", "xlsx", "pdf"] as const).map((format) => <button key={format} className="secondary-button" disabled={busy !== null} onClick={() => void exportPayments(format)}><Download size={14} /> {format.toUpperCase()}</button>)}</div> : <small>Separate platform ledger</small>}</div><table className="data-table"><thead><tr><th>Plan</th><th>Method / date</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}{payment.corrections?.length ? ` · ${payment.corrections.length} correction(s)` : ""}</small></td><td>{readable(payment.effective_method ?? payment.method)}<small className="table-sub">{payment.effective_payment_date ?? payment.payment_date ?? "No reported date"}</small></td><td>{payment.effective_reference ?? payment.reference ?? "—"}</td><td><strong>{money(payment.effective_amount_minor ?? payment.amount_minor, payment.currency)}</strong>{Boolean(payment.refunded_amount_minor) && <small className="table-sub">Refunded {money(payment.refunded_amount_minor ?? 0, payment.currency)}</small>}</td><td><span className={`status ${payment.status}`}><i />{readable(payment.status)}</span></td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Proof</button>}{["paid", "partially_refunded", "refunded"].includes(payment.status) && data.onLoadIronCoreReceipt && <button className="table-action" disabled={busy === `generated-${payment.id}`} onClick={() => void downloadGenerated(payment)}><Download size={13} /> IronCore receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}{data.actorRole === "super_admin" && data.onCorrectManualPayment && <button className="table-action" onClick={() => setCorrecting(payment)}>Correct</button>}{data.actorRole === "super_admin" && data.onRefundManualPayment && ["paid", "partially_refunded"].includes(payment.status) && <button className="table-action" onClick={() => setRefunding(payment)}>Refund</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No manual SaaS payments</strong><span>Cash and bank-transfer requests appear here without entering the member-payment ledger.</span></div>}</section>
 
-    <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Platform subscription records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period end</th><th>Amount</th><th>Status</th><th>Document</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number ?? "Pending number"}</strong></td><td>{date(invoice.period_end)}</td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span></td><td>{invoice.hosted_invoice_url?.startsWith("https://") ? <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a> : "—"}</td></tr>)}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after a cash, bank-transfer or Stripe subscription is approved.</span></div>}</section>
+    <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Platform subscription records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period / due</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>{data.invoices.map((invoice) => <tr key={invoice.id}><td><strong>{invoice.number ?? "Pending number"}</strong></td><td>{date(invoice.period_end)}<small className="table-sub">Due {date(invoice.due_at)}</small></td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong><small className="table-sub">Outstanding {money(invoice.amount_remaining_minor, invoice.currency)}</small></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span></td><td><div className="table-actions">{invoice.hosted_invoice_url?.startsWith("https://") && <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a>}{data.actorRole === "super_admin" && data.onVoidInvoice && !["paid", "void", "cancelled"].includes(invoice.status) && invoice.amount_paid_minor === 0 && <button className="table-action" onClick={() => setVoiding(invoice)}>Void</button>}</div></td></tr>)}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after a cash, bank-transfer or Stripe subscription is approved.</span></div>}</section>
     {modal && data.onCreatePlan && <PlanModal currency={data.baseCurrency} onClose={() => setModal(false)} onCreate={data.onCreatePlan} />}
     {manualChoice && <ManualPaymentModal choice={manualChoice} onClose={() => setManualChoice(null)} onSubmit={data.onManualPayment} />}
     {reviewing && <ManualReviewModal payment={reviewing} onClose={() => setReviewing(null)} onSubmit={data.onReviewManualPayment} />}
     {correcting && data.onCorrectManualPayment && <PaymentCorrectionModal payment={correcting} onClose={() => setCorrecting(null)} onSubmit={data.onCorrectManualPayment} />}
+    {refunding && data.onRefundManualPayment && <BillingActionModal title="Record SaaS refund" amount={{ value: refunding.amount_minor - (refunding.refunded_amount_minor ?? 0), currency: refunding.currency }} onClose={() => setRefunding(null)} onSubmit={(reason, amount) => data.onRefundManualPayment!(refunding.id, amount ?? 0, reason)} />}
+    {voiding && data.onVoidInvoice && <BillingActionModal title="Void unpaid invoice" onClose={() => setVoiding(null)} onSubmit={(reason) => data.onVoidInvoice!(voiding.id, reason)} />}
+    {overrideOpen && data.onOverrideBilling && <BillingActionModal title="Temporary billing override" onClose={() => setOverrideOpen(false)} onSubmit={(reason, days) => data.onOverrideBilling!(days ?? 7, reason)} />}
   </section>;
 }

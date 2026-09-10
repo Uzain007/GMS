@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\BindDatabaseIdentity;
 use App\Http\Middleware\EnsureAuthenticationVersion;
+use App\Http\Middleware\EnforceTenantBillingAccess;
 use App\Http\Middleware\RequireRole;
 use App\Http\Middleware\RequirePasswordChange;
 use App\Http\Middleware\ResolveTenant;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'database.identity' => BindDatabaseIdentity::class,
             'auth.version' => EnsureAuthenticationVersion::class,
+            'billing.access' => EnforceTenantBillingAccess::class,
             'password.changed' => RequirePasswordChange::class,
             'tenant' => ResolveTenant::class,
             'role' => RequireRole::class,
@@ -34,6 +36,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(SubstituteBindings::class, RequirePasswordChange::class);
         $middleware->prependToPriorityList(SubstituteBindings::class, BindDatabaseIdentity::class);
         $middleware->prependToPriorityList(SubstituteBindings::class, ResolveTenant::class);
+        $middleware->appendToPriorityList(ResolveTenant::class, EnforceTenantBillingAccess::class);
         $middleware->prependToPriorityList(SubstituteBindings::class, RequireRole::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

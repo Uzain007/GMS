@@ -73,7 +73,7 @@ test("phase-three endpoints remain behind tenant and role middleware", async () 
   for (const segment of ["branches", "members", "member-imports", "staff", "staff-invitations", "membership-plans", "memberships"]) {
     assert.match(routes, new RegExp(`/${segment}`));
   }
-  assert.match(routes, /Route::middleware\('tenant'\)/);
+  assert.match(routes, /Route::middleware\(\['tenant', 'billing\.access'\]\)/);
   assert.match(routes, /role:super_admin,gym_owner,gym_manager,receptionist/);
 });
 

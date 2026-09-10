@@ -45,6 +45,12 @@ test("authenticated mode exposes only integrated tenant modules", async () => {
   assert.doesNotMatch(app, /auth-preview-launch|previewActive|sharedPreview/);
 });
 
+test("an unconfigured API leaves bootstrap and shows the signed-out notice", async () => {
+  const app = await read("app/ironcore-app.tsx");
+  assert.match(app, /if \(!api\) \{[\s\S]*setPhase\("anonymous"\);[\s\S]*return;[\s\S]*\}/);
+  assert.match(app, /Live account access needs the Laravel API deployment to be configured first/);
+});
+
 test("attendance keeps readable columns without exposing preview navigation", async () => {
   const app = await read("app/ironcore-app.tsx");
   const dashboard = await read("app/ironcore-dashboard.tsx");

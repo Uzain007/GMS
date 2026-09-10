@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentGatewayController;
 use App\Http\Controllers\Api\V1\PlatformSaasPlanController;
+use App\Http\Controllers\Api\V1\PlatformInsightsController;
 use App\Http\Controllers\Api\V1\ProgressMeasurementController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SaasSubscriptionController;
@@ -92,13 +93,21 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('role:super_admin');
         Route::get('/platform/members/export', [MemberRosterController::class, 'platformExport'])
             ->middleware('role:super_admin');
+        Route::get('/platform/member-directory', [PlatformInsightsController::class, 'members'])
+            ->middleware('role:super_admin');
+        Route::get('/platform/member-directory/export', [PlatformInsightsController::class, 'exportMembers'])
+            ->middleware('role:super_admin');
+        Route::get('/platform/billing', [PlatformInsightsController::class, 'billing'])
+            ->middleware('role:super_admin');
+        Route::get('/platform/analytics', [PlatformInsightsController::class, 'analytics'])
+            ->middleware('role:super_admin');
         Route::get('/platform/audit-log', [AuditLogController::class, 'platform'])
             ->middleware('role:super_admin');
 
         // Invitation acceptance uses the signed token before tenant membership exists.
         Route::post('/gyms/{gym}/staff-invitations/accept', [StaffInvitationController::class, 'accept']);
 
-        Route::middleware('tenant')->group(function (): void {
+        Route::middleware(['tenant', 'billing.access'])->group(function (): void {
             Route::get('/gyms/{gym}', [GymController::class, 'show']);
             Route::patch('/gyms/{gym}', [GymController::class, 'update'])
                 ->middleware('role:super_admin,gym_owner,gym_manager');
@@ -282,7 +291,13 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::post('/saas-subscription/manual-payments/{payment}/corrections', [SaasSubscriptionController::class, 'correctManualPayment'])
                     ->middleware('role:super_admin');
+                Route::post('/saas-subscription/manual-payments/{payment}/refunds', [SaasSubscriptionController::class, 'refundManualPayment'])
+                    ->middleware('role:super_admin');
                 Route::patch('/saas-subscription/manual-payments/{payment}/review', [SaasSubscriptionController::class, 'reviewManualPayment'])
+                    ->middleware('role:super_admin');
+                Route::post('/saas-billing-invoices/{invoice}/void', [SaasSubscriptionController::class, 'voidInvoice'])
+                    ->middleware('role:super_admin');
+                Route::post('/saas-subscription/billing-override', [SaasSubscriptionController::class, 'overrideBillingRestriction'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/checkout', [SaasSubscriptionController::class, 'checkout'])
                     ->middleware('role:super_admin,gym_owner');

@@ -157,12 +157,13 @@ class AttendanceService
     public function checkIn(array $data, User $actor, Request $request): AttendanceRecord
     {
         return DB::transaction(function () use ($data, $actor, $request): AttendanceRecord {
-            $branch = GymBranch::query()->findOrFail($data['branch_id']);
+            $branchId = $this->resolveAdmissionBranch($data['branch_id'] ?? null);
+            $branch = GymBranch::query()->findOrFail($branchId);
             if ($branch->status !== BranchStatus::Active) {
                 throw ValidationException::withMessages(['branch_id' => ['Check-in is unavailable while this branch is inactive.']]);
             }
             [$member, $credential, $method] = $this->resolveMember($data);
-            $membership = $this->activeMembershipFor($member, $data['branch_id']);
+            $membership = $this->activeMembershipFor($member, $branchId);
 
             if (AttendanceRecord::query()
                 ->where('member_id', $member->getKey())
@@ -174,7 +175,7 @@ class AttendanceService
             $attendance = $this->createPresence(
                 $member,
                 $membership,
-                $data['branch_id'],
+                $branchId,
                 $actor,
                 $method,
                 $credential,
@@ -186,13 +187,30 @@ class AttendanceService
 
             $this->audit->record('attendance.checked_in', $attendance, $actor, after: [
                 'member_id' => $member->getKey(),
-                'branch_id' => $data['branch_id'],
+                'branch_id' => $branchId,
                 'method' => $method->value,
                 'checked_in_at' => $attendance->checked_in_at->toIso8601String(),
             ], request: $request);
 
             return $attendance->load(['member', 'branch']);
         });
+    }
+
+    private function resolveAdmissionBranch(?string $branchId): string
+    {
+        if (filled($branchId)) {
+            return $branchId;
+        }
+
+        $active = GymBranch::query()->where('status', BranchStatus::Active->value)
+            ->orderByDesc('is_primary')->get(['id', 'is_primary']);
+        if ($active->count() === 1 && $active->first()->is_primary) {
+            return (string) $active->first()->getKey();
+        }
+
+        throw ValidationException::withMessages([
+            'branch_id' => ['Select an active branch for check-in.'],
+        ]);
     }
 
     public function checkOut(string $attendanceId, User $actor, Request $request): AttendanceRecord

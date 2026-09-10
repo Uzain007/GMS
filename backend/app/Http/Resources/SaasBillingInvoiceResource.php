@@ -21,10 +21,14 @@ class SaasBillingInvoiceResource extends JsonResource
             // this resource is restricted to billing-authorised tenant roles.
             'hosted_invoice_url' => $this->hosted_invoice_url,
             'invoice_pdf_url' => $this->invoice_pdf_url,
+            'available_at' => $this->available_at,
             'period_start' => $this->period_start,
             'period_end' => $this->period_end,
             'due_at' => $this->due_at,
+            'grace_ends_at' => $this->grace_ends_at,
             'paid_at' => $this->paid_at,
+            'voided_at' => $this->voided_at,
+            'void_reason' => $this->void_reason,
             'created_at' => $this->created_at,
         ];
     }

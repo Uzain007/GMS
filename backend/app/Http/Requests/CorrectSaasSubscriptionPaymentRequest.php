@@ -18,6 +18,8 @@ class CorrectSaasSubscriptionPaymentRequest extends FormRequest
         return [
             'reference' => ['nullable', 'string', 'max:160'],
             'method' => ['nullable', Rule::in([PaymentMethod::Cash->value, PaymentMethod::BankTransfer->value])],
+            'payment_date' => ['nullable', 'date', 'before_or_equal:today'],
+            'amount_minor' => ['nullable', 'integer', 'min:1'],
             'internal_notes' => ['nullable', 'string', 'max:2000'],
             'metadata' => ['nullable', 'array', 'max:25'],
             'metadata.*' => ['nullable', 'string', 'max:500'],

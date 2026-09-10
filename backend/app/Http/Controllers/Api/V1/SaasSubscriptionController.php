@@ -9,6 +9,9 @@ use App\Http\Requests\StartSaasCheckoutRequest;
 use App\Http\Requests\CorrectSaasSubscriptionPaymentRequest;
 use App\Http\Requests\StoreSaasSubscriptionPaymentRequest;
 use App\Http\Requests\ReviewSaasSubscriptionPaymentRequest;
+use App\Http\Requests\StoreSaasPaymentRefundRequest;
+use App\Http\Requests\VoidSaasInvoiceRequest;
+use App\Http\Requests\OverrideSaasBillingRestrictionRequest;
 use App\Http\Resources\GymSubscriptionResource;
 use App\Http\Resources\SaasBillingInvoiceResource;
 use App\Http\Resources\SaasPlanResource;
@@ -79,7 +82,7 @@ class SaasSubscriptionController extends Controller
     {
         return SaasSubscriptionPaymentResource::collection(
             SaasSubscriptionPayment::query()
-                ->with(['price.plan', 'corrections.correctedBy:id,name'])
+                ->with(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
                 ->orderByDesc('created_at')
                 ->paginate(25)
         );
@@ -102,29 +105,35 @@ class SaasSubscriptionController extends Controller
             ]);
             $audit->record('saas.payment.correction_recorded', $correction, $request->user(), before: [
                 'reference' => $record->reference, 'method' => $record->method->value,
+                'payment_date' => $record->payment_date?->toDateString(), 'amount_minor' => $record->amount_minor,
             ], after: collect($data)->except('reason')->all(), reason: $data['reason'], request: $request);
 
             return $correction;
         });
 
-        return new SaasSubscriptionPaymentResource($record->fresh()->load(['price.plan', 'corrections.correctedBy:id,name']));
+        return new SaasSubscriptionPaymentResource($record->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']));
     }
 
     public function ironCoreReceipt(string $payment): Response
     {
         $record = SaasSubscriptionPayment::query()->with(['price.plan', 'invoice', 'corrections'])->findOrFail($payment);
-        abort_unless($record->status->value === 'paid', 422, 'Only paid transactions have an IronCore receipt.');
+        abort_unless(in_array($record->status->value, ['paid', 'partially_refunded', 'refunded'], true), 422, 'Only settled transactions have an IronCore receipt.');
         $effectiveMethod = $record->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $record->method->value;
+        $effectiveAmount = $record->corrections->reverse()->first(fn ($item) => $item->amount_minor !== null)?->amount_minor ?? $record->amount_minor;
+        $effectiveDate = $record->corrections->reverse()->first(fn ($item) => $item->payment_date !== null)?->payment_date?->toDateString()
+            ?? $record->payment_date?->toDateString()
+            ?? $record->paid_at?->toDateString();
         $lines = [
             'Gym: '.app(TenantContext::class)->gym()->name,
             'SaaS plan: '.$record->price->plan->name,
             'Invoice number: '.($record->invoice?->number ?? 'Not issued'),
             'Receipt number: ICR-'.mb_strtoupper(mb_substr(str_replace('-', '', $record->id), 0, 12)),
             'Payment method: '.str_replace('_', ' ', $effectiveMethod),
-            'Amount: '.number_format($record->amount_minor / 100, 2).' '.$record->currency->value,
-            'Paid date: '.$record->paid_at?->toIso8601String(),
+            'Amount: '.number_format($effectiveAmount / 100, 2).' '.$record->currency->value,
+            'Paid date: '.$effectiveDate,
+            'Refunded amount: '.number_format($record->refunded_amount_minor / 100, 2).' '.$record->currency->value,
             'Billing period: '.($record->invoice?->period_start?->toDateString() ?? '—').' to '.($record->invoice?->period_end?->toDateString() ?? '—'),
-            'Status: Paid',
+            'Status: '.str_replace('_', ' ', ucfirst($record->status->value)),
         ];
 
         return response(SimplePdfDocument::fromLines($lines, 'IRONCORE · SaaS Receipt'), 200, [
@@ -138,14 +147,18 @@ class SaasSubscriptionController extends Controller
     {
         $format = mb_strtolower((string) $request->query('format', 'csv'));
         abort_unless(in_array($format, ['csv', 'xlsx', 'pdf'], true), 422, 'Export format must be csv, xlsx or pdf.');
-        $rows = [['Created', 'Gym', 'Plan', 'Method', 'Reference', 'Amount', 'Currency', 'Status', 'Paid date']];
+        $rows = [['Created', 'Gym', 'Plan', 'Method', 'Reference', 'Amount', 'Refunded amount', 'Currency', 'Status', 'Payment date']];
         SaasSubscriptionPayment::query()->with(['price.plan', 'corrections'])->chunkById(500, function ($payments) use (&$rows): void {
             foreach ($payments as $payment) {
                 $effectiveMethod = $payment->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $payment->method->value;
                 $effectiveReference = $payment->corrections->reverse()->first(fn ($item) => $item->reference !== null)?->reference ?? $payment->reference;
+                $effectiveAmount = $payment->corrections->reverse()->first(fn ($item) => $item->amount_minor !== null)?->amount_minor ?? $payment->amount_minor;
+                $effectiveDate = $payment->corrections->reverse()->first(fn ($item) => $item->payment_date !== null)?->payment_date?->toDateString()
+                    ?? $payment->payment_date?->toDateString()
+                    ?? $payment->paid_at?->toDateString();
                 $rows[] = [$payment->created_at?->toIso8601String(), app(TenantContext::class)->gym()->name, $payment->price->plan->name,
                     $effectiveMethod, $effectiveReference,
-                    $payment->amount_minor, $payment->currency->value, $payment->status->value, $payment->paid_at?->toIso8601String()];
+                    $effectiveAmount, $payment->refunded_amount_minor, $payment->currency->value, $payment->status->value, $effectiveDate];
             }
         }, 'id');
         $name = 'ironcore-saas-payments-'.now()->format('Ymd-His');
@@ -163,7 +176,9 @@ class SaasSubscriptionController extends Controller
         SaasBillingService $billing,
         TenantContext $context,
     ): JsonResponse {
-        $price = SaasPlanPrice::query()->with('plan')->findOrFail($request->validated('saas_plan_price_id'));
+        $price = $request->validated('saas_plan_price_id')
+            ? SaasPlanPrice::query()->with('plan')->findOrFail($request->validated('saas_plan_price_id'))
+            : null;
         $result = $billing->createManualPayment(
             $context->gym(),
             $price,
@@ -189,6 +204,42 @@ class SaasSubscriptionController extends Controller
 
         return new SaasSubscriptionPaymentResource($billing->reviewManualPayment(
             $context->gym(), $model, $request->validated(), $request->user(), $request,
+        ));
+    }
+
+    public function refundManualPayment(
+        StoreSaasPaymentRefundRequest $request,
+        string $payment,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): SaasSubscriptionPaymentResource {
+        $record = SaasSubscriptionPayment::query()->findOrFail($payment);
+
+        return new SaasSubscriptionPaymentResource($billing->refundManualPayment(
+            $context->gym(), $record, $request->validated(), $request->user(), $request,
+        ));
+    }
+
+    public function voidInvoice(
+        VoidSaasInvoiceRequest $request,
+        string $invoice,
+        SaasBillingService $billing,
+    ): SaasBillingInvoiceResource {
+        return new SaasBillingInvoiceResource($billing->voidInvoice(
+            SaasBillingInvoice::query()->findOrFail($invoice),
+            $request->validated('reason'),
+            $request->user(),
+            $request,
+        ));
+    }
+
+    public function overrideBillingRestriction(
+        OverrideSaasBillingRestrictionRequest $request,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): GymSubscriptionResource {
+        return new GymSubscriptionResource($billing->overrideBillingRestriction(
+            $context->gym(), $request->validated(), $request->user(), $request,
         ));
     }
 

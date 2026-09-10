@@ -77,6 +77,14 @@ class OptionalPaymentMethodsTest extends TestCase
         $headers = ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'];
 
         Sanctum::actingAs($memberUser);
+        $this->post("/api/v1/gyms/{$gym->id}/member/payments", [
+            'invoice_id' => $invoice['id'],
+            'method' => 'bank_transfer',
+            'idempotency_key' => 'member-bank-transfer-no-date',
+            'bank_reference' => 'BANK-REFERENCE-NO-DATE',
+            'receipt' => UploadedFile::fake()->create('bank-receipt.pdf', 80, 'application/pdf'),
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('transferred_on');
+
         $response = $this->post("/api/v1/gyms/{$gym->id}/member/payments", [
             'invoice_id' => $invoice['id'],
             'method' => 'bank_transfer',
@@ -160,6 +168,7 @@ class OptionalPaymentMethodsTest extends TestCase
             'invoice_id' => $invoice['id'],
             'method' => 'bank_transfer',
             'idempotency_key' => 'member-bank-transfer-rejected',
+            'transferred_on' => today()->toDateString(),
             'receipt' => UploadedFile::fake()->create('receipt.pdf', 40, 'application/pdf'),
         ], ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'])->assertCreated()->json('data');
 
@@ -181,6 +190,7 @@ class OptionalPaymentMethodsTest extends TestCase
             'invoice_id' => $invoice['id'],
             'method' => 'bank_transfer',
             'idempotency_key' => 'member-bank-transfer-resubmitted',
+            'transferred_on' => today()->toDateString(),
             'receipt' => UploadedFile::fake()->create('replacement.pdf', 40, 'application/pdf'),
         ], ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'])
             ->assertCreated()->assertJsonPath('data.status', 'pending');

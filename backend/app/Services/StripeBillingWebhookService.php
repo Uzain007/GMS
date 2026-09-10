@@ -107,6 +107,8 @@ class StripeBillingWebhookService
             $invoice = $this->syncInvoice($customer, $object);
             $subscription = $invoice->subscription;
             if ($subscription && $type === 'invoice.payment_failed') {
+                $dueAt = $invoice->due_at ?? now();
+                $invoice->update(['grace_ends_at' => $invoice->grace_ends_at ?? $dueAt->copy()->addDays($subscription->grace_period_days)]);
                 $subscription->update([
                     'status' => SaasSubscriptionStatus::PastDue,
                     'latest_invoice_id' => $invoice->provider_invoice_id,
@@ -137,6 +139,11 @@ class StripeBillingWebhookService
                     $values['trial_ends_at'] = null;
                     $values['current_period_start'] = $invoice->period_start ?? $subscription->current_period_start;
                     $values['current_period_end'] = $invoice->period_end ?? $subscription->current_period_end;
+                    $values['next_billing_at'] = $invoice->period_end ?? $subscription->current_period_end;
+                    $values['billing_restricted_at'] = null;
+                    $values['billing_override_until'] = null;
+                    $values['billing_override_by'] = null;
+                    $values['billing_override_reason'] = null;
                 }
                 $subscription->update($values);
                 $freshSubscription = $subscription->fresh();
@@ -195,6 +202,7 @@ class StripeBillingWebhookService
             'billing_interval' => $price->billing_interval,
             'current_period_start' => $this->timestamp($payload['current_period_start'] ?? null),
             'current_period_end' => $this->timestamp($payload['current_period_end'] ?? null),
+            'next_billing_at' => $this->timestamp($payload['current_period_end'] ?? null),
             'trial_ends_at' => $this->timestamp($payload['trial_end'] ?? null),
             'cancel_at_period_end' => (bool) ($payload['cancel_at_period_end'] ?? false),
             'cancelled_at' => $this->timestamp($payload['canceled_at'] ?? null),

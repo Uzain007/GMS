@@ -30,6 +30,13 @@ This runbook targets a production topology with a separately deployed web app, L
 
 Set `APP_ENV=production`, `APP_DEBUG=false`, a generated `APP_KEY`, the hash-only `INITIAL_SUPER_ADMIN_SETUP_KEY_HASH` for a new installation, reviewed comma-separated IP/CIDR `TRUSTED_PROXIES` (or the explicit provider `*` boundary), encrypted PostgreSQL/Redis connections, object-storage configuration, exact `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS`, `SANCTUM_STATEFUL_DOMAINS`, `SESSION_DOMAIN`, `SESSION_SECURE_COOKIE=true`, provider secrets and notification-adapter credentials. Keep `CACHE_STORE`, `QUEUE_CONNECTION` and `SESSION_DRIVER` on Redis. Run both commands in [PRODUCTION_PREFLIGHT.md](PRODUCTION_PREFLIGHT.md) against the final deployment environment.
 
+For Railway, run the web service from the committed Docker image and create two additional services from that same image and environment:
+
+- Queue worker: `php artisan queue:work redis --queue=notifications,exports,default --sleep=1 --tries=3 --timeout=120 --max-time=3600`
+- Scheduler: `php artisan schedule:work`
+
+Run exactly one scheduler replica. The worker and scheduler need the same `APP_KEY`, `APP_URL`, `FRONTEND_URL`, PostgreSQL, Redis, private storage and authenticated SMTP settings as the API. Password resets, owner/member invitations and SaaS due/overdue reminders all use the configured SMTP transport; the queue must include `notifications` and `default`. Set `FRONTEND_URL=https://app.ironcore.website` so reset and invitation links use the live HTTPS application. Required mail settings are `MAIL_MAILER=smtp`, either a complete `MAIL_URL` or `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` and the provider-appropriate `MAIL_SCHEME`, plus a verified production `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` and optional `MAIL_EHLO_DOMAIN`.
+
 ## Rollback and recovery
 
 - Roll application containers back to the previous immutable image. Never use destructive Git or database resets.

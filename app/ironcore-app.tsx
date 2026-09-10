@@ -643,7 +643,12 @@ export function IronCoreApp() {
   }, []);
 
   const loadSession = useCallback(async () => {
-    if (!api) return;
+    if (!api) {
+      // A build without a browser API origin must still leave bootstrap and
+      // show the signed-out configuration notice instead of spinning forever.
+      setPhase("anonymous");
+      return;
+    }
     setPlatformLoading(true);
     setPlatformError(null);
     try {
@@ -1237,9 +1242,9 @@ export function IronCoreApp() {
     return result.checkout_url;
   }
 
-  async function createSaasManualPayment(priceId: string, method: "cash" | "bank_transfer", reference: string, idempotencyKey: string, receipt?: File): Promise<void> {
+  async function createSaasManualPayment(input: { priceId?: string; invoiceId?: string; method: "cash" | "bank_transfer"; reference: string; paymentDate?: string; idempotencyKey: string; receipt?: File }): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
-    await api.createSaasSubscriptionPayment(selectedGym.id, { saas_plan_price_id: priceId, method, reference, idempotency_key: idempotencyKey, receipt });
+    await api.createSaasSubscriptionPayment(selectedGym.id, { saas_plan_price_id: input.priceId, saas_billing_invoice_id: input.invoiceId, method: input.method, reference: input.reference, payment_date: input.paymentDate, idempotency_key: input.idempotencyKey, receipt: input.receipt });
     setSaasRefresh((value) => value + 1);
   }
 
@@ -1440,7 +1445,10 @@ export function IronCoreApp() {
     onGenerateGymOwnerTemporaryPassword: (gymId, reason) => api!.generateGymOwnerTemporaryPassword(gymId, reason),
     onCreatePlan: createSaasPlan,
     onUpdatePlan: updateSaasPlan,
-    onExportMembers: async () => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformMemberRosterExport(), "ironcore-all-gyms-members.csv"); },
+    onLoadMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembers(params); },
+    onExportMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembersExport(params); },
+    onLoadBilling: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformBilling(params); },
+    onLoadAnalytics: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAnalytics(params); },
     onLoadAudit: (filters) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAuditLog(filters); },
     onExportAudit: async (format, filters) => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformAuditExport(format, filters), `ironcore-audit-log.${format}`); },
     onChangePassword: changePassword,
@@ -1527,6 +1535,9 @@ export function IronCoreApp() {
     onReviewManualPayment: reviewSaasManualPayment,
     onLoadManualReceipt: loadSaasManualReceipt,
     onCorrectManualPayment: user.platform_role === "super_admin" ? async (paymentId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.correctSaasSubscriptionPayment(selectedGym.id, paymentId, input); setSaasRefresh((value) => value + 1); } : undefined,
+    onRefundManualPayment: user.platform_role === "super_admin" ? async (paymentId, amountMinor, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.refundSaasSubscriptionPayment(selectedGym.id, paymentId, amountMinor, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onVoidInvoice: user.platform_role === "super_admin" ? async (invoiceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.voidSaasInvoice(selectedGym.id, invoiceId, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onOverrideBilling: user.platform_role === "super_admin" ? async (days, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.overrideSaasBilling(selectedGym.id, days, reason); setSaasRefresh((value) => value + 1); } : undefined,
     onLoadIronCoreReceipt: (paymentId) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasIronCoreReceipt(selectedGym.id, paymentId); },
     onExportPayments: user.platform_role === "super_admin" ? (format) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasPaymentReport(selectedGym.id, format); } : undefined,
     onPortal: openSaasPortal,
@@ -1537,7 +1548,7 @@ export function IronCoreApp() {
     sessions: engagement.sessions,
     bookings: engagement.bookings,
     members: members.rows.map((row) => ({ id: row.id, name: row.name, memberCode: row.memberCode ?? "" })).filter((row) => /^\d{4,6}$/.test(row.memberCode)),
-    branches: operations.branches.map((row) => ({ id: row.id, name: row.name })),
+    branches: operations.branches.filter((row) => row.status === "active").map((row) => ({ id: row.id, name: row.name, isPrimary: row.is_primary })),
     trainers: staff.rows.filter((row) => row.role === "trainer" && row.status === "active").map((row) => ({ id: row.id, name: row.user.name })),
     timezone: selectedGym.timezone,
     actorRole: selectedGym.role,

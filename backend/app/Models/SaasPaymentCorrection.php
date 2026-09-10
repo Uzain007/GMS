@@ -16,13 +16,15 @@ class SaasPaymentCorrection extends Model
 
     protected $fillable = [
         'gym_id', 'saas_subscription_payment_id', 'corrected_by', 'reference',
-        'method', 'internal_notes', 'metadata', 'reason', 'created_at',
+        'method', 'payment_date', 'amount_minor', 'internal_notes', 'metadata', 'reason', 'created_at',
     ];
 
     protected function casts(): array
     {
         return [
             'method' => PaymentMethod::class,
+            'payment_date' => 'immutable_date',
+            'amount_minor' => 'integer',
             'metadata' => 'array',
             'created_at' => 'immutable_datetime',
         ];

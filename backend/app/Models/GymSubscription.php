@@ -20,6 +20,8 @@ class GymSubscription extends Model
         'provider', 'provider_subscription_id', 'status', 'plan_code_snapshot',
         'plan_name_snapshot', 'feature_limits_snapshot', 'currency', 'amount_minor',
         'billing_interval', 'current_period_start', 'current_period_end',
+        'next_billing_at', 'grace_period_days', 'billing_restricted_at',
+        'billing_override_until', 'billing_override_by', 'billing_override_reason',
         'trial_ends_at', 'cancel_at_period_end', 'cancelled_at', 'ended_at',
         'latest_invoice_id', 'failure_code', 'failure_message',
     ];
@@ -36,6 +38,10 @@ class GymSubscription extends Model
             'amount_minor' => 'integer',
             'current_period_start' => 'datetime',
             'current_period_end' => 'datetime',
+            'next_billing_at' => 'datetime',
+            'grace_period_days' => 'integer',
+            'billing_restricted_at' => 'datetime',
+            'billing_override_until' => 'datetime',
             'trial_ends_at' => 'datetime',
             'cancel_at_period_end' => 'boolean',
             'cancelled_at' => 'datetime',
@@ -61,5 +67,10 @@ class GymSubscription extends Model
     public function invoices(): HasMany
     {
         return $this->hasMany(SaasBillingInvoice::class);
+    }
+
+    public function billingOverrideBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'billing_override_by');
     }
 }
