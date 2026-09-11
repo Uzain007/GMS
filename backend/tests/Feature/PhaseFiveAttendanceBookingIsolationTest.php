@@ -67,6 +67,35 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             ->assertJsonPath('data.method', 'member_code');
     }
 
+    public function test_single_primary_location_is_resolved_when_mobile_frontend_has_no_branch_value(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-PRIMARY'));
+
+        Sanctum::actingAs($owner);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'member_code' => $member->member_code,
+        ], ['X-Gym-ID' => $gym->id])
+            ->assertCreated()
+            ->assertJsonPath('data.branch_id', $branch->id);
+    }
+
+    public function test_missing_branch_still_fails_closed_for_multiple_active_locations(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-MULTI'));
+        app(TenantContext::class)->run($gym, fn () => GymBranch::query()->create([
+            'name' => 'North', 'code' => 'NORTH', 'status' => 'active', 'is_primary' => false,
+        ]));
+
+        Sanctum::actingAs($owner);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'member_code' => $member->member_code,
+        ], ['X-Gym-ID' => $gym->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('branch_id');
+    }
+
     public function test_member_code_is_persistent_and_identical_across_profile_qr_and_manual_check_in(): void
     {
         [$owner, $gym, $branch] = $this->tenant();

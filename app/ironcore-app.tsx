@@ -1287,11 +1287,14 @@ export function IronCoreApp() {
     setSaasRefresh((value) => value + 1);
   }
 
-  async function checkInMember(input: { branchId: string; method: "member_code" | "qr"; accessValue: string }): Promise<void> {
+  async function checkInMember(input: { branchId?: string; method: "member_code" | "qr"; accessValue: string }): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
+    // Omitting an unavailable branch lets Laravel resolve only the tenant's
+    // single active primary location; multi-location gyms still fail closed.
+    const branch = input.branchId ? { branch_id: input.branchId } : {};
     await api.checkIn(selectedGym.id, input.method === "qr"
-      ? { branch_id: input.branchId, credential: input.accessValue }
-      : { branch_id: input.branchId, member_code: input.accessValue });
+      ? { ...branch, credential: input.accessValue }
+      : { ...branch, member_code: input.accessValue });
     setEngagementRefresh((value) => value + 1);
   }
   async function checkOutMember(attendanceId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.checkOut(selectedGym.id, attendanceId); setEngagementRefresh((value) => value + 1); }
@@ -1552,8 +1555,8 @@ export function IronCoreApp() {
     trainers: staff.rows.filter((row) => row.role === "trainer" && row.status === "active").map((row) => ({ id: row.id, name: row.user.name })),
     timezone: selectedGym.timezone,
     actorRole: selectedGym.role,
-    loading: engagement.loading,
-    error: engagement.error,
+    loading: engagement.loading || operations.loading,
+    error: engagement.error ?? operations.error,
     onReload: () => setEngagementRefresh((value) => value + 1),
     onCheckIn: checkInMember,
     onCheckOut: checkOutMember,

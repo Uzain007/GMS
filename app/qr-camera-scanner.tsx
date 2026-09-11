@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type DetectedBarcode = { rawValue: string };
 type BarcodeDetectorInstance = { detect(source: CanvasImageSource): Promise<DetectedBarcode[]> };
 type BarcodeDetectorConstructor = new (options: { formats: string[] }) => BarcodeDetectorInstance;
+type JsQrDecoder = typeof import("jsqr").default;
 
 type ScannerProps = {
   branchName: string;
@@ -15,9 +16,13 @@ type ScannerProps = {
 };
 
 export function cameraErrorMessage(error: unknown): string {
-  const name = error instanceof DOMException ? error.name : "";
+  const name = error instanceof DOMException
+    ? error.name
+    : typeof error === "object" && error !== null && "name" in error
+      ? String(error.name)
+      : "";
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return "Camera permission was denied. Allow camera access in your browser, or use Member Code instead.";
+    return "Camera permission is required to scan member QR codes.";
   }
   if (name === "NotFoundError" || name === "DevicesNotFoundError") {
     return "No camera was found. Connect a webcam or use Member Code instead.";
@@ -35,12 +40,33 @@ function detectorConstructor(): BarcodeDetectorConstructor | null {
   return (globalThis as typeof globalThis & { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector ?? null;
 }
 
+function decodeCanvasFrame(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+  decoder: JsQrDecoder,
+): string | null {
+  if (!video.videoWidth || !video.videoHeight) return null;
+
+  // Cap fallback decoding work on slower phones while keeping enough source
+  // detail for dense access credentials and poorly lit reception cameras.
+  const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
+  const width = Math.max(1, Math.round(video.videoWidth * scale));
+  const height = Math.max(1, Math.round(video.videoHeight * scale));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  context.drawImage(video, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height);
+  return decoder(pixels.data, width, height, { inversionAttempts: "attemptBoth" })?.data?.trim() || null;
+}
+
 export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
   const sessionRef = useRef(0);
   const processingRef = useRef(false);
+  const lastFrameAtRef = useRef(0);
   const lastScanRef = useRef<{ value: string; at: number } | null>(null);
   const scanHandlerRef = useRef(onScan);
   const closeHandlerRef = useRef(onClose);
@@ -66,15 +92,15 @@ export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback 
     const session = sessionRef.current;
     setError(null);
     setStatus("Requesting camera access…");
+    lastScanRef.current = null;
 
-    const Detector = detectorConstructor();
-    if (!Detector) {
-      setError("This browser cannot read QR codes from a live camera. Use a current Chrome or Edge browser, or enter the Member Code.");
-      setStatus("Camera scanner unavailable");
+    if (!window.isSecureContext) {
+      setError("Camera scanning requires a secure HTTPS connection. Please enter Member Code manually.");
+      setStatus("Secure camera access unavailable");
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Camera access is not available in this browser. Use Member Code instead.");
+      setError("Your browser does not support QR scanning. Please enter Member Code manually.");
       setStatus("Camera scanner unavailable");
       return;
     }
@@ -94,23 +120,55 @@ export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback 
       streamRef.current = stream;
       const selected = stream.getVideoTracks()[0]?.getSettings().deviceId ?? preferredDeviceId;
       setDeviceId(selected);
-      const available = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
-      setDevices(available);
+      try {
+        const available = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
+        setDevices(available);
+      } catch {
+        // Some mobile browsers can stream a permitted camera but do not expose
+        // the device list. Scanning remains available with the active camera.
+        setDevices([]);
+      }
 
       const video = videoRef.current;
-      if (!video) return;
+      if (!video) {
+        stopCamera();
+        return;
+      }
       video.srcObject = stream;
       await video.play();
       setStatus("Hold the member QR code inside the frame");
 
-      const detector = new Detector({ formats: ["qr_code"] });
-      const scan = async () => {
+      let detector: BarcodeDetectorInstance | null = null;
+      const Detector = detectorConstructor();
+      if (Detector) {
+        try {
+          detector = new Detector({ formats: ["qr_code"] });
+        } catch {
+          detector = null;
+        }
+      }
+      const fallbackDecoder = detector ? null : (await import("jsqr")).default;
+      const canvas = detector ? null : document.createElement("canvas");
+      const context = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
+      if (!detector && (!fallbackDecoder || !canvas || !context)) {
+        stopCamera();
+        setError("Your browser does not support QR scanning. Please enter Member Code manually.");
+        setStatus("Camera scanner unavailable");
+        return;
+      }
+
+      const scan = async (frameTime: number) => {
         if (session !== sessionRef.current) return;
-        if (!processingRef.current && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        // Native detection is inexpensive; the JavaScript fallback is throttled
+        // so older Android and iOS devices stay responsive while scanning.
+        const interval = detector ? 90 : 160;
+        if (!processingRef.current && frameTime - lastFrameAtRef.current >= interval && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          lastFrameAtRef.current = frameTime;
           processingRef.current = true;
           try {
-            const result = (await detector.detect(video))[0];
-            const value = result?.rawValue?.trim();
+            const value = detector
+              ? (await detector.detect(video))[0]?.rawValue?.trim()
+              : decodeCanvasFrame(video, canvas!, context!, fallbackDecoder!);
             const previous = lastScanRef.current;
             if (value && (!previous || previous.value !== value || Date.now() - previous.at > 3000)) {
               lastScanRef.current = { value, at: Date.now() };
@@ -132,11 +190,12 @@ export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback 
             processingRef.current = false;
           }
         }
-        frameRef.current = requestAnimationFrame(() => void scan());
+        frameRef.current = requestAnimationFrame((nextFrameTime) => void scan(nextFrameTime));
       };
-      frameRef.current = requestAnimationFrame(() => void scan());
+      frameRef.current = requestAnimationFrame((frameTime) => void scan(frameTime));
     } catch (cameraError) {
       if (session === sessionRef.current) {
+        stopCamera();
         setError(cameraErrorMessage(cameraError));
         setStatus("Camera could not start");
       }
@@ -164,7 +223,7 @@ export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback 
     <section className="qr-scanner-card">
       <header><span><Camera size={21} /></span><div><p className="eyebrow">Secure reception check-in</p><h2>Scan QR with Camera</h2><small>{branchName || "Select a branch"}</small></div><button className="icon-button" onClick={close} aria-label="Close scanner"><X size={18} /></button></header>
       <div className="qr-video-shell">
-        <video ref={videoRef} muted playsInline aria-label="Live camera view" />
+        <video ref={videoRef} muted playsInline autoPlay aria-label="Live camera view" />
         <div className="qr-scan-frame" aria-hidden="true"><i /><i /><i /><i /></div>
         <div className="qr-camera-status" aria-live="polite">{status}</div>
       </div>

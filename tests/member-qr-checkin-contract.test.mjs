@@ -1,8 +1,37 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import jsQR from "jsqr";
+import QRCode from "qrcode";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("the mobile fallback decodes the same opaque credential rendered on a member pass", () => {
+  const credential = "icqr1_browser_fallback_acceptance_credential";
+  const qr = QRCode.create(credential, { errorCorrectionLevel: "M" });
+  const quietZone = 4;
+  const scale = 8;
+  const size = (qr.modules.size + quietZone * 2) * scale;
+  const pixels = new Uint8ClampedArray(size * size * 4);
+  pixels.fill(255);
+
+  for (let row = 0; row < qr.modules.size; row += 1) {
+    for (let column = 0; column < qr.modules.size; column += 1) {
+      if (!qr.modules.get(row, column)) continue;
+      for (let y = 0; y < scale; y += 1) {
+        for (let x = 0; x < scale; x += 1) {
+          const pixel = ((((row + quietZone) * scale + y) * size) + ((column + quietZone) * scale + x)) * 4;
+          pixels[pixel] = 0;
+          pixels[pixel + 1] = 0;
+          pixels[pixel + 2] = 0;
+          pixels[pixel + 3] = 255;
+        }
+      }
+    }
+  }
+
+  assert.equal(jsQR(pixels, size, size, { inversionAttempts: "attemptBoth" })?.data, credential);
+});
 
 test("member codes are six-digit tenant-local lookup values, not security identifiers", async () => {
   const [migration, model, service, request, attendance] = await Promise.all([
@@ -21,22 +50,38 @@ test("member codes are six-digit tenant-local lookup values, not security identi
   assert.match(attendance, /where\('member_code', \$data\['member_code'\]\)/);
 });
 
-test("camera scanning prefers rear cameras, supports device switching, and has denied/manual fallbacks", async () => {
-  const [scanner, engagement, styles] = await Promise.all([
+test("camera scanning prefers rear cameras, supports mobile decoding, device switching, and manual fallbacks", async () => {
+  const [scanner, engagement, shell, api, styles, packageFile] = await Promise.all([
     read("app/qr-camera-scanner.tsx"),
     read("app/engagement-management.tsx"),
+    read("app/ironcore-app.tsx"),
+    read("app/lib/ironcore-api.ts"),
     read("app/globals.css"),
+    read("package.json"),
   ]);
 
   assert.match(engagement, /Scan QR with Camera/);
   assert.match(engagement, /inputMode="numeric"/);
   assert.match(scanner, /navigator\.mediaDevices\.getUserMedia/);
+  assert.match(scanner, /window\.isSecureContext/);
+  assert.match(scanner, /await import\("jsqr"\)/);
+  assert.match(scanner, /inversionAttempts: "attemptBoth"/);
   assert.match(scanner, /facingMode: \{ ideal: "environment" \}/);
   assert.match(scanner, /enumerateDevices\(\)/);
   assert.match(scanner, /deviceId: \{ exact: preferredDeviceId \}/);
   assert.match(scanner, /NotAllowedError/);
+  assert.match(scanner, /Camera permission is required to scan member QR codes\./);
+  assert.match(scanner, /Your browser does not support QR scanning\. Please enter Member Code manually\./);
   assert.match(scanner, /Use Member Code instead/);
   assert.match(scanner, /getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
+  assert.match(scanner, /muted playsInline autoPlay/);
+  assert.match(packageFile, /"jsqr": "\^1\.4\.0"/);
+  assert.doesNotMatch(engagement, /disabled=\{busy \|\| !selectedCheckInBranch\}/);
+  assert.match(engagement, /branchId: selectedCheckInBranch \|\| undefined/);
+  assert.match(engagement, /Primary location resolved securely/);
+  assert.match(shell, /const branch = input\.branchId \? \{ branch_id: input\.branchId \} : \{\}/);
+  assert.match(shell, /error: engagement\.error \?\? operations\.error/);
+  assert.match(api, /AttendanceCheckIn = \{ branch_id\?: string/);
   assert.match(styles, /\.qr-scanner-card/);
   assert.match(styles, /@media\(max-width:620px\).*\.qr-video-shell\{aspect-ratio:3\/4\}/s);
 });
