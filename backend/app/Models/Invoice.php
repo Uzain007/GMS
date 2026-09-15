@@ -15,10 +15,10 @@ class Invoice extends Model
     use BelongsToGym, HasUuids;
 
     protected $fillable = [
-        'member_id', 'membership_id', 'branch_id', 'created_by', 'number',
+        'member_id', 'membership_id', 'billing_cycle_date', 'branch_id', 'created_by', 'number',
         'status', 'currency', 'subtotal_amount_minor', 'tax_amount_minor',
         'total_amount_minor', 'paid_amount_minor', 'due_amount_minor',
-        'issued_at', 'due_at', 'paid_at', 'voided_at', 'notes', 'metadata',
+        'issued_at', 'due_at', 'grace_ends_at', 'paid_at', 'voided_at', 'notes', 'metadata',
     ];
 
     protected function casts(): array
@@ -33,6 +33,8 @@ class Invoice extends Model
             'due_amount_minor' => 'integer',
             'issued_at' => 'immutable_datetime',
             'due_at' => 'immutable_datetime',
+            'billing_cycle_date' => 'date',
+            'grace_ends_at' => 'immutable_datetime',
             'paid_at' => 'immutable_datetime',
             'voided_at' => 'immutable_datetime',
             'metadata' => 'array',

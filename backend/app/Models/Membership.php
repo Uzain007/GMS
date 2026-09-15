@@ -19,6 +19,7 @@ class Membership extends Model
         'member_id', 'plan_id', 'branch_id', 'created_by', 'status', 'starts_at',
         'ends_at', 'next_billing_at', 'price_amount_minor', 'currency',
         'joining_fee_minor', 'billing_interval', 'interval_count', 'auto_renew',
+        'grace_period_days', 'billing_restricted_at',
         'cancelled_at', 'cancellation_reason', 'terms_snapshot',
     ];
 
@@ -35,6 +36,8 @@ class Membership extends Model
             'billing_interval' => BillingInterval::class,
             'interval_count' => 'integer',
             'auto_renew' => 'boolean',
+            'grace_period_days' => 'integer',
+            'billing_restricted_at' => 'immutable_datetime',
             'cancelled_at' => 'immutable_datetime',
             'terms_snapshot' => 'array',
         ];

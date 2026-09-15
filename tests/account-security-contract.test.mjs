@@ -17,7 +17,7 @@ test("authentication versions revoke stale sessions independent of the session d
   assert.match(middleware, /sessionVersion !== \$user->auth_version/);
   assert.match(middleware, /session\(\)->invalidate\(\)/);
   assert.match(bootstrap, /'auth.version' => EnsureAuthenticationVersion::class/);
-  assert.match(routes, /\['auth:sanctum', 'auth.version', 'database.identity'\]/);
+  assert.match(routes, /\['auth:sanctum', 'auth.version', 'database.identity', 'auth.lifetime'\]/);
 });
 
 test("public recovery is queued, non-enumerating, throttled and fragment-only", async () => {

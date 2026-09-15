@@ -277,6 +277,8 @@ class SaasBillingService
                         'amount_minor' => $invoice?->amount_remaining_minor ?? $price->amount_minor,
                         'currency' => ($invoice?->currency ?? $price->currency)->value,
                         'saas_billing_invoice_id' => $invoice?->id,
+                        'reference' => $payment->reference,
+                        'payment_date' => $payment->payment_date?->toDateString(),
                         'has_receipt' => (bool) $receipt,
                     ],
                     request: $request,

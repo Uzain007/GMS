@@ -252,6 +252,7 @@ class AttendanceService
         if (! $membership) {
             throw ValidationException::withMessages(['membership' => ['An active, in-date membership is required.']]);
         }
+        $this->assertBillingAccess($membership);
         if ($membership->branch_id && $membership->branch_id !== $branchId) {
             throw ValidationException::withMessages(['branch_id' => ['This membership is not valid at the selected branch.']]);
         }
@@ -275,8 +276,18 @@ class AttendanceService
         if (! $membership) {
             throw ValidationException::withMessages(['membership' => ['An active, in-date membership is required to create a gym pass.']]);
         }
+        $this->assertBillingAccess($membership);
 
         return $membership;
+    }
+
+    private function assertBillingAccess(Membership $membership): void
+    {
+        if ($membership->billing_restricted_at) {
+            throw ValidationException::withMessages([
+                'membership' => ['Your membership payment is overdue. Please contact your gym.'],
+            ]);
+        }
     }
 
     public function ensureClassPresence(Member $member, Membership $membership, string $branchId, User $actor): AttendanceRecord

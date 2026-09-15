@@ -49,6 +49,7 @@ class PhaseFourPaymentIsolationTest extends TestCase
             'amount_minor' => 5100,
             'currency' => Currency::GBP->value,
             'idempotency_key' => 'cash-test-001',
+            'payment_date' => today()->toDateString(),
         ], ['X-Gym-ID' => $gym->id])
             ->assertCreated()
             ->assertJsonPath('data.status', PaymentStatus::Paid->value);

@@ -189,6 +189,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
                 'method' => 'cash',
                 'idempotency_key' => 'saas-trial-unpaid-0001',
                 'reference' => 'AWAITING-CASH-001',
+                'payment_date' => today()->toDateString(),
             ],
             ['X-Gym-ID' => $gym->id],
         )->assertCreated()->assertJsonPath('data.status', 'pending');
@@ -384,6 +385,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
                 'method' => 'cash',
                 'idempotency_key' => 'saas-cash-payment-00001',
                 'reference' => 'CASH-RECEIPT-901',
+                'payment_date' => today()->toDateString(),
             ],
             ['X-Gym-ID' => $gym->id],
         )->assertCreated()->assertJsonPath('data.status', 'pending');
@@ -489,6 +491,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         $payment = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments", [
             'saas_billing_invoice_id' => $invoice->id, 'method' => 'cash',
             'idempotency_key' => 'manual-renewal-payment-0001', 'reference' => 'CASH-RENEWAL-001',
+            'payment_date' => today()->toDateString(),
         ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data');
 
         Sanctum::actingAs($admin);

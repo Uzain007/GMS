@@ -10,6 +10,7 @@ class UpdateMembershipRequest extends TenantFormRequest
     public function rules(): array
     {
         return [
+            'plan_id' => ['sometimes', 'uuid', $this->tenantExists('membership_plans')],
             'status' => ['sometimes', Rule::enum(MembershipStatus::class)],
             'ends_at' => ['nullable', 'date'],
             'next_billing_at' => ['nullable', 'date'],

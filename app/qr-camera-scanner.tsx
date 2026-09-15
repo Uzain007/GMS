@@ -229,7 +229,7 @@ export function QrCameraScanner({ branchName, onScan, onClose, onManualFallback 
       </div>
       {devices.length > 1 && <label className="qr-camera-select"><SwitchCamera size={16} /><span>Camera</span><select value={deviceId} onChange={(event) => void startCamera(event.target.value)}>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select></label>}
       {error && <div className="qr-camera-error" role="alert"><CameraOff size={18} /><span>{error}</span><button type="button" onClick={() => void startCamera(deviceId)}><RefreshCw size={14} /> Try again</button></div>}
-      <div className="qr-scanner-safety"><ShieldCheck size={17} /><span><strong>Verified by IronCore</strong><small>The backend checks the secure QR token, selected gym, membership, branch and duplicate status.</small></span></div>
+      <div className="qr-scanner-safety"><ShieldCheck size={17} /><span><strong>Verified by IronCore</strong><small>Each scan confirms the member, gym, active membership, branch access and duplicate status.</small></span></div>
       <footer><button className="secondary-button" type="button" onClick={() => { stopCamera(); onManualFallback(); }}>Use Member Code instead</button><button className="secondary-button" type="button" onClick={close}>Cancel</button></footer>
     </section>
   </div>;

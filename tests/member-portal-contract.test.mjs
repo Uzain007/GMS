@@ -47,7 +47,7 @@ test("member portal is role-routed, mobile installable and restores the persiste
   assert.match(portal, /qrRenderError/);
   assert.match(portal, /Retry QR/);
   assert.match(portal, /const displayCredential = membershipAccessReady \? qrPlaintext : null/);
-  assert.match(portal, /same secure credential verified by reception/);
+  assert.match(portal, /same secure pass checked by reception/);
   assert.match(portal, /This QR remains available after reload and sign-in/);
   assert.doesNotMatch(portal, /localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(app, /randomUUID/);

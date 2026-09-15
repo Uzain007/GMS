@@ -127,7 +127,9 @@ const demoOperations: OperationData = {
   baseCurrency: "GBP",
   gymTimezone: "Europe/London",
   canManageSetup: false,
-  canManageMemberships: false,
+  canCreateMemberships: false,
+  canEditMemberships: false,
+  actorRole: "super_admin",
   preview: true,
   onReload: () => undefined,
   onCreateBranch: async () => undefined,
@@ -534,7 +536,7 @@ function LoginScreen({ onLogin, onRequestReset, onReset, resetSecret, onCancelRe
         <div className="auth-mobile-brand"><Brand /></div>
         <p className="eyebrow">{mode === "login" ? "Welcome back" : mode === "mfa" ? "Multi-factor authentication" : "Account recovery"}</p><h2>{title}</h2><p>{description}</p>
         {(mode === "login" || mode === "mfa" ? error : localError) && <div className="form-error" role="alert">{mode === "login" || mode === "mfa" ? error : localError}</div>}
-        {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Live account access needs the Laravel API deployment to be configured first.</div>}
+        {mode === "login" && !liveApiConfigured && <div className="form-notice" role="status">Account access is temporarily unavailable. Please contact IronCore support.</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}
         {(mode === "login" || mode === "forgot") && <label>Email address<input name="email" type="email" autoComplete="off" required maxLength={254} placeholder="you@yourgym.com" autoFocus /></label>}
         {mode === "login" && <><label>Password<input name="password" type="password" autoComplete="off" required minLength={8} placeholder="Enter your password" /></label><button className="auth-forgot" type="button" onClick={() => { setMode("forgot"); setNotice(null); setLocalError(null); }}>Forgot password?</button></>}
@@ -715,18 +717,32 @@ export function IronCoreApp() {
   }, [api]);
 
   useEffect(() => {
+    const expired = (event: Event) => {
+      const message = event instanceof CustomEvent && typeof event.detail === "string"
+        ? event.detail : "Your session expired. Please sign in again.";
+      setUser(null);
+      setGyms([]);
+      setSelectedGym(null);
+      setAuthError(message);
+      setPhase("anonymous");
+    };
+    window.addEventListener("ironcore:session-expired", expired);
+    return () => window.removeEventListener("ironcore:session-expired", expired);
+  }, []);
+
+  useEffect(() => {
     if (!activationChecked || memberActivation || passwordReset || mfaChallenge) return;
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
   }, [activationChecked, loadSession, memberActivation, mfaChallenge, passwordReset]);
 
   const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
-    if (!api) throw new Error("Live account activation needs the Laravel API deployment to be configured first.");
+    if (!api) throw new Error("Account activation is temporarily unavailable. Please contact your gym.");
     return api.previewMemberAccountActivation(gymId, token);
   }, [api]);
 
   const acceptMemberActivation = useCallback(async (gymId: string, token: string, password?: string): Promise<void> => {
-    if (!api) throw new Error("Live account activation needs the Laravel API deployment to be configured first.");
+    if (!api) throw new Error("Account activation is temporarily unavailable. Please contact your gym.");
     const result = await api.acceptMemberAccountActivation(gymId, token, password);
     if (result.authentication === "mfa_challenge") setMfaChallenge(result);
     setMemberActivation(null);
@@ -957,7 +973,7 @@ export function IronCoreApp() {
 
   async function login(email: string, password: string) {
     if (!api) {
-      setAuthError("Live account access needs the Laravel API deployment to be configured first.");
+      setAuthError("Account access is temporarily unavailable. Please contact IronCore support.");
       return;
     }
     setAuthBusy(true); setAuthError(null);
@@ -998,12 +1014,12 @@ export function IronCoreApp() {
   }
 
   async function requestPasswordReset(email: string): Promise<void> {
-    if (!api) throw new Error("Live account recovery needs the Laravel API deployment to be configured first.");
+    if (!api) throw new Error("Password recovery is temporarily unavailable. Please contact IronCore support.");
     await api.requestPasswordReset(email);
   }
 
   async function resetAccountPassword(secret: PasswordResetSecret, password: string): Promise<void> {
-    if (!api) throw new Error("Live account recovery needs the Laravel API deployment to be configured first.");
+    if (!api) throw new Error("Password recovery is temporarily unavailable. Please contact IronCore support.");
     const result = await api.resetPassword(secret.email, secret.token, password);
     setUser(null);
     setSelectedGym(null);
@@ -1491,15 +1507,15 @@ export function IronCoreApp() {
   }
 
   const setupRoles: IronCoreRole[] = ["super_admin", "gym_owner", "gym_manager"];
-  const membershipRoles: IronCoreRole[] = [...setupRoles, "receptionist"];
+  const membershipCreateRoles: IronCoreRole[] = [...setupRoles, "receptionist"];
   const liveOperations: OperationData = {
     branches: operations.branches.map((v) => ({ id: v.id, name: v.name, code: v.code, email: v.email, phone: v.phone, timezone: v.timezone, status: v.status, isPrimary: v.is_primary })),
     plans: operations.plans.map((v) => ({ id: v.id, branchId: v.branch_id, name: v.name, code: v.code, description: v.description, interval: v.billing_interval, intervalCount: v.interval_count, priceMinor: v.price_amount_minor, currency: v.currency, durationDays: v.duration_days, trialDays: v.trial_days, status: v.status })),
-    memberships: operations.memberships.map((v) => ({ id: v.id, memberId: v.member_id, planId: v.plan_id, status: v.status, startsAt: v.starts_at, endsAt: v.ends_at ?? null, nextBillingAt: v.next_billing_at, priceMinor: v.price_amount_minor, currency: v.currency, autoRenew: v.auto_renew })),
+    memberships: operations.memberships.map((v) => ({ id: v.id, memberId: v.member_id, planId: v.plan_id, status: v.status, startsAt: v.starts_at, endsAt: v.ends_at ?? null, nextBillingAt: v.next_billing_at, priceMinor: v.price_amount_minor, currency: v.currency, autoRenew: v.auto_renew, billingRestrictedAt: v.billing_restricted_at })),
     members: members.rows.map((v) => ({ id: v.id, name: v.name, memberCode: v.memberCode ?? "", branchId: v.homeBranchId, status: v.statusValue })).filter((v) => /^\d{4,6}$/.test(v.memberCode)),
     staff: staff.rows.map((row) => ({ id: row.id, name: row.user.name, role: row.role, branchId: row.home_branch_id, status: row.status })), sessions: engagement.sessions, attendance: engagement.attendance,
     loading: operations.loading, error: operations.error,
-    baseCurrency: selectedGym.base_currency, gymTimezone: selectedGym.timezone, canManageSetup: setupRoles.includes(selectedGym.role), canManageMemberships: membershipRoles.includes(selectedGym.role),
+    baseCurrency: selectedGym.base_currency, gymTimezone: selectedGym.timezone, canManageSetup: setupRoles.includes(selectedGym.role), canCreateMemberships: membershipCreateRoles.includes(selectedGym.role), canEditMemberships: setupRoles.includes(selectedGym.role), actorRole: selectedGym.role,
     onReload: () => setOperationsRefresh((v) => v + 1), onCreateBranch: createBranch, onUpdateBranch: updateBranch, onDeleteBranch: deleteBranch, onAssignBranchMember: assignBranchMember, onAssignBranchStaff: assignBranchStaff, onCreateClassSession: createClassSession, onCreatePlan: createPlan, onUpdatePlan: updatePlan, onCreateMembership: createMembership, onUpdateMembership: updateMembership,
   };
   const liveStaff: StaffData = {
@@ -1610,7 +1626,7 @@ export function IronCoreApp() {
     onDeleteProgress: deleteProgress,
     onUpdatePreference: updateNotificationPreference,
   };
-  const canManageMembers = membershipRoles.includes(selectedGym.role);
+  const canManageMembers = membershipCreateRoles.includes(selectedGym.role);
   const canManageStaff = setupRoles.includes(selectedGym.role);
   const canReadSaasBilling = ["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role);
   const canReadReports = ["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role);

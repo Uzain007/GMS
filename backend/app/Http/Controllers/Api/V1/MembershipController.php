@@ -2,16 +2,13 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Enums\MembershipStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreMembershipRequest;
 use App\Http\Requests\UpdateMembershipRequest;
 use App\Http\Resources\MembershipResource;
 use App\Models\Membership;
-use App\Services\AuditService;
 use App\Services\MembershipService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Facades\DB;
 
 class MembershipController extends Controller
 {
@@ -46,32 +43,9 @@ class MembershipController extends Controller
     public function update(
         UpdateMembershipRequest $request,
         string $membership,
-        AuditService $audit,
+        MembershipService $service,
     ): MembershipResource {
         $model = Membership::query()->findOrFail($membership);
-        $before = $model->toArray();
-        $data = $request->safe()->except('reason');
-
-        if (($data['status'] ?? null) === MembershipStatus::Cancelled->value) {
-            $data['cancelled_at'] = now();
-            $data['auto_renew'] = false;
-        }
-
-        $fresh = DB::transaction(function () use ($model, $data, $audit, $request, $before): Membership {
-            $model->update($data);
-            $fresh = $model->fresh();
-            $audit->record(
-                'membership.updated',
-                $fresh,
-                $request->user(),
-                $before,
-                $fresh->toArray(),
-                (string) $request->string('reason'),
-                $request,
-            );
-            return $fresh;
-        });
-
-        return new MembershipResource($fresh);
+        return new MembershipResource($service->update($model, $request->validated(), $request->user(), $request));
     }
 }

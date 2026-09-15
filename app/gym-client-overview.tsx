@@ -77,12 +77,12 @@ export function GymClientOverview({ data, availableViews, onView }: Props) {
 
   return <section className="gym-overview">
     <div className="gym-welcome">
-      <div><div className="gym-welcome-label"><span>{data.preview ? "Representative gym preview" : "Live gym workspace"}</span><i /></div><h2>Good morning, {data.gymName}.</h2><p>Members, revenue and today&apos;s operations in one tenant-isolated view.</p></div>
+      <div><div className="gym-welcome-label"><span>{data.preview ? "Representative gym preview" : "Live gym workspace"}</span><i /></div><h2>Good morning, {data.gymName}.</h2><p>Members, revenue and today&apos;s operations in one clear view.</p></div>
       {canOpen("attendance") && <button className="primary-button" onClick={() => onView("attendance")}><Activity size={17} /> Open front desk</button>}
     </div>
 
-    <div className="gym-scope-note"><ShieldCheck size={17} /><span><strong>{data.preview ? "Preview records only" : "Selected-gym data only"}</strong><small>{data.preview ? "This workspace demonstrates the client portal without using authenticated tenant data." : "These cards compose already authorised API responses; Laravel policies and PostgreSQL RLS remain authoritative."}</small></span></div>
-    {data.warnings.length > 0 && <div className="gym-overview-warning" role="status"><Clock3 size={16} /><span>Some live sections are temporarily unavailable. The available tenant data remains isolated and safe.</span></div>}
+    {!['receptionist', 'trainer', 'member'].includes(data.actorRole) && <div className="gym-scope-note"><ShieldCheck size={17} /><span><strong>{data.preview ? "Preview records only" : data.actorRole === "super_admin" ? "Protected tenant overview" : "Your gym overview"}</strong><small>{data.preview ? "This preview is separate from live accounts." : data.actorRole === "super_admin" ? "Authorised API responses, policies and PostgreSQL RLS protect this tenant view." : "This page contains the latest available information for your gym."}</small></span></div>}
+    {data.warnings.length > 0 && <div className="gym-overview-warning" role="status"><Clock3 size={16} /><span>Some information could not be loaded. Please refresh or try again shortly.</span></div>}
 
     <div className="gym-kpi-grid" aria-busy={data.loading}>
       <Kpi icon={UsersRound} label="Members" value={data.memberTotal.toLocaleString()} detail={data.activeMembers === null ? "Selected gym member total" : `${data.activeMembers.toLocaleString()} active members`} tone="violet" />

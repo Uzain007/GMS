@@ -25,6 +25,8 @@ class InvoiceResource extends JsonResource
             'due_amount_minor' => $this->due_amount_minor,
             'issued_at' => $this->issued_at?->toIso8601String(),
             'due_at' => $this->due_at?->toIso8601String(),
+            'billing_cycle_date' => $this->billing_cycle_date?->toDateString(),
+            'grace_ends_at' => $this->grace_ends_at?->toIso8601String(),
             'paid_at' => $this->paid_at?->toIso8601String(),
             'notes' => $this->notes,
             // Items are always loaded through their own fail-closed tenant scope.

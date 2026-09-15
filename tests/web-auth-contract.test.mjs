@@ -38,7 +38,7 @@ test("authenticated mode exposes only integrated tenant modules", async () => {
   const operations = await read("app/tenant-operations.tsx");
 
   assert.match(dashboard, /tenantViews\.includes\(item\.id\)/);
-  assert.match(dashboard, /Live tenant data/);
+  assert.match(dashboard, /Gym workspace protected/);
   for (const resource of ["branches", "membership-plans", "memberships"]) assert.match(client, new RegExp(`tenantCollection<.*>\\(gymId, "${resource}"\\)`));
   assert.match(operations, /Number\(match\[1\]\) \* 100/);
   assert.match(app, /NEXT_PUBLIC_IRONCORE_DEMO_MODE/);
@@ -48,7 +48,7 @@ test("authenticated mode exposes only integrated tenant modules", async () => {
 test("an unconfigured API leaves bootstrap and shows the signed-out notice", async () => {
   const app = await read("app/ironcore-app.tsx");
   assert.match(app, /if \(!api\) \{[\s\S]*setPhase\("anonymous"\);[\s\S]*return;[\s\S]*\}/);
-  assert.match(app, /Live account access needs the Laravel API deployment to be configured first/);
+  assert.match(app, /Account access is temporarily unavailable\. Please contact IronCore support/);
 });
 
 test("attendance keeps readable columns without exposing preview navigation", async () => {
@@ -63,7 +63,7 @@ test("attendance keeps readable columns without exposing preview navigation", as
     assert.match(dashboard, new RegExp(`view === "${view}" && liveOperations`));
   }
   assert.match(operations, /Representative preview/);
-  assert.match(operations, /Sample records stay isolated from authenticated gym data/);
+  assert.match(operations, /Sample records are separate from live gym accounts/);
   assert.match(operations, /title === "Branches" \? "branch"/);
   assert.match(operations, /function billingLabel/);
   assert.match(operations, /one_time: "One time"/);
@@ -93,7 +93,7 @@ test("gym-client portal has a distinct tenant dashboard without expanding browse
   assert.match(app, /\["gym-dashboard", "members", "branches"/);
   assert.match(app, /portalMode="gym"/);
   assert.match(app, /Back to platform/);
-  assert.match(gymOverview, /Selected-gym data only/);
+  assert.match(gymOverview, /Protected tenant overview/);
   assert.match(gymOverview, /availableViews\.includes\(view\)/);
   assert.doesNotMatch(gymOverview, /fetch\(|localStorage|sessionStorage|gym_id/);
   assert.match(styles, /Milestone 6B keeps the gym client's landing view separate/);
@@ -217,7 +217,7 @@ test("coaching UI integrates assignment-scoped plans, exact progress and private
   assert.match(coaching, /onUpdateProgress/);
   assert.match(coaching, /onDeleteProgress/);
   assert.match(coaching, /Measurement details/);
-  assert.match(coaching, /Assignment-bound coaching workspace/);
+  assert.match(coaching, /Coaching workspace/);
   assert.match(coaching, /End trainer access/);
   assert.match(coaching, /This assignment cannot be reactivated/);
   assert.match(coaching, /Preference changes are member-controlled/);
@@ -238,7 +238,7 @@ test("reporting UI uses one guarded tenant aggregate and keeps currencies separa
   assert.match(app, /setReports\(\(current\) => \(\{ \.\.\.current, report: null, currency:/);
   assert.match(app, /canReadReports = \["super_admin", "gym_owner", "gym_manager"\]/);
   assert.match(dashboard, /ReportManagement data=\{liveReports\}/);
-  assert.match(reports, /Tenant-safe live report/);
+  assert.match(reports, /Your gym report/);
   assert.match(reports, /currency only|currency\} only/);
   assert.match(reports, /type="date"/);
   assert.match(reports, /From date must be before or the same as the To date/);
@@ -289,7 +289,7 @@ test("tenant operation and member lifecycle edits use audited backend updates", 
   assert.match(operations, /EditPlanModal/);
   assert.match(operations, /EditMembershipModal/);
   assert.match(operations, /Existing memberships keep their accepted price snapshot/);
-  assert.match(operations, /The selected gym, actor and reason are written to the audit trail/);
+  assert.match(operations, /This change, the person making it and the reason are kept in activity history/);
 });
 
 test("gym settings keep labels and controls separated without horizontal overflow", async () => {

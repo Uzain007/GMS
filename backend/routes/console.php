@@ -10,3 +10,4 @@ Artisan::command('ironcore:status', function (): void {
 // One scheduler process runs this daily. Each tenant is rebound separately by
 // the command service, so forced PostgreSQL RLS remains active throughout.
 Schedule::command('ironcore:saas-billing')->dailyAt('01:00')->withoutOverlapping();
+Schedule::command('ironcore:membership-billing')->dailyAt('01:15')->withoutOverlapping();

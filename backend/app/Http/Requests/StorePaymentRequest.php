@@ -20,6 +20,7 @@ class StorePaymentRequest extends TenantFormRequest
             'currency' => ['required', Rule::enum(Currency::class)],
             'idempotency_key' => ['required', 'string', 'max:120'],
             'paid_at' => ['nullable', 'date', 'before_or_equal:now'],
+            'payment_date' => ['nullable', 'required_if:method,'.PaymentMethod::Cash->value, 'date', 'before_or_equal:today'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'metadata' => ['nullable', 'array'],
             'bank_reference' => ['nullable', 'string', 'max:160'],
@@ -31,6 +32,14 @@ class StorePaymentRequest extends TenantFormRequest
                 'mimetypes:application/pdf,image/jpeg,image/png,image/webp',
                 'max:10240',
             ],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'payment_date.required_if' => 'The payment date is required for a cash payment.',
+            'transferred_on.required_if' => 'The transfer date is required for a bank transfer.',
         ];
     }
 }

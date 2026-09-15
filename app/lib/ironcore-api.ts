@@ -154,9 +154,9 @@ export type UpdateBranch = { name: string; code: string; email?: string | null; 
 export type MembershipPlanRecord = { id: string; gym_id: string; branch_id: string | null; name: string; code: string; description: string | null; billing_interval: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor: number; duration_days: number | null; trial_days: number; status: "active" | "inactive"; created_at: string | null };
 export type NewMembershipPlan = { name: string; code: string; branch_id?: string; description?: string; billing_interval: MembershipPlanRecord["billing_interval"]; interval_count: number; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; duration_days?: number; trial_days?: number; status?: "active" };
 export type UpdateMembershipPlan = { name: string; code: string; branch_id?: string | null; description?: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; duration_days?: number | null; trial_days?: number; status: MembershipPlanRecord["status"]; reason: string };
-export type MembershipRecord = { id: string; gym_id: string; member_id: string; plan_id: string; branch_id: string | null; status: "pending" | "active" | "paused" | "cancelled" | "expired"; starts_at: string; ends_at?: string | null; is_in_date?: boolean; next_billing_at: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; billing_interval?: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count?: number; auto_renew: boolean; plan?: { id: string; name: string; code: string }; branch?: { id: string; name: string } | null; created_at: string | null };
+export type MembershipRecord = { id: string; gym_id: string; member_id: string; plan_id: string; branch_id: string | null; status: "pending" | "active" | "paused" | "cancelled" | "expired"; starts_at: string; ends_at?: string | null; is_in_date?: boolean; next_billing_at: string | null; price_amount_minor: number; currency: GymSummary["base_currency"]; joining_fee_minor?: number; billing_interval?: "one_time" | "weekly" | "monthly" | "quarterly" | "yearly"; interval_count?: number; auto_renew: boolean; grace_period_days?: number; billing_restricted_at?: string | null; access_restricted?: boolean; plan?: { id: string; name: string; code: string }; branch?: { id: string; name: string } | null; created_at: string | null };
 export type NewMembership = { member_id: string; plan_id: string; branch_id?: string; starts_at: string; ends_at?: string; status?: "pending" | "active"; auto_renew?: boolean };
-export type UpdateMembership = { status: MembershipRecord["status"]; ends_at?: string | null; next_billing_at?: string | null; auto_renew: boolean; cancellation_reason?: string | null; reason: string };
+export type UpdateMembership = { plan_id?: string; status: MembershipRecord["status"]; ends_at?: string | null; next_billing_at?: string | null; auto_renew: boolean; cancellation_reason?: string | null; reason: string };
 export type UpdateMemberSelf = { first_name?: string; last_name?: string; email?: string; phone?: string; date_of_birth?: string | null };
 export type StaffRole = "gym_owner" | "gym_manager" | "receptionist" | "trainer";
 export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; phone: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive"; hired_at: string | null; terminated_at: string | null; has_profile_image: boolean; created_at: string | null };
@@ -178,7 +178,7 @@ export type PaymentRecord = { id: string; gym_id: string; member_id: string; mem
 export type PaymentSummaryRecord = { gross_minor: number; refunded_minor: number; net_minor: number; pending_minor: number; outstanding_minor: number; currency: GymSummary["base_currency"] };
 export type PaymentGatewayRecord = { id: string; provider: "stripe"; status: "pending" | "restricted" | "active" | "disabled"; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean; country_code: string; default_currency: GymSummary["base_currency"]; requirements: { currently_due?: string[]; eventually_due?: string[]; disabled_reason?: string | null } | null; connected_at: string | null; provider_account_id: string | null };
 export type NewInvoice = { member_id: string; membership_id?: string; branch_id?: string; currency: GymSummary["base_currency"]; issued_at?: string; due_at?: string; notes?: string; items: Array<{ description: string; quantity: number; unit_amount_minor: number; tax_amount_minor?: number }> };
-export type NewPayment = { member_id: string; membership_id?: string; invoice_id?: string; branch_id?: string; method: PaymentRecord["method"]; amount_minor: number; currency: GymSummary["base_currency"]; idempotency_key: string; paid_at?: string; notes?: string; bank_reference?: string; transferred_on?: string; receipt?: File };
+export type NewPayment = { member_id: string; membership_id?: string; invoice_id?: string; branch_id?: string; method: PaymentRecord["method"]; amount_minor: number; currency: GymSummary["base_currency"]; idempotency_key: string; paid_at?: string; payment_date?: string; notes?: string; bank_reference?: string; transferred_on?: string; receipt?: File };
 export type CreatedPayment = { payment: PaymentRecord; checkout_url: string | null; idempotency_reused: boolean };
 export type PaymentGatewayState = { gateway: PaymentGatewayRecord | null; provider_configured: boolean; checkout_available: boolean };
 export type BankTransferInvoiceDetails = { invoice_id: string; payment_reference: string; amount_minor: number; currency: GymSummary["base_currency"] };
@@ -257,7 +257,7 @@ export type Paginated<T> = {
 export type CursorPage<T> = { data: T[]; meta?: { per_page?: number; next_cursor?: string | null; prev_cursor?: string | null } };
 
 type ApiEnvelope<T> = { data: T };
-type ValidationPayload = { message?: string; errors?: Record<string, string[]> };
+type ValidationPayload = { message?: string; code?: string; errors?: Record<string, string[]> };
 
 export class IronCoreApiError extends Error {
   constructor(
@@ -329,6 +329,9 @@ export class IronCoreApi {
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as ValidationPayload;
       const firstError = Object.values(payload.errors ?? {})[0]?.[0];
+      if (response.status === 401 && payload.code === "session_expired" && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ironcore:session-expired", { detail: payload.message }));
+      }
       throw new IronCoreApiError(
         firstError ?? payload.message ?? "IronCore could not complete that request.",
         response.status,

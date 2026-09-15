@@ -760,6 +760,80 @@ body{font-size:var(--text-sm);line-height:1.5}
   .member-pass-head,.member-pass-foot,.member-pass-person{padding-inline:18px}
 }
 
+/* Final production typography pass. Legacy portal rules above intentionally
+   remain structurally intact; this shared layer guarantees one readable scale
+   and resilient controls at every supported viewport. */
+:root{--text-xs:12px;--text-sm:13px;--text-md:15px;--text-lg:18px;--text-xl:22px}
+body{font-size:14px;line-height:1.55}
+.eyebrow,.nav-eyebrow,.member-kicker,.member-page-top p,
+.metric-label,.mini-metrics span,.platform-metrics small,.engagement-stat small,
+.coaching-metrics small,.report-metric small,.branch-metrics small,
+.member-stat-grid small,.member-card-title small,.member-card>small,
+.platform-detail-grid dt,.member-account-stack dt,.member-bank-field small,
+.import-preview-metrics small,.audit-filters label,.billing-dashboard-filters label{
+  font-size:12px;line-height:1.4
+}
+.primary-button,.secondary-button,.danger-button,.member-primary,.member-secondary,
+.nav-item,.platform-sidebar nav button,.platform-sidebar-foot button,
+.member-sidebar nav button,.member-sidebar-foot button{
+  min-height:40px;font-size:13px;line-height:1.25
+}
+.table-action,.member-text-button,.security-text-button{min-height:36px;font-size:12px}
+.icon-button,.member-icon-button{min-width:36px;min-height:36px}
+.data-table th{padding:12px 15px;font-size:12px;line-height:1.35}
+.data-table td{padding:13px 15px;font-size:13px;line-height:1.45}
+.table-sub,.gym-cell small,.person-cell small,.activity-item small,
+.platform-quick-list small,.assignment-row small,.exercise-list small,
+.measurement-list small,.delivery-list small,.payment-method-list small,
+.branch-collection li small{font-size:12px;line-height:1.45}
+.status,.plan-pill,.method-chip,.report-chip,.measurement-status{min-height:24px;font-size:11px;line-height:1.15}
+.modal-card>label,.modal-card form>label,.engagement-modal label,.progress-form label,
+.settings-card form label,.member-payment-form label,.member-import-modal>form label,
+.checkin-console label,.searchable-select-label{font-size:13px;line-height:1.4}
+.modal-card input,.modal-card select,.modal-card textarea,.engagement-modal input,
+.engagement-modal select,.engagement-modal textarea,.progress-form input,
+.progress-form select,.progress-form textarea,.settings-card form input,
+.settings-card form select,.settings-card form textarea,.member-payment-form input,
+.member-payment-form select,.searchable-select-trigger{font-size:14px;line-height:1.4}
+.live-scope-banner strong,.gym-scope-note strong,.modal-note strong,.modal-safety strong,
+.payment-safety strong,.audit-note strong{font-size:13px;line-height:1.4}
+.live-scope-banner small,.gym-scope-note small,.modal-note small,.modal-safety small,
+.payment-safety small,.audit-note small,.form-error,.form-notice,
+.member-inline-error,.member-inline-notice{font-size:12px;line-height:1.5}
+.panel-title h3,.panel-heading h2,.settings-card h3,.class-card h3,
+.member-card-title h3,.member-card h3{font-size:18px;line-height:1.3}
+.panel-title>small,.settings-card>p,.class-card>p:not(.eyebrow),
+.checkin-copy p:last-child,.gym-overview-warning,.member-payment-unavailable,
+.member-bank-details>p,.platform-settings-grid p,.branch-empty span{font-size:13px;line-height:1.5}
+.qr-scanner-card>header small,.qr-camera-select,.qr-camera-select select,
+.qr-camera-error,.qr-camera-error button,.qr-scanner-safety small,
+.member-qr-zone>small,.bank-receipt-fields label small{font-size:12px;line-height:1.45}
+.member-qr-zone>strong{font-size:16px}.member-bank-field strong{font-size:13px}
+.member-bank-heading>button,.member-bank-field>button{min-height:36px;font-size:12px}
+.searchable-select-options>button,.searchable-select-options>p{font-size:13px}
+.compact-check{display:flex!important;min-height:40px;align-items:center;gap:9px!important}
+.compact-check input{width:17px!important;height:17px!important;min-height:0!important;flex:0 0 auto;accent-color:var(--violet)}
+.member-overdue-alert{font-weight:700}
+
+@media(max-width:1024px){
+  .finance-metrics,.engagement-metrics,.analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .checkin-console{grid-template-columns:1fr}.checkin-console form{grid-template-columns:1fr 1fr}
+}
+@media(max-width:768px){
+  .finance-actions,.gateway-actions,.member-bulk-actions{width:100%;justify-content:flex-start}
+  .field-pair,.field-trio,.field-triple,.progress-form .field-pair{grid-template-columns:1fr}
+  .checkin-console form{grid-template-columns:1fr}
+  .member-bank-details{grid-template-columns:1fr}
+  .member-bank-heading{grid-column:auto;align-items:flex-start;flex-direction:column}
+  .member-bank-heading>button{width:100%}
+}
+@media(max-width:440px){
+  .finance-metrics,.engagement-metrics,.analytics-metrics{grid-template-columns:1fr}
+  .modal-layer,.member-modal-backdrop{padding:8px}
+  .modal-card,.member-modal{max-height:calc(100dvh - 16px);padding:18px 16px}
+  .module-heading h2,.welcome-row h2,.platform-welcome h2{font-size:28px}
+}
+
 @media(max-width:620px){
   .report-workspace,.report-workspace>*{width:100%;min-width:0;max-width:100%}
   .report-heading>div,.report-filters>*{min-width:0}
@@ -953,4 +1027,39 @@ body{font-size:var(--text-sm);line-height:1.5}
   .sidebar,.platform-sidebar{padding:18px 14px 14px}
   .platform-profile-wrap{display:none!important}
   .profile-popover{position:fixed;top:68px;right:12px;width:min(280px,calc(100vw - 24px))}
+}
+
+/* Final readable-text guard. Earlier feature styles intentionally retain their
+   layout values; these shared selectors prevent legacy 7–10px copy from
+   reappearing in any authenticated portal at normal browser zoom. */
+.app-shell small,.platform-shell small,.member-shell small,
+.tenant-page small,.auth-page small,.activation-card small{
+  font-size:12px;
+  line-height:1.45;
+}
+.app-shell p:not(.eyebrow),.platform-shell p:not(.eyebrow),
+.member-shell p:not(.eyebrow),.tenant-page p:not(.eyebrow){
+  font-size:13px;
+  line-height:1.55;
+}
+.app-shell label,.platform-shell label,.member-shell label,.tenant-page label,
+.auth-page label,.activation-card label{font-size:13px;line-height:1.4}
+.app-shell dt,.platform-shell dt,.member-shell dt,.tenant-page dt{font-size:12px;line-height:1.4}
+.app-shell dd,.platform-shell dd,.member-shell dd,.tenant-page dd{font-size:13px;line-height:1.45}
+.nav-count,.finance-tabs button span,.tag,.plan-pill,.status,.method-chip,
+.report-chip,.measurement-status{font-size:11px;line-height:1.2}
+.search-box input,.currency-select select,.notification-popover,
+.panel-heading>div>span,.range-tabs button,.metric-change,.chart-summary small,
+.activity-item time,.system-health,.gym-cell,.table-sub,.staff-helper,
+.staff-file-label,.import-error-list,.branch-action-modal{font-size:12px;line-height:1.45}
+.search-box kbd,.chart-y,.chart-x{font-size:11px}
+.modal-note,.gateway-card,.payment-safety,.audit-note{font-size:12px;line-height:1.5}
+.member-profile-summary dt,.member-current-membership dt{font-size:12px}
+.member-profile-summary dd,.member-current-membership dd{font-size:13px}
+
+@media(max-width:768px){
+  .content,.platform-content,.member-content{min-width:0;max-width:100%;overflow-x:hidden}
+  .module-heading,.welcome-row,.panel-title,.panel-heading{min-width:0}
+  .modal-card,.member-modal{width:min(100%,calc(100vw - 16px));min-width:0}
+  .table-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
 }

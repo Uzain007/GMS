@@ -17,6 +17,7 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, HasUuids, Notifiable;
 
     public const SESSION_AUTH_VERSION_KEY = 'ironcore_auth_version';
+    public const SESSION_STARTED_AT_KEY = 'ironcore_session_started_at';
 
     protected $attributes = ['auth_version' => 1, 'must_change_password' => false];
 

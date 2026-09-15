@@ -60,7 +60,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/mfa/challenge', [MfaController::class, 'challenge'])->middleware('throttle:mfa-challenge');
         Route::post('/forgot-password', [AccountSecurityController::class, 'forgotPassword'])->middleware('throttle:recovery');
         Route::post('/reset-password', [AccountSecurityController::class, 'resetPassword'])->middleware('throttle:recovery');
-        Route::middleware(['auth:sanctum', 'auth.version', 'database.identity'])->group(function (): void {
+        Route::middleware(['auth:sanctum', 'auth.version', 'database.identity', 'auth.lifetime'])->group(function (): void {
             Route::get('/me', [AuthController::class, 'me']);
             Route::post('/logout', [AuthController::class, 'logout']);
             Route::patch('/password', [AccountSecurityController::class, 'changePassword']);
@@ -79,7 +79,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/gyms/{gym}/member-account-invitations/accept', [MemberAccountInvitationController::class, 'accept'])
         ->middleware('throttle:member-activation');
 
-    Route::middleware(['auth:sanctum', 'auth.version', 'database.identity', 'password.changed'])->group(function (): void {
+    Route::middleware(['auth:sanctum', 'auth.version', 'database.identity', 'auth.lifetime', 'password.changed'])->group(function (): void {
         Route::get('/gyms', [GymController::class, 'index']);
         Route::post('/gyms', [GymController::class, 'store'])->middleware('role:super_admin');
 
@@ -240,7 +240,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/memberships/{membership}', [MembershipController::class, 'show'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::patch('/memberships/{membership}', [MembershipController::class, 'update'])
-                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/invoices', [InvoiceController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');

@@ -217,6 +217,7 @@ class MfaController extends Controller
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
         $request->session()->put(User::SESSION_AUTH_VERSION_KEY, $user->auth_version);
+        $request->session()->put(User::SESSION_STARTED_AT_KEY, now()->getTimestamp());
 
         return response()->json(['data' => [
             'authentication' => 'session',

@@ -69,5 +69,5 @@ test("demo fixtures cannot be reached through signed-out authentication", async 
 
   assert.doesNotMatch(app, /previewActive|setPreviewActive|sharedPreview/);
   assert.doesNotMatch(app, /onPreview=\{demoMode|Preview gym portal|Preview member portal/);
-  assert.match(app, /if \(!api\) throw new Error\("Live account activation needs the Laravel API deployment to be configured first\."\)/);
+  assert.match(app, /if \(!api\) throw new Error\("Account activation is temporarily unavailable\. Please contact your gym\."\)/);
 });

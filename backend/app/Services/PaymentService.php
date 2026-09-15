@@ -15,6 +15,7 @@ use App\Models\Membership;
 use App\Models\Payment;
 use App\Models\PaymentRefund;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,7 @@ class PaymentService
     public function __construct(
         private readonly AuditService $audit,
         private readonly StripeGatewayService $stripe,
+        private readonly AutomatedMembershipBillingService $membershipBilling,
     ) {}
 
     /** @return array{payment: Payment, checkout_url: ?string, reused: bool} */
@@ -86,7 +88,7 @@ class PaymentService
                     'refunded_amount_minor' => 0,
                     'currency' => $data['currency'],
                     'idempotency_key' => $data['idempotency_key'],
-                    'paid_at' => $pending ? null : ($data['paid_at'] ?? now()),
+                    'paid_at' => $pending ? null : $this->historicalPaymentTime($data),
                     'notes' => $data['notes'] ?? null,
                     'metadata' => $data['metadata'] ?? null,
                 ]);
@@ -408,6 +410,20 @@ class PaymentService
             'status' => $due === 0 ? InvoiceStatus::Paid : InvoiceStatus::Open,
             'paid_at' => $due === 0 ? now() : null,
         ]);
+        if ($due === 0) {
+            $this->membershipBilling->markInvoiceSettled($invoice->fresh());
+        }
+    }
+
+    private function historicalPaymentTime(array $data): CarbonImmutable
+    {
+        if (! empty($data['payment_date'])) {
+            // Preserve the entered business date instead of silently replacing
+            // a historical cash payment with the current timestamp.
+            return CarbonImmutable::parse($data['payment_date'], 'UTC')->startOfDay();
+        }
+
+        return isset($data['paid_at']) ? CarbonImmutable::parse($data['paid_at']) : CarbonImmutable::now();
     }
 
     private function finalizeRefund(PaymentRefund $refund): void

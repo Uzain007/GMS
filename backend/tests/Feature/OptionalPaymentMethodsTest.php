@@ -51,6 +51,7 @@ class OptionalPaymentMethodsTest extends TestCase
             'amount_minor' => $invoice['due_amount_minor'],
             'currency' => Currency::GBP->value,
             'idempotency_key' => 'optional-cash-payment',
+            'payment_date' => today()->toDateString(),
         ], $headers)->assertCreated()->assertJsonPath('data.status', 'paid')->json('data');
 
         app(TenantContext::class)->run($gym, function () use ($payment, $invoice): void {

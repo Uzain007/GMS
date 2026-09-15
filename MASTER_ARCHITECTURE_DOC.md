@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.56.0 — automated SaaS billing, platform insights and primary-location admission |
-| Last verified | 9 September 2026 |
+| MAD version | 0.57.0 — member billing lifecycle, contract amendments and role session limits |
+| Last verified | 14 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Production billing automation, platform insights, primary-location admission and shared UI readability implemented locally; approval pending |
+| Active milestone | Member billing lifecycle, audited contract amendments, payment dates, role session limits and shared UI readability implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -312,7 +312,7 @@ Only one pending invitation may exist per `(gym_id, member_id)`. Reissuing revok
 | `terms` | jsonb | yes | current plan terms |
 | `created_at`, `updated_at` | timestamp | yes | index `(gym_id, branch_id, status)` |
 
-### `memberships` — immutable member contract snapshot
+### `memberships` — audited member contract snapshot
 
 | Column | Type | Null | Constraints / index |
 | --- | --- | --- | --- |
@@ -328,12 +328,14 @@ Only one pending invitation may exist per `(gym_id, member_id)`. Reissuing revok
 | `currency` | char(3) | no | accepted ISO currency snapshot |
 | `billing_interval`, `interval_count` | varchar/small integer | no | accepted schedule snapshot |
 | `auto_renew` | boolean | no | default true |
+| `grace_period_days` | unsigned small integer | no | default seven-day member-payment grace period |
+| `billing_restricted_at` | timestamp | yes | access restriction set only after the open renewal invoice grace period expires |
 | `cancelled_at` | timestamp | yes | — |
 | `cancellation_reason` | text | yes | required for cancellation |
 | `terms_snapshot` | jsonb | yes | immutable accepted terms |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading member/status, billing, plan and branch indexes |
 
-Partial unique index `(gym_id, member_id)` permits only one `pending` or `active` membership at a time.
+Partial unique index `(gym_id, member_id)` permits only one `pending` or `active` membership at a time. Owners and managers may amend the plan, expiry, next billing date and auto-renew state with a mandatory reason. The accepted contract snapshot changes atomically while encrypted audit before/after values preserve the preceding contract; existing invoices and payments retain their own historical amount and currency snapshots.
 
 ### `member_imports` — previewed spreadsheet import tracking
 
@@ -393,13 +395,14 @@ Provider credentials are platform environment secrets and never columns. The onl
 | `gym_id` | uuid | no | FK `gyms.id` cascade delete |
 | `member_id` | uuid | no | composite tenant FK to `members` |
 | `membership_id`, `branch_id` | uuid | yes | composite tenant FKs to membership and branch |
+| `billing_cycle_date` | date | yes | nullable for manual invoices; tenant-unique with membership for idempotent automated renewal |
 | `created_by` | uuid | no | FK `users.id` restrict delete |
 | `number` | varchar(50) | no | unique `(gym_id, number)` |
 | `status` | varchar(30) | no | `draft`, `open`, `paid`, `void`, `uncollectible` |
 | `currency` | char(3) | no | supported ISO currency |
 | `subtotal_amount_minor`, `tax_amount_minor`, `total_amount_minor` | unsigned bigint | no | server-calculated immutable invoice totals |
 | `paid_amount_minor`, `due_amount_minor` | unsigned bigint | no | transactionally maintained balance |
-| `issued_at`, `due_at`, `paid_at`, `voided_at` | timestamp | mixed | lifecycle timestamps |
+| `issued_at`, `due_at`, `grace_ends_at`, `paid_at`, `voided_at` | timestamp | mixed | lifecycle timestamps; grace applies only to automated membership renewal invoices |
 | `notes`, `metadata` | text/jsonb | yes | bounded tenant detail |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status/due, member, membership and branch indexes |
 
@@ -433,10 +436,11 @@ Provider credentials are platform environment secrets and never columns. The onl
 | `currency` | char(3) | no | ISO currency; must match linked invoice |
 | `idempotency_key` | varchar(120) | no | unique per gym; prevents duplicate operator submissions |
 | `provider_checkout_id`, `provider_payment_id` | varchar(180) | yes | opaque references, unique inside `(gym_id, provider)` |
+| `paid_at` | timestamp | yes | immediate manual settlement time; cash uses the required operator-entered historical payment date |
 | lifecycle/failure/notes/metadata fields | mixed | yes | no PAN, CVC or bank credentials |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status, member, invoice, method and branch indexes |
 
-Cash and manual card payments settle immediately with an authenticated actor and audit evidence. Manual card means an externally processed terminal payment; IronCore never accepts or stores raw card data. Bank transfers remain pending until a management review approves or rejects the private receipt. Online card checkout uses Stripe-hosted Checkout only when both the deployment adapter and the gym's connected account are active. Membership-plan creation and publication never depend on Stripe.
+Cash payments require a business `Payment Date`; bank transfers require their distinct `Transfer Date`. Cash and manual card payments settle immediately with an authenticated actor and audit evidence. Manual card means an externally processed terminal payment; IronCore never accepts or stores raw card data. Bank transfers remain pending until a management review approves or rejects the private receipt. Online card checkout uses Stripe-hosted Checkout only when both the deployment adapter and the gym's connected account are active. Membership-plan creation and publication never depend on Stripe.
 
 The payment-status upgrade runs one explicit gym at a time while PostgreSQL FORCE RLS remains enabled. A follow-up repair migration safely converts any legacy `succeeded`/`failed` rows left by an earlier deployment attempt without disabling tenant boundaries.
 
@@ -860,7 +864,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | POST | `/auth/mfa/challenge` | public MFA-challenge throttle; opaque five-minute challenge | Complete a pending login with one non-replayed TOTP value or consume one recovery code before any session/token is issued |
 | POST | `/auth/forgot-password` | recovery throttle; public | Always acknowledge a syntactically valid normalized email identically, while Laravel conditionally sends a one-time reset fragment |
 | POST | `/auth/reset-password` | recovery throttle + stateful browser origin | Consume a valid one-time reset token, replace the password, advance `auth_version`, revoke all bearer tokens and start one regenerated web session |
-| GET | `/auth/me` | `auth:sanctum`, authentication-version gate, database identity | Return authenticated identity and active gym roles |
+| GET | `/auth/me` | `auth:sanctum`, authentication-version gate, database identity, role lifetime gate | Return authenticated identity and active gym roles; expire member sessions at six hours and tenant staff sessions at ten hours |
 | PATCH | `/auth/password` | `auth:sanctum`, authentication-version gate, database identity | Verify the current password, replace it, advance `auth_version`, revoke other credentials and retain only the current authenticated context |
 | GET | `/auth/mfa` | `auth:sanctum`, authentication-version gate, database identity | Return only MFA enabled/pending state, confirmation time and remaining recovery-code count |
 | POST | `/auth/mfa/setup` | authenticated + MFA-management throttle + current password | Replace a pending unconfirmed secret and return its Base32/otpauth values once; an enabled factor must be disabled before replacement |
@@ -906,7 +910,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET/POST | `/gyms/{gym}/membership-plans` | tenant; reads all tenant roles, writes owner/manager | List or create plan definitions |
 | GET/PATCH | `/gyms/{gym}/membership-plans/{plan}` | tenant; reads all tenant roles, writes owner/manager | Read/update plan; existing contracts remain unchanged |
 | GET/POST | `/gyms/{gym}/memberships` | tenant; owner/manager/receptionist | List or create snapshotted member contracts |
-| GET/PATCH | `/gyms/{gym}/memberships/{membership}` | tenant; owner/manager/receptionist | Read/update lifecycle; cancellation reason required |
+| GET/PATCH | `/gyms/{gym}/memberships/{membership}` | tenant; reads owner/manager/receptionist; writes owner/manager only | Read or reason-amend plan, expiry, next billing and auto-renew; cancellation reason required |
 | GET/POST | `/gyms/{gym}/invoices` | tenant; owner/manager/receptionist | List or issue server-calculated member invoices |
 | GET | `/gyms/{gym}/invoices/{invoice}` | tenant; owner/manager/receptionist | Read invoice and tenant-scoped items |
 | GET/PATCH | `/gyms/{gym}/bank-transfer-settings` | tenant; owner/manager/super admin; mandatory reason on update | Read or update encrypted member transfer instructions without logging account identifiers |
@@ -1030,6 +1034,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - A new activation creates a platform user only when no user owns the invited email. An existing account is linked without changing its password. Both paths create/update only the `member` role for the invitation gym and regenerate the authenticated web session.
 - Password recovery returns the same accepted response for existing and unknown normalized emails. Reset tokens are one-time, broker-hashed at rest, expiry-bound and placed only in a frontend URL fragment; they never enter query strings, logs, analytics or browser persistence. Expiry and resend throttling are deployment-configurable, reset delivery uses the normal Redis queue, local Docker routes SMTP only to its loopback-bound Mailpit inbox, and production must provide an authenticated SMTP transport.
 - Stateful login records the user's current `auth_version`. Every authenticated route compares that session value with the database value before tenant identity is bound; password reset or change advances the version so every stale Redis/database session fails closed on its next request.
+- Stateful and bearer authentication also enforce an absolute server-authored lifetime: linked members expire after six hours and non-platform gym staff expire after ten hours. Successful password reset, member activation and MFA login start the same clock; expiry invalidates the browser session or deletes the current bearer token. Super Admin retains its existing separate security controls.
 - Password reset revokes all Sanctum tokens before creating the replacement session. Authenticated password change retains only the current context: it updates the current session generation or, for a bearer request, revokes every other personal access token.
 - MFA is optional per platform identity and applies uniformly across super-admin, tenant staff and member roles. It never belongs to a gym and a tenant role cannot enable, disable or inspect another user's factor.
 - TOTP uses RFC 6238 SHA-1 with a 160-bit secret, six digits, 30-second steps and a bounded ±1-step clock window. The user row is locked and `mfa_last_used_step` must advance, so concurrent requests cannot accept the same authenticator value twice.
@@ -1039,6 +1044,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Trainers may view rosters and mark attendance only for class sessions assigned to their tenant staff profile; they cannot create classes or book other members.
 - Member booking reads and writes resolve the `members.user_id` link server-side. A client-supplied `member_id` never expands member self-service access.
 - QR pass issuance and check-in require an active, in-date membership. Check-in additionally requires branch compatibility. Submitted QR secrets are hashed before tenant-scoped lookup and never enter logs or audit values. The persistent visible six-digit `member_code` is only a tenant-local manual lookup and never substitutes for secure QR validation; the longer `member_number` is not labelled or displayed as the user-facing code.
+- The daily idempotent member-billing command creates one renewal invoice per membership/cycle up to seven days before `next_billing_at`, queues at most one reminder per invoice/day and applies `billing_restricted_at` only after the membership grace period. Restricted memberships cannot issue or use QR passes, check in manually, book classes or use coaching benefits. Full payment clears the restriction and advances the next cycle without rewriting invoice, payment or audit history.
 - Session capacity, counters, waitlist sequence and FIFO promotion are updated only inside a database transaction holding a row lock on the tenant-resolved class session.
 - Trainer training/progress access requires an active tenant assignment whose `trainer_staff_profile_id` belongs to the authenticated user. Owners/managers operate only inside the selected gym, and member access always resolves `members.user_id` server-side.
 - Workout sessions remain append-only. Progress corrections append a replacement and safe deletion only voids an active row, so original integer-thousandth evidence is never overwritten or physically deleted. Exact loads use integer grams and measurements use controlled units, avoiding floating-point drift.
@@ -1054,7 +1060,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - The Next.js web/PWA uses Sanctum's stateful cookie flow: it first requests `/sanctum/csrf-cookie`, sends `X-XSRF-TOKEN` on mutations and includes credentials on API requests.
 - Production frontend and API hosts must share an HTTPS parent domain (or use a same-origin API proxy); production sets `SESSION_SECURE_COOKIE=true`, an appropriate shared `SESSION_DOMAIN` and an exact `SANCTUM_STATEFUL_DOMAINS`/CORS allowlist.
 - The Laravel session identifier is regenerated after login and invalidated on logout. The session cookie remains encrypted and HttpOnly; bearer tokens are never written to `localStorage` or `sessionStorage`.
-- Login, member activation and successful password reset copy the current server-side `auth_version` into the encrypted session. No client-provided version is trusted, and a stale or missing version is logged out before any tenant route runs.
+- Login, MFA completion, member activation and successful password reset copy the current server-side `auth_version` and a server-authored absolute start time into the encrypted session. No client-provided version or start time is trusted, and a stale, missing-version or expired session is logged out before any tenant route runs.
 - A login completed with a temporary owner credential returns only `must_change_password` identity state. The web renders a dedicated replacement form and does not request gym/platform collections; Laravel independently returns `423 password_change_required` from every non-security authenticated route until the strong password change succeeds.
 - For an MFA-enabled identity, primary credential or recovery verification returns an opaque five-minute challenge instead of a user/session payload. The browser keeps it only in component memory, sends one authenticator/recovery value in the request body and clears the challenge on success, cancellation, navigation or reload.
 - Authenticator enrollment returns a Base32 secret and `otpauth://` URI once for local QR rendering. The browser does not persist the secret or recovery codes; closing the setup result requires starting setup again with the current password.
@@ -1125,7 +1131,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - Production uses separate frontend, Laravel API, PostgreSQL 17, Redis and S3-compatible storage services; free frontend hosting is not a safe substitute for the stateful API/database/queue stack.
 - HTTPS, exact CORS/Sanctum origins, secure cookies, trusted proxy configuration and environment-only secrets are mandatory before launch.
-- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release.
+- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs `ironcore:membership-billing` daily at 01:15 alongside the existing SaaS billing lifecycle, with overlap locks and the same PostgreSQL/Redis configuration as the web process.
 - The production backend image runs Caddy and PHP-FPM under Supervisor. Caddy binds to Railway's injected `PORT` (with `8000` only as an image-local fallback), serves Laravel exclusively from `public/` and forwards PHP requests to the private PHP-FPM listener. Local Docker Compose retains its explicit `php artisan serve` override.
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
 - Backups, point-in-time recovery, restore drills, provider webhook monitoring, failed-job alerts, centralised logs and error tracking are production launch gates.
@@ -1161,6 +1167,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
 | Post-deployment stabilization — owner UX, audit, billing corrections and offboarding | Implemented locally; approval pending | One-time owner credentials are copyable only until dismissal; owner/invitation mail uses the shared provider; paid SaaS corrections are append-only; audit history exposes the existing encrypted log; suspended/archived tenants cannot log in; real history blocks hard deletion. |
+| IronCore Beta — member payment and access lifecycle | Implemented locally; approval pending | Cash and bank transfer use distinct required business dates; owners/managers can reason-amend member contracts; a daily idempotent renewal invoice/reminder/grace workflow restricts overdue QR, check-in, booking and coaching access and restores it after full payment; member and staff sessions have six- and ten-hour absolute limits. |
 | IronCore Beta v0.1 — Railway public API container | Implemented locally; approval pending | The backend image now supervises Caddy plus PHP-FPM, listens on Railway's dynamic `PORT`, serves only Laravel's public directory and preserves the existing local Compose command overrides. `/up` remains process liveness and `/api/v1/health/readiness` remains the PostgreSQL/Redis readiness gate. |
 | IronCore Beta v0.1 — demo login removal | Implemented locally; approval pending | The public login contains only real email/password and recovery actions. Demo role buttons, credential autofill and API-unavailable preview/activation fallbacks are absent; all roles continue through the unchanged Laravel session and permission flow. |
 | IronCore Beta v0.1 — password-reset email delivery | Implemented locally; approval pending | Keeps the existing non-enumerating, hash-only, expiring and single-use recovery contract while adding a local SMTP inbox, a dedicated Redis queue worker, production-provider environment settings and role-wide recovery/login regression coverage. No tenant schema or permission boundary changes. |

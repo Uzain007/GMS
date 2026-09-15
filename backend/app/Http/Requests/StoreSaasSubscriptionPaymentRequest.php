@@ -21,8 +21,7 @@ class StoreSaasSubscriptionPaymentRequest extends TenantFormRequest
             'idempotency_key' => ['required', 'string', 'min:16', 'max:120'],
             'reference' => ['required', 'string', 'min:2', 'max:160'],
             'payment_date' => [
-                'nullable',
-                'required_if:method,'.PaymentMethod::BankTransfer->value,
+                'required',
                 'date',
                 'before_or_equal:today',
             ],
@@ -33,6 +32,15 @@ class StoreSaasSubscriptionPaymentRequest extends TenantFormRequest
                 'mimetypes:application/pdf,image/jpeg,image/png,image/webp',
                 'max:10240',
             ],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'payment_date.required' => $this->input('method') === PaymentMethod::Cash->value
+                ? 'The payment date is required for a cash payment.'
+                : 'The transfer date is required for a bank transfer.',
         ];
     }
 }

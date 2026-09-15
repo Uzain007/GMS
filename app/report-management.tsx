@@ -160,7 +160,7 @@ export function ReportManagement({ data }: { data: ReportData }) {
       </form>
     </div>
 
-    <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Tenant-safe live report</strong><small>Laravel validates this gym, caps the date range and keeps every currency separate. Cached aggregates expire after 60 seconds.</small></span><button className="secondary-button" onClick={data.onReload} disabled={data.loading}><RefreshCw className={data.loading ? "spin" : ""} size={14} /> Refresh</button></div>
+    <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Your gym report</strong><small>Figures use the selected date range and keep each currency separate.</small></span><button className="secondary-button" onClick={data.onReload} disabled={data.loading}><RefreshCw className={data.loading ? "spin" : ""} size={14} /> Refresh</button></div>
 
     {!report ? <EmptyReport error={data.error} loading={data.loading} onReload={data.onReload} /> : <>
       {data.error && <div className="form-error" role="alert">{data.error}</div>}

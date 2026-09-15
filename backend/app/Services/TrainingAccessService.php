@@ -6,10 +6,13 @@ use App\Enums\TrainerAssignmentStatus;
 use App\Enums\StaffStatus;
 use App\Enums\UserRole;
 use App\Models\Member;
+use App\Models\Membership;
 use App\Models\StaffProfile;
 use App\Models\TrainerMemberAssignment;
 use App\Models\User;
 use App\Models\WorkoutPlan;
+use App\Enums\MembershipStatus;
+use Illuminate\Validation\ValidationException;
 use App\Tenancy\TenantContext;
 
 class TrainingAccessService
@@ -34,6 +37,7 @@ class TrainingAccessService
             if ($requestedMemberId && $requestedMemberId !== $member->getKey()) {
                 abort(403, 'Members may access only their own training records.');
             }
+            $this->assertMemberBenefitsAvailable($member);
             return $member;
         }
 
@@ -65,6 +69,7 @@ class TrainingAccessService
         $role = $this->role($actor);
         if ($role === UserRole::Member) {
             abort_unless($member->user_id === $actor->getKey(), 403, 'Members may access only themselves.');
+            $this->assertMemberBenefitsAvailable($member);
         } elseif ($role === UserRole::Trainer) {
             $trainer = StaffProfile::query()->with('user')->where('user_id', $actor->getKey())->firstOrFail();
             $this->assertActiveTrainer($trainer);
@@ -77,6 +82,7 @@ class TrainingAccessService
         $role = $this->role($actor);
         if ($role === UserRole::Member) {
             $member = Member::query()->where('user_id', $actor->getKey())->firstOrFail();
+            $this->assertMemberBenefitsAvailable($member);
             abort_unless(! $write && $plan->member_id === $member->getKey(), 403, 'Members cannot modify workout plans.');
         } elseif ($role === UserRole::Trainer) {
             $trainer = StaffProfile::query()->with('user')->where('user_id', $actor->getKey())->firstOrFail();
@@ -87,6 +93,20 @@ class TrainingAccessService
                 403,
                 'Trainer access requires the matching active assignment.',
             );
+        }
+    }
+
+    private function assertMemberBenefitsAvailable(Member $member): void
+    {
+        $membership = Membership::query()->where('member_id', $member->getKey())
+            ->where('status', MembershipStatus::Active->value)
+            ->whereDate('starts_at', '<=', today())
+            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', today()))
+            ->latest('starts_at')->first();
+        if ($membership?->billing_restricted_at) {
+            throw ValidationException::withMessages([
+                'membership' => ['Your membership payment is overdue. Please contact your gym.'],
+            ]);
         }
     }
 

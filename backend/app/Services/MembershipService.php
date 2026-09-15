@@ -77,6 +77,58 @@ class MembershipService
         });
     }
 
+    public function update(Membership $membership, array $data, User $actor, Request $request): Membership
+    {
+        return DB::transaction(function () use ($membership, $data, $actor, $request): Membership {
+            $locked = Membership::query()->lockForUpdate()->findOrFail($membership->getKey());
+            $before = $locked->toArray();
+            $reason = (string) $data['reason'];
+            unset($data['reason']);
+
+            if (isset($data['plan_id']) && $data['plan_id'] !== $locked->plan_id) {
+                // The replacement plan is tenant-scoped twice: the model concern
+                // and PostgreSQL RLS. Its accepted terms become the amended
+                // contract snapshot while the audit row preserves the original.
+                $plan = MembershipPlan::query()->findOrFail($data['plan_id']);
+                if ($plan->status !== PlanStatus::Active) {
+                    throw ValidationException::withMessages(['plan_id' => ['The selected plan is not active.']]);
+                }
+                if ($plan->branch_id && $locked->branch_id && $locked->branch_id !== $plan->branch_id) {
+                    throw ValidationException::withMessages(['plan_id' => ['The selected plan is not valid for this membership branch.']]);
+                }
+                $data = array_merge($data, [
+                    'branch_id' => $plan->branch_id ?? $locked->branch_id,
+                    'price_amount_minor' => $plan->price_amount_minor,
+                    'currency' => $plan->currency,
+                    'joining_fee_minor' => $plan->joining_fee_minor,
+                    'billing_interval' => $plan->billing_interval,
+                    'interval_count' => $plan->interval_count,
+                    'terms_snapshot' => $plan->terms,
+                ]);
+            }
+
+            $endsAt = array_key_exists('ends_at', $data) && $data['ends_at']
+                ? CarbonImmutable::parse($data['ends_at']) : $locked->ends_at;
+            $nextBilling = array_key_exists('next_billing_at', $data) && $data['next_billing_at']
+                ? CarbonImmutable::parse($data['next_billing_at']) : null;
+            if ($endsAt && $endsAt->lt($locked->starts_at)) {
+                throw ValidationException::withMessages(['ends_at' => ['The expiry date cannot be before the membership start date.']]);
+            }
+            if ($nextBilling && $nextBilling->lt($locked->starts_at)) {
+                throw ValidationException::withMessages(['next_billing_at' => ['The next billing date cannot be before the membership start date.']]);
+            }
+
+            if (($data['status'] ?? null) === MembershipStatus::Cancelled->value) {
+                $data['cancelled_at'] = now();
+                $data['auto_renew'] = false;
+            }
+            $locked->update($data);
+            $fresh = $locked->fresh();
+            $this->audit->record('membership.updated', $fresh, $actor, $before, $fresh->toArray(), $reason, $request);
+            return $fresh;
+        });
+    }
+
     private function nextBillingAt(MembershipPlan $plan, CarbonImmutable $startsAt): ?CarbonImmutable
     {
         if ($plan->billing_interval === BillingInterval::OneTime) {
