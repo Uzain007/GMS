@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.57.0 — member billing lifecycle, contract amendments and role session limits |
-| Last verified | 14 September 2026 |
+| MAD version | 0.58.0 — complete provider-optional platform SaaS billing workflow |
+| Last verified | 15 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Member billing lifecycle, audited contract amendments, payment dates, role session limits and shared UI readability implemented locally; approval pending |
+| Active milestone | Complete tenant-safe SaaS plan selection, invoicing, manual review, dunning and platform billing operations implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -567,17 +567,18 @@ Stripe subscriptions are activated only by signed provider events. Cash and bank
 | --- | --- | --- | --- |
 | `id`, `gym_id` | uuid | no | tenant identity, gym FK, unique `(gym_id, id)` and forced RLS |
 | `saas_plan_price_id` | uuid | no | platform catalogue price FK; amount/currency copied server-side; renewal submissions derive it from the selected invoice |
-| `gym_subscription_id`, `saas_billing_invoice_id` | uuid | yes | tenant-composite links created only after approval |
+| `gym_subscription_id`, `saas_billing_invoice_id` | uuid | yes | tenant-composite links to the selected contract/invoice; first-payment invoices are prepared before evidence submission |
 | `submitted_by`, `reviewed_by` | uuid | mixed | authenticated actor FKs; only `super_admin` may review |
 | `method`, `status` | varchar | no | `cash`/`bank_transfer`; `pending`/`paid`/`rejected` |
 | `amount_minor`, `refunded_amount_minor`, `currency` | unsigned bigint/char(3) | no | immutable selected SaaS price snapshot plus append-only refund total |
-| `idempotency_key`, `reference` | varchar | no | tenant-unique retry key and bounded bank/cash reference |
-| `payment_date` | date | yes | required for bank transfer and retained as submitted settlement evidence |
+| `idempotency_key`, `reference` | varchar | no/yes | tenant-unique retry key; bank reference required while cash reference is optional |
+| `payment_date` | date | yes | required for both methods and presented as transfer date for bank or payment date for cash |
+| `notes` | text | yes | bounded optional submitter context; never provider credentials |
 | receipt metadata | mixed | yes | private tenant-prefixed PDF/image locator, digest, MIME and size; required for bank transfer |
 | `reviewed_at`, `review_reason`, `paid_at` | mixed | yes | mandatory decision evidence and settlement time |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status, method and price indexes |
 
-Manual subscription payments never enter the gym-member `payments` table. One pending manual request is allowed per gym. Approval creates a manual platform billing customer, an Active snapshotted gym subscription and a Paid SaaS billing invoice atomically, moves a Trial/Past-due tenant to Active, clears its trial end and records the paid period start/end; rejection preserves the evidence without granting service. Signed paid or failed Stripe invoices apply the same Active/Past-due tenant lifecycle. Suspended and Cancelled tenant states remain explicit Super Admin overrides and are never reopened by billing automation.
+Manual subscription payments never enter the gym-member `payments` table. Selecting cash or bank first creates an idempotent Incomplete manual contract plus a visible numbered invoice from the authoritative price; evidence is then linked to that invoice. One pending manual request is allowed per gym. Approval atomically marks the invoice Paid and the subscription Active, moves a Trial/Past-due tenant to Active, clears its trial end and records the paid period start/end; rejection preserves invoice/evidence without granting service and allows a corrected resubmission. Signed paid or failed Stripe invoices apply the same Active/Past-due tenant lifecycle. Suspended and Cancelled tenant states remain explicit Super Admin overrides and are never reopened by billing automation.
 
 ### `saas_payment_corrections` — append-only SaaS payment annotations
 
@@ -899,7 +900,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/platform/members/export` | authenticated `super_admin` only | Dedicated audited cross-gym CSV export that enters each gym explicitly and never disables ordinary tenant scope |
 | GET | `/platform/member-directory` | authenticated `super_admin` only | Search/filter the cross-gym member directory through explicit per-gym tenant contexts with bounded pagination |
 | GET | `/platform/member-directory/export?format=csv\|xlsx` | authenticated `super_admin` only | Audited export of selected or filtered directory rows without granting tenant operators cross-gym access |
-| GET | `/platform/billing` | authenticated `super_admin` only | Return central SaaS metrics plus filterable subscription and invoice projections grouped by immutable currency |
+| GET | `/platform/billing` | authenticated `super_admin` only | Return central SaaS metrics plus filterable subscription, invoice and manual-payment review projections grouped by immutable currency |
 | GET | `/platform/analytics` | authenticated `super_admin` only | Return date-bounded gym, member, plan and SaaS revenue trends from authoritative records |
 | GET | `/platform/audit-log[?format=csv\|xlsx\|pdf]` | authenticated `super_admin`; request-bound database identity | Search, filter, paginate or export the existing platform-wide audit history; the default window is 365 days |
 | GET/POST | `/gyms/{gym}/staff` | tenant; owner/manager | List staff or create an immediate trainer profile/account using server-fixed trainer role and a tenant-validated branch |
@@ -931,7 +932,9 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/saas-plans` | tenant; owner/manager/super admin | List active platform tiers and prices available to the selected gym |
 | GET | `/gyms/{gym}/saas-subscription` | tenant; owner/manager/super admin | Read the selected gym's current snapshotted subscription and customer state |
 | GET | `/gyms/{gym}/saas-billing-invoices` | tenant; owner/manager/super admin | List bounded recurring invoice history with provider-hosted document links |
-| GET | `/gyms/{gym}/saas-subscription/payment-options` | tenant; owner/manager/super admin | Return safe platform Stripe configuration state while cash/bank remain independent |
+| POST | `/gyms/{gym}/saas-billing-invoices` | tenant; `super_admin`; mandatory reason | Publish one idempotent invoice for an explicitly selected gym and authoritative plan price |
+| POST | `/gyms/{gym}/saas-subscription/manual-invoice` | tenant; owner/super admin | Select a manual plan/period and create the numbered idempotent invoice before cash/bank evidence submission |
+| GET | `/gyms/{gym}/saas-subscription/payment-options` | tenant; owner/manager/super admin | Return safe Stripe availability and configured IronCore platform bank instructions; never the gym member-payment account |
 | GET/POST | `/gyms/{gym}/saas-subscription/manual-payments` | tenant; reads owner/manager/super admin; writes owner/super admin | List or submit a tenant-scoped cash/bank SaaS payment using the authoritative price |
 | GET | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/receipt` | tenant; owner/manager/super admin | Stream the authorised private platform bank-transfer receipt |
 | GET | `/gyms/{gym}/saas-subscription/manual-payments/{payment}/ironcore-receipt` | tenant; owner/manager/super admin; settled only | Download a branded server-generated receipt with effective correction display values and retained refund totals |
@@ -1082,8 +1085,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Finance navigation is available to owners, managers and receptionists. All tenant collections use independent stale-response guards and are cleared immediately when the active gym changes.
 - The finance workspace labels Stripe as `Not configured` without blocking plans, cash or bank transfer. Online checkout is disabled until the optional deployment adapter and gym account are both active. Cash and terminal-card recording never request card details; refunds require an explicit amount and reason.
 - Member self-service derives amount, currency, membership and member identity from an open tenant invoice. It can upload a validated private bank receipt for review or open Stripe-hosted checkout when available; the browser cannot submit an arbitrary member or amount.
-- Gym subscription card Checkout and customer-portal sessions open only Stripe-hosted URLs returned for the selected gym. Billing methods, tax IDs and card details never pass through or persist in IronCore. Cash/bank choices instead create a separate tenant platform-payment record for Super Admin review.
-- Subscription collections, invoices and customer state use independent stale-response guards and are cleared immediately when the active gym changes. Gym Owners can pay an authoritative current renewal invoice by cash or bank transfer, see next billing/grace/restriction dates and retain billing-only access after restriction. The Super Admin portal exposes a real global member directory, central SaaS billing dashboard and date-filtered growth analytics; each cross-gym read enters explicit tenant context and never disables ordinary tenant scope.
+- Gym subscription card Checkout and customer-portal sessions open only Stripe-hosted URLs returned for the selected gym. Billing methods, tax IDs and card details never pass through or persist in IronCore. Cash/bank plan selection first prepares a numbered invoice and then creates a separate tenant platform-payment record for Super Admin review.
+- Plan catalogue loading is isolated from subscription, invoice, payment and provider-option failures, so an authorised owner still sees published matching-currency plans with a targeted retry message. Subscription collections, invoices and customer state retain independent stale-response guards and clear immediately when the active gym changes. Gym Owners can pay an authoritative current invoice by cash or bank transfer, see next billing/grace/restriction dates and retain billing-only access after restriction. The Super Admin portal exposes a real global member directory, central SaaS payment review/invoice dashboard and date-filtered growth analytics; each cross-gym read enters explicit tenant context and never disables ordinary tenant scope.
 - Attendance, class sessions and booking collections use independent stale-response guards and are cleared immediately when the active gym changes. Class form wall-clock values are converted with the selected gym's IANA timezone, and staff/member schedules render in that gym timezone rather than the device timezone. The same API-sourced numeric Member Code is shown on member lists/profiles, member self-service, the reception QR card and relevant coaching/attendance details; the long business reference is never presented as that visible code. QR/member-code inputs are held only long enough to submit one authenticated check-in request and are never written to browser storage. Reception camera scanning prefers a rear mobile camera, permits webcam/USB-camera selection, stops every media track on close and retains the exact numeric Member Code fallback when permission or QR detection is unavailable.
 - Training plans, workout sessions, progress measurements and notification preferences use independent stale-response guards and clear immediately on logout or tenant switch. Staff-entered workout and corrected-measurement wall-clock values are converted with the selected gym's IANA timezone before persistence. Management receives explicit view/edit/delete controls only when Laravel permits them; correction and safe deletion require reasons, and live charts exclude corrected/voided history. The browser never decides trainer/member scope and never stores notification destinations or health/progress history in local storage.
 - Reports use one independently guarded tenant request and clear immediately on logout or tenant switch. Date and currency filters are sent to Laravel, while all aggregation and scope decisions remain server-authoritative.
@@ -1132,6 +1135,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Production uses separate frontend, Laravel API, PostgreSQL 17, Redis and S3-compatible storage services; free frontend hosting is not a safe substitute for the stateful API/database/queue stack.
 - HTTPS, exact CORS/Sanctum origins, secure cookies, trusted proxy configuration and environment-only secrets are mandatory before launch.
 - Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs `ironcore:membership-billing` daily at 01:15 alongside the existing SaaS billing lifecycle, with overlap locks and the same PostgreSQL/Redis configuration as the web process.
+- Platform bank transfer is enabled only when `SAAS_BANK_ACCOUNT_NAME`, `SAAS_BANK_NAME` and `SAAS_BANK_ACCOUNT_NUMBER_OR_IBAN` are all configured; routing details and instructions are optional. These platform values are commercially and technically separate from every gym's encrypted member-payment bank settings.
 - The production backend image runs Caddy and PHP-FPM under Supervisor. Caddy binds to Railway's injected `PORT` (with `8000` only as an image-local fallback), serves Laravel exclusively from `public/` and forwards PHP requests to the private PHP-FPM listener. Local Docker Compose retains its explicit `php artisan serve` override.
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
 - Backups, point-in-time recovery, restore drills, provider webhook monitoring, failed-job alerts, centralised logs and error tracking are production launch gates.
@@ -1245,6 +1249,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Post-Milestone 26 — branch management workflow | Implemented locally; approval pending | Gym Admin branches now open a unified workspace for details, audited status changes, staff/trainer and member home-branch assignment, branch classes and attendance, plus deletion of empty non-primary branches. Inactive branches retain history and reject new check-ins, classes and bookings. |
 | IronCore Beta — Super Admin gym-owner account lifecycle | Implemented locally; approval pending | Replaces unusable random owner credentials with explicit secure invite or temporary-password onboarding, a mandatory first-login password gate, selected-tenant owner profile/access management, reasoned recovery/email/status actions, one-response password display, credential revocation and cross-gym denial. |
 | IronCore Beta — automated billing and platform intelligence | Implemented locally; approval pending | Guarantees one primary location for branch-limited gyms, automates manual SaaS renewal invoices and 15-day dunning/restriction, adds owner billing visibility, append-only payment corrections/refunds/voids, Super Admin billing/global-member/analytics workspaces, required bank-transfer dates and shared responsive typography/modal/table fixes. |
+| IronCore Beta — complete SaaS billing workflow | Implemented locally; approval pending | Keeps the existing ledger and lifecycle, isolates catalogue loading failures, adds platform bank configuration, invoice-before-evidence manual plan selection, idempotent review, individual invoice publication, central payment review filters/actions and login-session overdue warnings without making Stripe mandatory. |
 
 ## Change control
 

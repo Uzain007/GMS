@@ -23,6 +23,7 @@ class SaasSubscriptionPaymentResource extends JsonResource
             'effective_reference' => $this->relationLoaded('corrections') ? ($this->corrections->reverse()->first(fn ($item) => $item->reference !== null)?->reference ?? $this->reference) : $this->reference,
             'effective_method' => $this->relationLoaded('corrections') ? ($this->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $this->method->value) : $this->method->value,
             'payment_date' => $this->payment_date?->toDateString(),
+            'notes' => $this->notes,
             'effective_payment_date' => $this->relationLoaded('corrections') ? ($this->corrections->reverse()->first(fn ($item) => $item->payment_date !== null)?->payment_date?->toDateString() ?? $this->payment_date?->toDateString()) : $this->payment_date?->toDateString(),
             'effective_amount_minor' => $this->relationLoaded('corrections') ? ($this->corrections->reverse()->first(fn ($item) => $item->amount_minor !== null)?->amount_minor ?? $this->amount_minor) : $this->amount_minor,
             'corrections' => $this->whenLoaded('corrections', fn () => $this->corrections->map(fn ($correction): array => [
@@ -50,6 +51,18 @@ class SaasSubscriptionPaymentResource extends JsonResource
             'receipt_original_name' => $this->receipt_original_name,
             'reviewed_at' => $this->reviewed_at,
             'review_reason' => $this->review_reason,
+            'submitted_by' => $this->whenLoaded('submittedBy', fn (): array => [
+                'id' => $this->submittedBy->id,
+                'name' => $this->submittedBy->name,
+                'email' => $this->submittedBy->email,
+            ]),
+            'invoice' => $this->whenLoaded('invoice', fn (): ?array => $this->invoice ? [
+                'id' => $this->invoice->id,
+                'number' => $this->invoice->number,
+                'period_start' => $this->invoice->period_start?->toIso8601String(),
+                'period_end' => $this->invoice->period_end?->toIso8601String(),
+                'due_at' => $this->invoice->due_at?->toIso8601String(),
+            ] : null),
             'paid_at' => $this->paid_at,
             'plan' => $this->whenLoaded('price', fn (): array => [
                 'id' => $this->price->plan->id,

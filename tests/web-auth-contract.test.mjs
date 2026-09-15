@@ -166,7 +166,8 @@ test("SaaS billing UI uses tenant-safe subscription, invoice, Checkout and porta
   }
   assert.match(client, /saas-subscription\/checkout/);
   assert.match(client, /saas-subscription\/portal/);
-  assert.match(app, /Promise\.all\(\[\s*api\.saasPlans/);
+  assert.match(app, /Promise\.allSettled\(\[\s*api\.saasPlans/);
+  assert.match(client, /saas-subscription\/manual-invoice/);
   assert.match(app, /setSaas\(\{ plans: \[\], subscription: null, invoices: \[\]/);
   assert.match(dashboard, /SaasBillingManagement data=\{liveSaasBilling\}/);
   assert.match(billing, /Money flows are isolated/);

@@ -98,7 +98,7 @@ type MemberSelfState = {
 const apiOrigin = process.env.NEXT_PUBLIC_IRONCORE_API_URL?.trim() ?? "";
 const demoMode = process.env.NEXT_PUBLIC_IRONCORE_DEMO_MODE === "true" || !apiOrigin;
 const emptyPaymentOptions: MemberPaymentOptions = { stripe_configured: false, stripe_available: false, bank_transfer_available: false, bank_transfer_details: null, cash_available_at_gym: true };
-const emptySaasPaymentOptions: SaasPaymentOptions = { stripe_configured: false, bank_transfer_available: true, cash_available: true };
+const emptySaasPaymentOptions: SaasPaymentOptions = { stripe_configured: false, bank_transfer_available: false, cash_available: true, platform_bank_details: null };
 const demoOperations: OperationData = {
   // Representative preview records stay inside demo mode. Authenticated mode
   // always replaces them with collections fetched for the explicitly selected
@@ -181,6 +181,7 @@ const demoFinance: FinanceData = {
   onReviewBankTransfer: async () => undefined, onLoadReceipt: async () => new Blob(),
   onConnectStripe: async () => "#demo-stripe", onRefreshStripe: async () => undefined,
 };
+const demoSaasInvoice: SaasBillingInvoiceRecord = { id: "saas-invoice-1", number: "IC-2026-0081", status: "paid", currency: "GBP", amount_due_minor: 7900, amount_paid_minor: 7900, amount_remaining_minor: 0, hosted_invoice_url: null, invoice_pdf_url: null, period_start: "2026-08-01T00:00:00Z", period_end: "2026-09-01T00:00:00Z", due_at: null, paid_at: "2026-08-01T00:02:00Z", created_at: "2026-08-01T00:00:00Z" };
 const demoSaasBilling: SaasBillingData = {
   readOnly: true,
   plans: [
@@ -190,12 +191,12 @@ const demoSaasBilling: SaasBillingData = {
   ],
   subscription: { id: "demo-saas-subscription", gym_id: "demo-gym", provider: "stripe", status: "active", plan_code: "growth", plan_name: "Growth", feature_limits: { members: 2500, branches: 3, staff: 30, advanced_reports: true, priority_support: false }, currency: "GBP", amount_minor: 7900, billing_interval: "monthly", current_period_start: "2026-08-01T00:00:00Z", current_period_end: "2026-09-01T00:00:00Z", trial_ends_at: null, cancel_at_period_end: false, cancelled_at: null, ended_at: null, failure_code: null, failure_message: null, billing_contact: { email: "owner@forge.example", name: "Forge Fitness" }, created_at: "2026-05-01T00:00:00Z" },
   invoices: [
-    { id: "saas-invoice-1", number: "IC-2026-0081", status: "paid", currency: "GBP", amount_due_minor: 7900, amount_paid_minor: 7900, amount_remaining_minor: 0, hosted_invoice_url: null, invoice_pdf_url: null, period_start: "2026-08-01T00:00:00Z", period_end: "2026-09-01T00:00:00Z", due_at: null, paid_at: "2026-08-01T00:02:00Z", created_at: "2026-08-01T00:00:00Z" },
+    demoSaasInvoice,
     { id: "saas-invoice-2", number: "IC-2026-0074", status: "paid", currency: "GBP", amount_due_minor: 7900, amount_paid_minor: 7900, amount_remaining_minor: 0, hosted_invoice_url: null, invoice_pdf_url: null, period_start: "2026-07-01T00:00:00Z", period_end: "2026-08-01T00:00:00Z", due_at: null, paid_at: "2026-07-01T00:02:00Z", created_at: "2026-07-01T00:00:00Z" },
   ],
-  payments: [], paymentOptions: { cash_available: true, bank_transfer_available: true, stripe_configured: true },
+  payments: [], paymentOptions: { cash_available: true, bank_transfer_available: false, stripe_configured: true, platform_bank_details: null },
   baseCurrency: "GBP", actorRole: "super_admin", loading: false, error: null,
-  onReload: () => undefined, onCheckout: async () => "", onManualPayment: async () => undefined, onReviewManualPayment: async () => undefined, onLoadManualReceipt: async () => new Blob(), onPortal: async () => "", onCreatePlan: async () => undefined,
+  onReload: () => undefined, onCheckout: async () => "", onPrepareManualInvoice: async () => demoSaasInvoice, onManualPayment: async () => undefined, onReviewManualPayment: async () => undefined, onLoadManualReceipt: async () => new Blob(), onPortal: async () => "", onCreatePlan: async () => undefined,
 };
 const demoEngagement: EngagementData = {
   readOnly: true,
@@ -864,9 +865,9 @@ export function IronCoreApp() {
     const sequence = ++saasSequence.current;
     const timer = window.setTimeout(() => {
       setSaas((current) => ({ ...current, loading: true, error: null }));
-      // Plan catalogue and tenant billing records load together, but only the
-      // latter are protected by the selected route/header tenant + forced RLS.
-      void Promise.all([
+      // The platform catalogue is independent from tenant billing history. A
+      // recoverable invoice/payment error must never hide published plans.
+      void Promise.allSettled([
         api.saasPlans(selectedGym.id),
         api.saasSubscription(selectedGym.id),
         api.saasBillingInvoices(selectedGym.id),
@@ -874,10 +875,19 @@ export function IronCoreApp() {
         api.saasPaymentOptions(selectedGym.id),
       ]).then(([plans, subscription, invoices, payments, paymentOptions]) => {
         if (sequence !== saasSequence.current) return;
-        setSaas({ plans, subscription, invoices: invoices.data, payments: payments.data, paymentOptions, loading: false, error: null });
-      }).catch((error) => {
-        if (sequence !== saasSequence.current) return;
-        setSaas((current) => ({ ...current, loading: false, error: apiMessage(error, "SaaS billing could not be loaded.") }));
+        const failures = [plans, subscription, invoices, payments, paymentOptions]
+          .filter((result): result is PromiseRejectedResult => result.status === "rejected");
+        setSaas((current) => ({
+          plans: plans.status === "fulfilled" ? plans.value : current.plans,
+          subscription: subscription.status === "fulfilled" ? subscription.value : current.subscription,
+          invoices: invoices.status === "fulfilled" ? invoices.value.data : current.invoices,
+          payments: payments.status === "fulfilled" ? payments.value.data : current.payments,
+          paymentOptions: paymentOptions.status === "fulfilled" ? paymentOptions.value : current.paymentOptions,
+          loading: false,
+          error: failures.length > 0
+            ? apiMessage(failures[0].reason, plans.status === "rejected" ? "Available plans could not be loaded." : "Some billing history is temporarily unavailable. Available plans remain selectable.")
+            : null,
+        }));
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -1258,9 +1268,9 @@ export function IronCoreApp() {
     return result.checkout_url;
   }
 
-  async function createSaasManualPayment(input: { priceId?: string; invoiceId?: string; method: "cash" | "bank_transfer"; reference: string; paymentDate?: string; idempotencyKey: string; receipt?: File }): Promise<void> {
+  async function createSaasManualPayment(input: { priceId?: string; invoiceId?: string; method: "cash" | "bank_transfer"; reference?: string; paymentDate?: string; notes?: string; idempotencyKey: string; receipt?: File }): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
-    await api.createSaasSubscriptionPayment(selectedGym.id, { saas_plan_price_id: input.priceId, saas_billing_invoice_id: input.invoiceId, method: input.method, reference: input.reference, payment_date: input.paymentDate, idempotency_key: input.idempotencyKey, receipt: input.receipt });
+    await api.createSaasSubscriptionPayment(selectedGym.id, { saas_plan_price_id: input.priceId, saas_billing_invoice_id: input.invoiceId, method: input.method, reference: input.reference, payment_date: input.paymentDate, notes: input.notes, idempotency_key: input.idempotencyKey, receipt: input.receipt });
     setSaasRefresh((value) => value + 1);
   }
 
@@ -1467,6 +1477,12 @@ export function IronCoreApp() {
     onLoadMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembers(params); },
     onExportMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembersExport(params); },
     onLoadBilling: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformBilling(params); },
+    onCreateSaasInvoice: async (gymId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.createSaasInvoice(gymId, input); },
+    onReviewSaasPayment: async (gymId, paymentId, decision, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.reviewSaasSubscriptionPayment(gymId, paymentId, decision, reason); },
+    onLoadSaasPaymentReceipt: (gymId, paymentId) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasSubscriptionPaymentReceipt(gymId, paymentId); },
+    onCorrectSaasPayment: async (gymId, paymentId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.correctSaasSubscriptionPayment(gymId, paymentId, input); },
+    onRefundSaasPayment: async (gymId, paymentId, amountMinor, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.refundSaasSubscriptionPayment(gymId, paymentId, amountMinor, reason); },
+    onVoidSaasInvoice: async (gymId, invoiceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.voidSaasInvoice(gymId, invoiceId, reason); },
     onLoadAnalytics: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAnalytics(params); },
     onLoadAudit: (filters) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAuditLog(filters); },
     onExportAudit: async (format, filters) => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformAuditExport(format, filters), `ironcore-audit-log.${format}`); },
@@ -1550,6 +1566,10 @@ export function IronCoreApp() {
     error: saas.error,
     onReload: () => setSaasRefresh((value) => value + 1),
     onCheckout: startSaasCheckout,
+    onPrepareManualInvoice: async (priceId, method, idempotencyKey) => {
+      if (!api || !selectedGym) throw new Error("Select a gym first.");
+      return api.prepareSaasSubscriptionInvoice(selectedGym.id, { saas_plan_price_id: priceId, method, idempotency_key: idempotencyKey });
+    },
     onManualPayment: createSaasManualPayment,
     onReviewManualPayment: reviewSaasManualPayment,
     onLoadManualReceipt: loadSaasManualReceipt,

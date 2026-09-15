@@ -19,7 +19,7 @@ class SaasSubscriptionPayment extends Model
         'gym_id', 'saas_plan_price_id', 'gym_subscription_id',
         'saas_billing_invoice_id', 'submitted_by', 'reviewed_by', 'method',
         'status', 'amount_minor', 'currency', 'idempotency_key', 'reference',
-        'payment_date', 'refunded_amount_minor',
+        'payment_date', 'notes', 'refunded_amount_minor',
         'receipt_disk', 'receipt_path', 'receipt_original_name',
         'receipt_mime_type', 'receipt_size_bytes', 'receipt_sha256',
         'reviewed_at', 'review_reason', 'paid_at',

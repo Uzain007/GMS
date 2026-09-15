@@ -9,6 +9,7 @@ use App\Models\GymBranch;
 use App\Models\Member;
 use App\Models\MembershipPlan;
 use App\Models\SaasBillingInvoice;
+use App\Models\SaasSubscriptionPayment;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -23,16 +24,17 @@ class PlatformInsightsService
         $gyms = $this->gyms($filters['gym_id'] ?? null);
         $subscriptions = collect();
         $invoices = collect();
+        $payments = collect();
 
         foreach ($gyms as $gym) {
-            $this->tenant->run($gym, function () use ($gym, $filters, $subscriptions, $invoices): void {
+            $this->tenant->run($gym, function () use ($gym, $filters, $subscriptions, $invoices, $payments): void {
                 $subscription = GymSubscription::query()->latest()->first();
                 $search = mb_strtolower(trim((string) ($filters['search'] ?? '')));
                 $gymMatches = $search === '' || str_contains(mb_strtolower($gym->name), $search);
                 $subscriptionMatches = $subscription
                     && (empty($filters['plan_id']) || $subscription->saas_plan_id === $filters['plan_id'])
                     && (empty($filters['currency']) || $subscription->currency->value === $filters['currency'])
-                    && (empty($filters['status']) || $subscription->status->value === $filters['status'])
+                    && (empty($filters['subscription_status']) || $subscription->status->value === $filters['subscription_status'])
                     && ($gymMatches || str_contains(mb_strtolower($subscription->plan_name_snapshot), $search));
                 if ($subscriptionMatches) {
                     $subscriptions->push($this->subscriptionRow($gym, $subscription));
@@ -43,8 +45,9 @@ class PlatformInsightsService
                     $query->where(fn ($q) => $q->whereRaw('LOWER(number) LIKE ?', [$like])
                         ->orWhereHas('subscription', fn ($subscriptionQuery) => $subscriptionQuery->whereRaw('LOWER(plan_name_snapshot) LIKE ?', [$like])));
                 }
-                if (! empty($filters['status'])) {
-                    $query->where('status', $filters['status']);
+                $invoiceStatus = $filters['invoice_status'] ?? $filters['status'] ?? null;
+                if (! empty($invoiceStatus)) {
+                    $query->where('status', $invoiceStatus);
                 }
                 if (! empty($filters['currency'])) {
                     $query->where('currency', $filters['currency']);
@@ -60,6 +63,38 @@ class PlatformInsightsService
                 }
                 foreach ($query->get() as $invoice) {
                     $invoices->push($this->invoiceRow($gym, $invoice));
+                }
+
+                $paymentQuery = SaasSubscriptionPayment::query()
+                    ->with(['price.plan', 'invoice', 'submittedBy:id,name,email', 'corrections', 'refunds'])
+                    ->orderByDesc('created_at');
+                if ($search !== '' && ! $gymMatches) {
+                    $like = '%'.addcslashes($search, '%_\\').'%';
+                    $paymentQuery->where(fn ($q) => $q->whereRaw('LOWER(reference) LIKE ?', [$like])
+                        ->orWhereHas('price.plan', fn ($planQuery) => $planQuery->whereRaw('LOWER(name) LIKE ?', [$like]))
+                        ->orWhereHas('invoice', fn ($invoiceQuery) => $invoiceQuery->whereRaw('LOWER(number) LIKE ?', [$like]))
+                        ->orWhereHas('submittedBy', fn ($userQuery) => $userQuery->whereRaw('LOWER(name) LIKE ?', [$like])));
+                }
+                if (! empty($filters['payment_status'])) {
+                    $paymentQuery->where('status', $filters['payment_status']);
+                }
+                if (! empty($filters['payment_method'])) {
+                    $paymentQuery->where('method', $filters['payment_method']);
+                }
+                if (! empty($filters['currency'])) {
+                    $paymentQuery->where('currency', $filters['currency']);
+                }
+                if (! empty($filters['plan_id'])) {
+                    $paymentQuery->whereHas('price', fn ($q) => $q->where('saas_plan_id', $filters['plan_id']));
+                }
+                if (! empty($filters['from'])) {
+                    $paymentQuery->whereDate('created_at', '>=', $filters['from']);
+                }
+                if (! empty($filters['to'])) {
+                    $paymentQuery->whereDate('created_at', '<=', $filters['to']);
+                }
+                foreach ($paymentQuery->get() as $payment) {
+                    $payments->push($this->paymentRow($gym, $payment));
                 }
             });
         }
@@ -93,6 +128,7 @@ class PlatformInsightsService
             ],
             'subscriptions' => $subscriptions->values()->all(),
             'invoices' => $invoices->values()->all(),
+            'payments' => $payments->values()->all(),
         ];
     }
 
@@ -298,6 +334,48 @@ class PlatformInsightsService
             'period_start' => $invoice->period_start?->toIso8601String(), 'period_end' => $invoice->period_end?->toIso8601String(),
             'due_at' => $invoice->due_at?->toIso8601String(), 'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String(),
             'paid_at' => $invoice->paid_at?->toIso8601String(),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function paymentRow(Gym $gym, SaasSubscriptionPayment $payment): array
+    {
+        $effectiveReference = $payment->corrections->reverse()->first(fn ($item) => $item->reference !== null)?->reference ?? $payment->reference;
+        $effectiveMethod = $payment->corrections->reverse()->first(fn ($item) => $item->method !== null)?->method?->value ?? $payment->method->value;
+        $effectiveDate = $payment->corrections->reverse()->first(fn ($item) => $item->payment_date !== null)?->payment_date?->toDateString()
+            ?? $payment->payment_date?->toDateString();
+        $effectiveAmount = $payment->corrections->reverse()->first(fn ($item) => $item->amount_minor !== null)?->amount_minor ?? $payment->amount_minor;
+
+        return [
+            'id' => $payment->id,
+            'gym_id' => $gym->id,
+            'gym_name' => $gym->name,
+            'plan_name' => $payment->price?->plan?->name,
+            'billing_interval' => $payment->price?->billing_interval,
+            'invoice_id' => $payment->invoice?->id,
+            'invoice_number' => $payment->invoice?->number,
+            'method' => $payment->method->value,
+            'effective_method' => $effectiveMethod,
+            'status' => $payment->status->value,
+            'amount_minor' => $payment->amount_minor,
+            'effective_amount_minor' => $effectiveAmount,
+            'refunded_amount_minor' => $payment->refunded_amount_minor,
+            'currency' => $payment->currency->value,
+            'reference' => $payment->reference,
+            'effective_reference' => $effectiveReference,
+            'payment_date' => $payment->payment_date?->toDateString(),
+            'effective_payment_date' => $effectiveDate,
+            'notes' => $payment->notes,
+            'has_receipt' => filled($payment->receipt_path),
+            'submitted_by' => $payment->submittedBy ? [
+                'id' => $payment->submittedBy->id,
+                'name' => $payment->submittedBy->name,
+                'email' => $payment->submittedBy->email,
+            ] : null,
+            'review_reason' => $payment->review_reason,
+            'correction_count' => $payment->corrections->count(),
+            'refund_count' => $payment->refunds->count(),
+            'created_at' => $payment->created_at?->toIso8601String(),
         ];
     }
 }

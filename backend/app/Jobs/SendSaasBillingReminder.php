@@ -47,7 +47,9 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
             }
 
             $invoice = $notification->invoice;
-            $days = max(0, now()->startOfDay()->diffInDays($invoice->grace_ends_at?->startOfDay() ?? now(), false));
+            $localNow = now($gym->timezone);
+            $graceEnd = $invoice->grace_ends_at?->copy()->setTimezone($gym->timezone)->startOfDay() ?? $localNow;
+            $days = max(0, $localNow->copy()->startOfDay()->diffInDays($graceEnd, false));
             $amount = number_format($invoice->amount_remaining_minor / 100, 2).' '.$invoice->currency->value;
             $warning = $days > 0
                 ? "Payment is required within {$days} days to avoid service interruption."

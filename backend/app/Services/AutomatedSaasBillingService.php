@@ -46,9 +46,11 @@ class AutomatedSaasBillingService
     public function processTenant(Gym $gym): array
     {
         $result = ['invoices_created' => 0, 'reminders_queued' => 0, 'restricted' => 0];
+        $localNow = now($gym->timezone);
 
-        DB::transaction(function () use ($gym, &$result): void {
+        DB::transaction(function () use ($gym, $localNow, &$result): void {
             $subscription = GymSubscription::query()->whereIn('status', [
+                SaasSubscriptionStatus::Incomplete->value,
                 SaasSubscriptionStatus::Trialing->value,
                 SaasSubscriptionStatus::Active->value,
                 SaasSubscriptionStatus::PastDue->value,
@@ -113,7 +115,8 @@ class AutomatedSaasBillingService
                     continue;
                 }
 
-                $pastDue = $invoice->due_at->isBefore(now()->startOfDay());
+                $pastDue = $invoice->due_at->copy()->setTimezone($gym->timezone)
+                    ->isBefore($localNow->copy()->startOfDay());
                 $target = $pastDue ? SaasInvoiceStatus::PastDue : SaasInvoiceStatus::Due;
                 if ($invoice->status !== $target) {
                     $beforeStatus = $invoice->status->value;
@@ -126,17 +129,26 @@ class AutomatedSaasBillingService
                 $overrideActive = $subscription->billing_override_until?->isFuture() === true;
                 if ($pastDue && ! $overrideActive) {
                     if ($subscription->status !== SaasSubscriptionStatus::PastDue) {
+                        $beforeStatus = $subscription->status->value;
                         $subscription->update(['status' => SaasSubscriptionStatus::PastDue]);
                         $this->gymStatus->synchronize($gym, SaasSubscriptionStatus::PastDue, reason: 'Automated SaaS invoice overdue lifecycle.');
+                        $this->audit->record('saas.subscription.grace_started', $subscription->fresh(), null,
+                            before: ['status' => $beforeStatus],
+                            after: [
+                                'status' => SaasSubscriptionStatus::PastDue->value,
+                                'invoice_id' => $invoice->id,
+                                'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String(),
+                            ], reason: 'The SaaS invoice passed its due date.');
                     }
                 }
                 // Owners are notified on the due date and daily while overdue;
                 // the unique tenant key makes repeated scheduler runs harmless.
-                if ($this->queueOwnerReminder($gym, $invoice, $pastDue ? 'saas_invoice_overdue' : 'saas_invoice_due')) {
+                if ($this->queueOwnerReminder($gym, $invoice, $pastDue ? 'saas_invoice_overdue' : 'saas_invoice_due', $localNow)) {
                     $result['reminders_queued']++;
                 }
 
-                if ($invoice->grace_ends_at?->isPast() && ! $overrideActive && ! $subscription->billing_restricted_at) {
+                if ($invoice->grace_ends_at?->copy()->setTimezone($gym->timezone)->isBefore($localNow)
+                    && ! $overrideActive && ! $subscription->billing_restricted_at) {
                     $subscription->update(['billing_restricted_at' => now()]);
                     $this->audit->record('saas.subscription.billing_restricted', $subscription->fresh(), null, after: [
                         'invoice_id' => $invoice->id,
@@ -178,7 +190,7 @@ class AutomatedSaasBillingService
         );
     }
 
-    private function queueOwnerReminder(Gym $gym, SaasBillingInvoice $invoice, string $template): bool
+    private function queueOwnerReminder(Gym $gym, SaasBillingInvoice $invoice, string $template, Carbon $localNow): bool
     {
         $owner = $gym->users()->wherePivot('role', UserRole::GymOwner->value)
             ->wherePivot('status', 'active')->orderBy('users.id')->first();
@@ -186,7 +198,8 @@ class AutomatedSaasBillingService
             return false;
         }
 
-        $key = implode(':', [$template, $invoice->id, now()->toDateString(), $owner->id]);
+        $notificationDate = $localNow->toDateString();
+        $key = implode(':', [$template, $invoice->id, $notificationDate, $owner->id]);
         $notification = SaasBillingNotification::query()->firstOrCreate(
             ['idempotency_key' => $key],
             [
@@ -194,7 +207,7 @@ class AutomatedSaasBillingService
                 'recipient_user_id' => $owner->id,
                 'destination' => $owner->email,
                 'template_key' => $template,
-                'notification_date' => now()->toDateString(),
+                'notification_date' => $notificationDate,
                 'status' => 'queued',
             ],
         );

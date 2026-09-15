@@ -36,6 +36,18 @@ class SaasOptionalPaymentPublishingTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['platform_billing.bank_transfer' => [
+            'account_name' => 'IronCore Test Platform',
+            'bank_name' => 'Test Bank',
+            'account_number_or_iban' => 'GB00TEST00000000000000',
+            'routing_details' => '00-00-00',
+            'payment_instructions' => 'Use the SaaS invoice number.',
+        ]]);
+    }
+
     public function test_super_admin_can_publish_and_list_a_saas_plan_without_stripe_configuration(): void
     {
         $this->disableStripe();
@@ -469,14 +481,20 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         });
 
         app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
+        app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
         $invoice = app(TenantContext::class)->run($gym, fn () => SaasBillingInvoice::query()->where('status', 'due')->firstOrFail());
-        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, SaasBillingNotification::query()->count()));
+        app(TenantContext::class)->run($gym, function (): void {
+            $this->assertSame(1, SaasBillingInvoice::query()->count());
+            $this->assertSame(1, SaasBillingNotification::query()->count());
+        });
 
         $this->travel(16)->days();
+        app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
         app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
         $subscription = app(TenantContext::class)->run($gym, fn () => GymSubscription::query()->latest()->firstOrFail());
         $this->assertNotNull($subscription->billing_restricted_at);
         $this->assertSame(SaasSubscriptionStatus::PastDue, $subscription->status);
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, AuditLog::query()->where('event', 'saas.subscription.billing_restricted')->count()));
 
         Sanctum::actingAs($owner);
         $this->getJson("/api/v1/gyms/{$gym->id}/members", ['X-Gym-ID' => $gym->id])->assertStatus(402);

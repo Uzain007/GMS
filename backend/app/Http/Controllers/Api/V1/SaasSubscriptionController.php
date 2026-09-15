@@ -6,6 +6,8 @@ use App\Enums\SaasPlanStatus;
 use App\Enums\SaasSubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StartSaasCheckoutRequest;
+use App\Http\Requests\PrepareSaasSubscriptionInvoiceRequest;
+use App\Http\Requests\StoreSaasBillingInvoiceRequest;
 use App\Http\Requests\CorrectSaasSubscriptionPaymentRequest;
 use App\Http\Requests\StoreSaasSubscriptionPaymentRequest;
 use App\Http\Requests\ReviewSaasSubscriptionPaymentRequest;
@@ -54,8 +56,7 @@ class SaasSubscriptionController extends Controller
     {
         $subscription = GymSubscription::query()
             ->whereNotIn('status', [SaasSubscriptionStatus::Cancelled->value, SaasSubscriptionStatus::IncompleteExpired->value])
-            ->with('customer')->latest()->first()
-            ?? GymSubscription::query()->with('customer')->latest()->first();
+            ->with('customer')->latest()->first();
 
         return $subscription
             ? new GymSubscriptionResource($subscription)
@@ -71,10 +72,21 @@ class SaasSubscriptionController extends Controller
 
     public function paymentOptions(StripePlatformBillingService $stripe): JsonResponse
     {
+        $bank = (array) config('platform_billing.bank_transfer', []);
+        $configured = collect(['account_name', 'bank_name', 'account_number_or_iban'])
+            ->every(fn (string $key): bool => filled($bank[$key] ?? null));
+
         return response()->json(['data' => [
             'cash_available' => true,
-            'bank_transfer_available' => true,
+            'bank_transfer_available' => $configured,
             'stripe_configured' => $stripe->checkoutConfigured(),
+            'platform_bank_details' => $configured ? [
+                'account_name' => $bank['account_name'],
+                'bank_name' => $bank['bank_name'],
+                'account_number_or_iban' => $bank['account_number_or_iban'],
+                'routing_details' => filled($bank['routing_details'] ?? null) ? $bank['routing_details'] : null,
+                'payment_instructions' => filled($bank['payment_instructions'] ?? null) ? $bank['payment_instructions'] : null,
+            ] : null,
         ]]);
     }
 
@@ -82,7 +94,7 @@ class SaasSubscriptionController extends Controller
     {
         return SaasSubscriptionPaymentResource::collection(
             SaasSubscriptionPayment::query()
-                ->with(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
+                ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
                 ->orderByDesc('created_at')
                 ->paginate(25)
         );
@@ -189,7 +201,41 @@ class SaasSubscriptionController extends Controller
         );
 
         return response()->json([
-            'data' => (new SaasSubscriptionPaymentResource($result['payment']))->resolve($request),
+            'data' => (new SaasSubscriptionPaymentResource($result['payment']->loadMissing([
+                'price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name',
+            ])))->resolve($request),
+            'meta' => ['idempotency_reused' => $result['reused']],
+        ], $result['reused'] ? 200 : 201);
+    }
+
+    public function storeInvoice(
+        StoreSaasBillingInvoiceRequest $request,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): JsonResponse {
+        $price = SaasPlanPrice::query()->with('plan')->findOrFail($request->validated('saas_plan_price_id'));
+        $result = $billing->createManualInvoice(
+            $context->gym(), $price, $request->validated(), $request->user(), $request,
+        );
+
+        return response()->json([
+            'data' => (new SaasBillingInvoiceResource($result['invoice']))->resolve($request),
+            'meta' => ['idempotency_reused' => $result['reused']],
+        ], $result['reused'] ? 200 : 201);
+    }
+
+    public function prepareInvoice(
+        PrepareSaasSubscriptionInvoiceRequest $request,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): JsonResponse {
+        $price = SaasPlanPrice::query()->with('plan')->findOrFail($request->validated('saas_plan_price_id'));
+        $result = $billing->prepareManualInvoice(
+            $context->gym(), $price, $request->validated(), $request->user(), $request,
+        );
+
+        return response()->json([
+            'data' => (new SaasBillingInvoiceResource($result['invoice']))->resolve($request),
             'meta' => ['idempotency_reused' => $result['reused']],
         ], $result['reused'] ? 200 : 201);
     }

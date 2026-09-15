@@ -205,7 +205,7 @@ class SaasBillingService
     ): array {
         $existing = SaasSubscriptionPayment::query()
             ->where('idempotency_key', $data['idempotency_key'])
-            ->with('price.plan')
+            ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
             ->first();
         if ($existing) {
             return ['payment' => $existing, 'reused' => true];
@@ -233,6 +233,9 @@ class SaasBillingService
         if (! in_array($method->value, $price->plan->payment_methods ?? [], true)) {
             throw ValidationException::withMessages(['method' => ['This payment method is not available for the selected SaaS plan.']]);
         }
+        if ($method === PaymentMethod::BankTransfer && ! $this->platformBankTransferConfigured()) {
+            throw ValidationException::withMessages(['method' => ['IronCore bank-transfer details are not configured. Choose cash or card instead.']]);
+        }
         if ($method === PaymentMethod::BankTransfer && ! $receipt) {
             throw ValidationException::withMessages(['receipt' => ['A bank-transfer receipt is required.']]);
         }
@@ -256,8 +259,9 @@ class SaasBillingService
                     'amount_minor' => $invoice?->amount_remaining_minor ?? $price->amount_minor,
                     'currency' => $invoice?->currency ?? $price->currency,
                     'idempotency_key' => $data['idempotency_key'],
-                    'reference' => trim((string) $data['reference']),
+                    'reference' => filled($data['reference'] ?? null) ? trim((string) $data['reference']) : null,
                     'payment_date' => $data['payment_date'] ?? null,
+                    'notes' => filled($data['notes'] ?? null) ? trim((string) $data['notes']) : null,
                 ]);
 
                 if ($receipt) {
@@ -279,12 +283,13 @@ class SaasBillingService
                         'saas_billing_invoice_id' => $invoice?->id,
                         'reference' => $payment->reference,
                         'payment_date' => $payment->payment_date?->toDateString(),
+                        'notes_present' => filled($payment->notes),
                         'has_receipt' => (bool) $receipt,
                     ],
                     request: $request,
                 );
 
-                return $payment->fresh()->load('price.plan');
+                return $payment->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
             });
         } catch (Throwable $exception) {
             if ($stored) {
@@ -294,6 +299,133 @@ class SaasBillingService
         }
 
         return ['payment' => $payment, 'reused' => false];
+    }
+
+    /** @return array{invoice:SaasBillingInvoice,reused:bool} */
+    public function prepareManualInvoice(
+        Gym $gym,
+        SaasPlanPrice $price,
+        array $data,
+        User $actor,
+        Request $request,
+    ): array {
+        $price->loadMissing('plan');
+        $method = PaymentMethod::from($data['method']);
+        if (! in_array($method->value, $price->plan->payment_methods ?? [], true)) {
+            throw ValidationException::withMessages(['method' => ['This payment method is not available for the selected SaaS plan.']]);
+        }
+        if ($method === PaymentMethod::BankTransfer && ! $this->platformBankTransferConfigured()) {
+            throw ValidationException::withMessages(['method' => ['IronCore bank-transfer details are not configured. Choose cash or card instead.']]);
+        }
+
+        // Preparing the invoice before evidence is submitted gives the owner
+        // an authoritative number/reference without trusting client pricing.
+        return $this->createManualInvoice($gym, $price, [
+            'amount_minor' => $price->amount_minor,
+            'currency' => $price->currency->value,
+            'due_date' => now($gym->timezone)->toDateString(),
+            'idempotency_key' => $data['idempotency_key'],
+            'reason' => 'Gym owner selected '.$price->plan->name.' for '.$method->value.' settlement.',
+        ], $actor, $request);
+    }
+
+    /** @return array{invoice:SaasBillingInvoice,reused:bool} */
+    public function createManualInvoice(
+        Gym $gym,
+        SaasPlanPrice $price,
+        array $data,
+        User $actor,
+        Request $request,
+    ): array {
+        $price->loadMissing('plan');
+        $this->assertSelectablePrice($gym, $price);
+        if ((int) $data['amount_minor'] !== $price->amount_minor || $data['currency'] !== $price->currency->value) {
+            throw ValidationException::withMessages([
+                'amount_minor' => ['The invoice amount and currency must match the selected published price.'],
+            ]);
+        }
+
+        $providerId = 'ironcore_issued_'.hash('sha256', $gym->id.'|'.$data['idempotency_key']);
+        $existing = SaasBillingInvoice::query()->where('provider_invoice_id', $providerId)->first();
+        if ($existing) {
+            return ['invoice' => $existing, 'reused' => true];
+        }
+
+        return DB::transaction(function () use ($gym, $price, $data, $actor, $request, $providerId): array {
+            $subscription = $this->currentSubscription();
+            if ($subscription) {
+                if ($subscription->provider !== PaymentProvider::Manual) {
+                    throw ValidationException::withMessages(['subscription' => ['Stripe-managed subscriptions must use Stripe invoices.']]);
+                }
+                if ($subscription->saas_plan_price_id !== $price->id) {
+                    throw ValidationException::withMessages(['saas_plan_price_id' => ['The selected price must match the gym’s current subscription.']]);
+                }
+                $openInvoice = SaasBillingInvoice::query()->where('gym_subscription_id', $subscription->id)
+                    ->whereIn('status', [SaasInvoiceStatus::Draft->value, SaasInvoiceStatus::Upcoming->value, SaasInvoiceStatus::Due->value, SaasInvoiceStatus::PastDue->value, SaasInvoiceStatus::Open->value])
+                    ->lockForUpdate()->first();
+                if ($openInvoice) {
+                    throw ValidationException::withMessages(['invoice' => ['This gym already has an unpaid SaaS invoice.']]);
+                }
+                $customer = $subscription->customer;
+            } else {
+                $customer = $this->manualCustomer($gym, $actor);
+                $subscription = GymSubscription::query()->create([
+                    'billing_customer_id' => $customer->id,
+                    'saas_plan_id' => $price->plan->id,
+                    'saas_plan_price_id' => $price->id,
+                    'provider' => PaymentProvider::Manual,
+                    'provider_subscription_id' => 'manual_contract_'.Str::uuid(),
+                    'status' => SaasSubscriptionStatus::Incomplete,
+                    'plan_code_snapshot' => $price->plan->code,
+                    'plan_name_snapshot' => $price->plan->name,
+                    'feature_limits_snapshot' => $price->plan->feature_limits,
+                    'currency' => $price->currency,
+                    'amount_minor' => $price->amount_minor,
+                    'billing_interval' => $price->billing_interval,
+                ]);
+                $this->audit->record('saas.subscription.created', $subscription, $actor, after: [
+                    'saas_plan_id' => $price->plan->id,
+                    'saas_plan_price_id' => $price->id,
+                    'status' => SaasSubscriptionStatus::Incomplete->value,
+                ], reason: $data['reason'], request: $request);
+            }
+
+            // Commercial dates use the gym's IANA timezone, while Laravel stores
+            // the resulting instants consistently for cross-region scheduling.
+            $periodStart = Carbon::parse($data['due_date'], $gym->timezone)->startOfDay();
+            $periodEnd = $price->billing_interval === 'yearly'
+                ? $periodStart->copy()->addYearNoOverflow()
+                : $periodStart->copy()->addMonthNoOverflow();
+            $invoice = SaasBillingInvoice::query()->create([
+                'billing_customer_id' => $customer->id,
+                'gym_subscription_id' => $subscription->id,
+                'provider_invoice_id' => $providerId,
+                'number' => 'IC-SAAS-'.Str::upper((string) Str::ulid()),
+                'status' => $periodStart->isFuture() ? SaasInvoiceStatus::Upcoming : SaasInvoiceStatus::Due,
+                'currency' => $price->currency,
+                'amount_due_minor' => $price->amount_minor,
+                'amount_paid_minor' => 0,
+                'amount_remaining_minor' => $price->amount_minor,
+                'available_at' => now(),
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'due_at' => $periodStart,
+                'grace_ends_at' => $periodStart->copy()->addDays($subscription->grace_period_days),
+            ]);
+            $this->audit->record('saas.invoice.generated', $invoice, $actor, after: [
+                'number' => $invoice->number,
+                'gym_subscription_id' => $subscription->id,
+                'status' => $invoice->status->value,
+                'amount_due_minor' => $invoice->amount_due_minor,
+                'currency' => $invoice->currency->value,
+                'due_at' => $invoice->due_at?->toIso8601String(),
+            ], reason: $data['reason'], request: $request);
+            $this->audit->record('saas.invoice.published', $invoice, $actor, after: [
+                'available_at' => $invoice->available_at?->toIso8601String(),
+            ], reason: $data['reason'], request: $request);
+
+            return ['invoice' => $invoice, 'reused' => false];
+        });
     }
 
     public function reviewManualPayment(
@@ -309,6 +441,14 @@ class SaasBillingService
                 ->lockForUpdate()
                 ->findOrFail($payment->getKey());
             if ($locked->status !== PaymentStatus::Pending) {
+                $sameDecision = ($data['decision'] === 'approve' && in_array($locked->status, [
+                    PaymentStatus::Paid, PaymentStatus::PartiallyRefunded, PaymentStatus::Refunded,
+                ], true)) || ($data['decision'] === 'reject' && $locked->status === PaymentStatus::Rejected);
+                if ($sameDecision) {
+                    // Network retries return the already-final result without a
+                    // second activation, invoice mutation or duplicate audit row.
+                    return $locked->load(['price.plan', 'submittedBy', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+                }
                 throw ValidationException::withMessages(['payment' => ['Only a pending SaaS payment can be reviewed.']]);
             }
 
@@ -409,7 +549,7 @@ class SaasBillingService
                 );
             }
 
-            $fresh = $locked->fresh()->load('price.plan');
+            $fresh = $locked->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
             $this->audit->record(
                 $approved ? 'saas.subscription_payment.approved' : 'saas.subscription_payment.rejected',
                 $fresh,
@@ -496,6 +636,12 @@ class SaasBillingService
             }
             $before = $locked->toArray();
             $locked->update(['status' => SaasInvoiceStatus::Void, 'voided_at' => now(), 'voided_by' => $actor->id, 'void_reason' => $reason]);
+            if ($locked->subscription?->status === SaasSubscriptionStatus::Incomplete) {
+                $locked->subscription->update([
+                    'status' => SaasSubscriptionStatus::IncompleteExpired,
+                    'ended_at' => now(),
+                ]);
+            }
             $this->audit->record('saas.invoice.voided', $locked->fresh(), $actor, $before, $locked->fresh()->toArray(), $reason, $request);
             return $locked->fresh();
         });
@@ -640,6 +786,14 @@ class SaasBillingService
                 'default_currency' => $gym->base_currency,
             ],
         );
+    }
+
+    private function platformBankTransferConfigured(): bool
+    {
+        $bank = (array) config('platform_billing.bank_transfer', []);
+
+        return collect(['account_name', 'bank_name', 'account_number_or_iban'])
+            ->every(fn (string $key): bool => filled($bank[$key] ?? null));
     }
 
     /** @return array{disk: string, path: string, attributes: array<string, mixed>} */

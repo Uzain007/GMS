@@ -19,12 +19,19 @@ class StoreSaasSubscriptionPaymentRequest extends TenantFormRequest
                 PaymentMethod::BankTransfer->value,
             ])],
             'idempotency_key' => ['required', 'string', 'min:16', 'max:120'],
-            'reference' => ['required', 'string', 'min:2', 'max:160'],
+            'reference' => [
+                'nullable',
+                'required_if:method,'.PaymentMethod::BankTransfer->value,
+                'string',
+                'min:2',
+                'max:160',
+            ],
             'payment_date' => [
                 'required',
                 'date',
                 'before_or_equal:today',
             ],
+            'notes' => ['nullable', 'string', 'max:2000'],
             'receipt' => [
                 'required_if:method,'.PaymentMethod::BankTransfer->value,
                 'file',
@@ -38,6 +45,7 @@ class StoreSaasSubscriptionPaymentRequest extends TenantFormRequest
     public function messages(): array
     {
         return [
+            'reference.required_if' => 'The bank transfer reference is required.',
             'payment_date.required' => $this->input('method') === PaymentMethod::Cash->value
                 ? 'The payment date is required for a cash payment.'
                 : 'The transfer date is required for a bank transfer.',

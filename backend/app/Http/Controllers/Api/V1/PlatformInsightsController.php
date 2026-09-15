@@ -21,12 +21,17 @@ class PlatformInsightsController extends Controller
             'gym_id' => ['nullable', 'uuid', 'exists:gyms,id'], 'plan_id' => ['nullable', 'uuid', 'exists:saas_plans,id'],
             'search' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', Rule::in(['draft', 'upcoming', 'due', 'past_due', 'open', 'paid', 'void', 'cancelled', 'uncollectible'])],
+            'invoice_status' => ['nullable', Rule::in(['draft', 'upcoming', 'due', 'past_due', 'open', 'paid', 'void', 'cancelled', 'uncollectible'])],
+            'subscription_status' => ['nullable', Rule::in(['incomplete', 'trialing', 'active', 'past_due', 'unpaid', 'paused', 'cancelled', 'incomplete_expired'])],
+            'payment_status' => ['nullable', Rule::in(['pending', 'paid', 'rejected', 'partially_refunded', 'refunded', 'voided'])],
+            'payment_method' => ['nullable', Rule::in(['cash', 'bank_transfer'])],
             'currency' => ['nullable', Rule::in(['GBP', 'USD', 'PKR', 'AED', 'SAR'])],
             'from' => ['nullable', 'date'], 'to' => ['nullable', 'date', 'after_or_equal:from'],
             'page' => ['nullable', 'integer', 'min:1'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
         $result = $insights->billing($filters);
         $result['invoices'] = $this->page($result['invoices'], $request);
+        $result['payments'] = $this->page($result['payments'], $request);
         return response()->json(['data' => $result]);
     }
 
