@@ -35,6 +35,7 @@ class ReportOverviewRequest extends TenantFormRequest
             'from' => ['required', 'date_format:Y-m-d'],
             'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
             'currency' => ['required', Rule::enum(Currency::class)],
+            'branch_id' => ['nullable', 'uuid', $this->tenantExists('gym_branches')],
         ];
     }
 

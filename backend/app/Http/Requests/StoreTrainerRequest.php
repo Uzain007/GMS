@@ -13,7 +13,7 @@ class StoreTrainerRequest extends TenantFormRequest
             'email' => ['required', 'email:rfc', 'max:254'],
             'phone' => ['required', 'string', 'max:40'],
             'profile_image' => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:5120'],
-            'home_branch_id' => ['required', 'uuid', $this->tenantExists('gym_branches')],
+            'home_branch_id' => ['required', 'uuid', $this->tenantExists('gym_branches')->where('status', 'active')],
             // The API fixes the role to trainer; clients cannot promote this flow.
             'status' => ['required', Rule::in(['active', 'inactive'])],
         ];

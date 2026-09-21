@@ -99,7 +99,7 @@ function featureList(plan: SaasPlanRecord): string[] {
   const limits = plan.feature_limits;
   return [
     `${Number(limits.members ?? 0).toLocaleString()} members`,
-    Number(limits.branches ?? 0) === 1 ? "1 branch · primary location only" : `${Number(limits.branches ?? 0).toLocaleString()} branches`,
+    Number(limits.branches ?? 0) === 1 ? "1 branch · Primary Branch only" : `${Number(limits.branches ?? 0).toLocaleString()} branches`,
     `${Number(limits.staff ?? 0).toLocaleString()} staff`,
     limits.advanced_reports ? "Advanced reporting" : "Core reporting",
     limits.priority_support ? "Priority support" : "Standard support",
@@ -199,14 +199,14 @@ function ManualPaymentModal({ choice, paymentOptions, onClose, onSubmit }: {
     <form className="modal-card" onSubmit={submit}>
       <div className="modal-heading"><span>{choice.method === "cash" ? <Banknote size={21} /> : <FileUp size={21} />}</span><div><p className="eyebrow">Platform subscription</p><h2 id="saas-manual-payment-title">{readable(choice.method)} · {choice.planName}</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       {error && <div className="form-error" role="alert">{error}</div>}
-      <div className="saas-payment-summary"><span><small>Amount due</small><strong>{money(choice.amountMinor, choice.currency)}</strong></span><span><small>Invoice</small><strong>{choice.invoiceNumber ?? "Created after approval"}</strong></span></div>
+      <div className="saas-payment-summary"><span><small>Amount due</small><strong>{money(choice.amountMinor, choice.currency)}</strong></span><span><small>Invoice</small><strong>{choice.invoiceNumber ?? "Invoice unavailable"}</strong></span></div>
       {choice.method === "bank_transfer" && paymentOptions.platform_bank_details && <section className="saas-platform-bank-details" aria-label="IronCore platform bank details"><div><strong>This payment is for your IronCore SaaS subscription.</strong><small>Transfer only to the IronCore platform account below.</small></div>{[
         ["Account name", paymentOptions.platform_bank_details.account_name],
         ["Bank name", paymentOptions.platform_bank_details.bank_name],
         ["Account number / IBAN", paymentOptions.platform_bank_details.account_number_or_iban],
         ["Sort code / routing", paymentOptions.platform_bank_details.routing_details],
       ].filter((item): item is [string, string] => Boolean(item[1])).map(([label, value]) => <div className="saas-bank-field" key={label}><span><small>{label}</small><strong>{value}</strong></span><button type="button" className="table-action" onClick={() => void navigator.clipboard.writeText(value)}>Copy</button></div>)}<button type="button" className="secondary-button" onClick={() => void navigator.clipboard.writeText([
-        `IronCore SaaS subscription`, `Amount: ${money(choice.amountMinor, choice.currency)}`, `Invoice: ${choice.invoiceNumber ?? "Created after approval"}`,
+        `IronCore SaaS subscription`, `Amount: ${money(choice.amountMinor, choice.currency)}`, choice.invoiceNumber ? `Invoice: ${choice.invoiceNumber}` : "",
         `Account name: ${paymentOptions.platform_bank_details?.account_name}`, `Bank: ${paymentOptions.platform_bank_details?.bank_name}`,
         `Account / IBAN: ${paymentOptions.platform_bank_details?.account_number_or_iban}`,
         paymentOptions.platform_bank_details?.routing_details ? `Routing: ${paymentOptions.platform_bank_details.routing_details}` : "",
@@ -230,6 +230,7 @@ function ManualReviewModal({ payment, onClose, onSubmit }: {
   const [error, setError] = useState<string | null>(null);
 
   async function review(formElement: HTMLFormElement, decision: "approve" | "reject") {
+    if (!formElement.reportValidity()) return;
     const form = new FormData(formElement);
     setBusy(decision); setError(null);
     try {

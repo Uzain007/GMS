@@ -35,6 +35,9 @@ class BranchController extends Controller
             // Set the application default explicitly so the just-created model
             // and its tenant-safe response agree with PostgreSQL immediately.
             $data['status'] ??= BranchStatus::Active->value;
+            if (($data['is_primary'] ?? false) && $data['status'] !== BranchStatus::Active->value) {
+                throw ValidationException::withMessages(['status' => ['A primary branch must be active.']]);
+            }
             if ($data['is_primary'] ?? false) {
                 GymBranch::query()->update(['is_primary' => false]);
             }
@@ -60,6 +63,14 @@ class BranchController extends Controller
         $data = $request->safe()->except('reason');
 
         $fresh = DB::transaction(function () use ($model, $data, $audit, $request, $before): GymBranch {
+            // Keep an active primary fallback for one-location admission. Move
+            // primary status to another active branch before retiring this one.
+            if ($model->is_primary && ($data['is_primary'] ?? true) === false) {
+                throw ValidationException::withMessages(['is_primary' => ['Make another active branch primary before removing this designation.']]);
+            }
+            if (($data['is_primary'] ?? $model->is_primary) && ($data['status'] ?? $model->status->value) !== BranchStatus::Active->value) {
+                throw ValidationException::withMessages(['status' => ['A primary branch must remain active. Make another active branch primary first.']]);
+            }
             if (($data['is_primary'] ?? false) === true) {
                 GymBranch::query()->where('id', '!=', $model->getKey())->update(['is_primary' => false]);
             }

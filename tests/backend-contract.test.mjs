@@ -16,6 +16,12 @@ test("backend targets the agreed Laravel and PostgreSQL stack", async () => {
   assert.match(database, /REDIS_CLIENT/);
 });
 
+test("new gyms create a consistently named Primary Branch fallback", async () => {
+  const controller = await read("app/Http/Controllers/Api/V1/GymController.php");
+  assert.match(controller, /'name' => 'Primary Branch'/);
+  assert.doesNotMatch(controller, /'name' => 'Primary location'/);
+});
+
 test("tenant middleware denies cross-gym access on the server", async () => {
   const middleware = await read("app/Http/Middleware/ResolveTenant.php");
   const context = await read("app/Tenancy/TenantContext.php");
@@ -360,18 +366,26 @@ test("trainer access, append-only history and notification jobs fail closed", as
 test("tenant reports are bounded, currency-specific, cached and role protected", async () => {
   const request = await read("app/Http/Requests/ReportOverviewRequest.php");
   const service = await read("app/Services/ReportService.php");
+  const reportPage = await read("../app/report-management.tsx");
+  const reportApi = await read("../app/lib/ironcore-api.ts");
   const routes = await read("routes/api.php");
   const limiter = await read("app/Providers/AppServiceProvider.php");
   const indexes = await read("database/migrations/2026_08_07_000017_add_reporting_indexes.php");
 
   assert.match(request, /cannot exceed 366 days/);
   assert.match(request, /Rule::enum\(Currency::class\)/);
+  assert.match(request, /'branch_id' => \['nullable', 'uuid', \$this->tenantExists\('gym_branches'\)\]/);
   assert.match(service, /ironcore:gym:\{\$gym->id\}:reports:overview/);
   assert.match(service, /CACHE_SECONDS = 60/);
   assert.match(service, /where\('gym_id', \$gymId\)/);
   assert.match(service, /where\('currency', \$currency->value\)/);
   assert.match(service, /AT TIME ZONE/);
   assert.match(service, /changeBasisPoints/);
+  assert.match(service, /\$branchId \?\? 'all'/);
+  assert.match(service, /where\('home_branch_id', \$branchId\)/);
+  assert.match(service, /whereHas\('payment'/);
+  assert.match(reportPage, /<option value="">All branches<\/option>/);
+  assert.match(reportApi, /params\.set\("branch_id", branchId\)/);
   assert.match(routes, /reports\/overview/);
   assert.match(routes, /role:super_admin,gym_owner,gym_manager/);
   assert.match(routes, /throttle:reports/);

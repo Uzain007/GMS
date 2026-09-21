@@ -21,6 +21,7 @@ class ReportController extends Controller
                 $filters['from'],
                 $filters['to'],
                 Currency::from($filters['currency']),
+                $filters['branch_id'] ?? null,
             ),
         ]);
     }

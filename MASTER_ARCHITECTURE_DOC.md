@@ -204,7 +204,7 @@ Tenant operators see audit events only through their selected gym. FORCE-RLS pol
 | `is_primary` | boolean | no | partial unique index allows one primary branch per gym |
 | `created_at`, `updated_at` | timestamp | yes | index `(gym_id, is_primary)` |
 
-Every newly created gym receives one active primary location in the same tenant transaction. The operational backfill creates that location only for existing gyms with no branch rows and has a deliberately non-destructive rollback. A one-location gym can omit `branch_id` at reception; Laravel resolves the sole active primary branch server-side. Multiple-location gyms must still select a tenant-owned active branch.
+Every newly created gym receives one active Primary Branch in the same tenant transaction. The operational backfill creates that branch only for existing gyms with no branch rows and has a deliberately non-destructive rollback. A one-location gym can omit `branch_id` at reception; Laravel resolves the sole active Primary Branch server-side. Multiple-location gyms must still select a tenant-owned active branch. The member/trainer `home_branch_id` field is shown as Assigned Branch; existing database names and relationships remain unchanged.
 
 ### `members` — tenant member profiles
 
@@ -822,9 +822,9 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `User hasMany UserMfaRecoveryCode`; recovery rows are platform-owned one-time authentication evidence and never tenant data.
 - `Gym hasMany GymBranch`, `Member`, `StaffProfile`, `MembershipPlan`, `MemberImport` and `MemberDataExport`; it has one tenant-scoped encrypted GymBankTransferSetting.
 - `GymBranch belongsTo Gym` and has many home members and branch-specific membership plans.
-- `Member belongsTo Gym`, optionally belongs to a home branch and platform user, and has many memberships and time-limited data exports. Its detail response resolves one bounded current membership summary inside the selected tenant rather than depending on a paginated membership list.
-- `StaffProfile belongsTo User` and optionally a home branch; it belongs to many branches through tenant-owned `staff_profile_branch` and may reference one private profile image through tenant-owned storage metadata.
-- `StaffInvitation belongsTo invitedBy User` and optionally a home branch. Acceptance creates/updates `gym_user` and `staff_profiles` atomically.
+- `Member belongsTo Gym`, optionally belongs to an assigned branch through `home_branch_id` and to a platform user, and has many memberships and time-limited data exports. Its detail response resolves one bounded current membership summary inside the selected tenant rather than depending on a paginated membership list.
+- `StaffProfile belongsTo User` and optionally an assigned branch through `home_branch_id`; it belongs to many branches through tenant-owned `staff_profile_branch` and may reference one private profile image through tenant-owned storage metadata.
+- `StaffInvitation belongsTo invitedBy User` and optionally an assigned branch through `home_branch_id`. Acceptance creates/updates `gym_user` and `staff_profiles` atomically.
 - `MemberAccountInvitation belongsTo Member`, its inviting User and optional accepted User. Acceptance creates/updates the member-role `gym_user` row and links `members.user_id` atomically inside the invitation's tenant context.
 - `MembershipPlan optionally belongsTo GymBranch` and has many memberships.
 - `Membership belongsTo Member`, `MembershipPlan`, optional branch and creating user; every operational relationship is protected by a composite tenant FK.
@@ -980,7 +980,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | DELETE | `/gyms/{gym}/progress-measurements/{measurement}` | tenant; owner/manager/super admin; mandatory reason | Void an active measurement without physical deletion and retain audit evidence |
 | GET/PATCH | `/gyms/{gym}/notification-preferences` | tenant; linked member self; owner/manager read for support | Read defaults/current choices or update the member's own communication preferences |
 | GET | `/gyms/{gym}/notification-deliveries` | tenant; owner/manager or linked member self | Cursor-list masked delivery history; never return encrypted destinations |
-| GET | `/gyms/{gym}/reports/overview` | tenant; owner/manager/super admin; `reports` throttle | Return one bounded, currency-specific operational report for the explicitly selected gym |
+| GET | `/gyms/{gym}/reports/overview[?branch_id=uuid]` | tenant; owner/manager/super admin; `reports` throttle | Return one bounded, currency-specific operational report for the explicitly selected gym; an optional tenant-validated branch filters every metric, trend, breakdown and class total |
 | GET | `/gyms/{gym}/audit-log[?format=csv\|xlsx\|pdf]` | tenant; owner/manager/super admin | Search, filter, paginate or export only the selected gym's existing audit history |
 
 ## Role permission arrays
@@ -1128,7 +1128,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Partitioning is introduced only from measured volume, initially by time for append-only payments, attendance and audit data.
 - Attendance defaults to a bounded date window and cursor pagination. Branch/time and member/time indexes support reception dashboards without scanning a gym's complete history.
 - Training/progress history defaults to bounded member/date filters and cursor pagination. Tenant/member/time and tenant/trainer/status indexes avoid unbounded coaching-dashboard scans.
-- Report periods are capped at 366 days and use half-open timestamp ranges. The 60-second Redis cache key includes `gym_id`, date range, currency and report version; the named report limiter is keyed by authenticated user and selected gym.
+- Report periods are capped at 366 days and use half-open timestamp ranges. The 60-second Redis cache key includes `gym_id`, optional tenant-validated `branch_id`, date range, currency and report version; the named report limiter is keyed by authenticated user and selected gym. Branch reports use the explicit activity `branch_id` and the person's Assigned Branch for member counts. Unassigned historical records remain visible in the all-branches report, not an arbitrary branch.
 
 ## Deployment and operational hardening contract
 
@@ -1248,7 +1248,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Post-Milestone 26 — member activation form presentation | Implemented locally; approval pending | The existing one-time activation/security flow now uses a full-width single-column password form, labelled show/hide controls, balanced spacing and responsive desktop/mobile presentation without changing token handling or acceptance rules. |
 | Post-Milestone 26 — branch management workflow | Implemented locally; approval pending | Gym Admin branches now open a unified workspace for details, audited status changes, staff/trainer and member home-branch assignment, branch classes and attendance, plus deletion of empty non-primary branches. Inactive branches retain history and reject new check-ins, classes and bookings. |
 | IronCore Beta — Super Admin gym-owner account lifecycle | Implemented locally; approval pending | Replaces unusable random owner credentials with explicit secure invite or temporary-password onboarding, a mandatory first-login password gate, selected-tenant owner profile/access management, reasoned recovery/email/status actions, one-response password display, credential revocation and cross-gym denial. |
-| IronCore Beta — automated billing and platform intelligence | Implemented locally; approval pending | Guarantees one primary location for branch-limited gyms, automates manual SaaS renewal invoices and 15-day dunning/restriction, adds owner billing visibility, append-only payment corrections/refunds/voids, Super Admin billing/global-member/analytics workspaces, required bank-transfer dates and shared responsive typography/modal/table fixes. |
+| IronCore Beta — automated billing and platform intelligence | Implemented locally; approval pending | Guarantees one Primary Branch for branch-limited gyms, automates manual SaaS renewal invoices and 15-day dunning/restriction, adds owner billing visibility, append-only payment corrections/refunds/voids, Super Admin billing/global-member/analytics workspaces, required bank-transfer dates and shared responsive typography/modal/table fixes. |
 | IronCore Beta — complete SaaS billing workflow | Implemented locally; approval pending | Keeps the existing ledger and lifecycle, isolates catalogue loading failures, adds platform bank configuration, invoice-before-evidence manual plan selection, idempotent review, individual invoice publication, central payment review filters/actions and login-session overdue warnings without making Stripe mandatory. |
 
 ## Change control

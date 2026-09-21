@@ -59,7 +59,7 @@ class GymController extends Controller
                 // RLS requires the newly-created gym context before owner/pivot
                 // or audit writes; the browser's owner fields grant no authority.
                 GymBranch::query()->create([
-                    'name' => 'Primary location',
+                    'name' => 'Primary Branch',
                     'code' => 'PRIMARY',
                     'timezone' => $gym->timezone,
                     'status' => 'active',

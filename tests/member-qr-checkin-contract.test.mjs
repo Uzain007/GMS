@@ -76,9 +76,10 @@ test("camera scanning prefers rear cameras, supports mobile decoding, device swi
   assert.match(scanner, /getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/);
   assert.match(scanner, /muted playsInline autoPlay/);
   assert.match(packageFile, /"jsqr": "\^1\.4\.0"/);
-  assert.doesNotMatch(engagement, /disabled=\{busy \|\| !selectedCheckInBranch\}/);
+  assert.match(engagement, /disabled=\{busy \|\| data\.loading \|\| !selectedCheckInBranch\}/);
   assert.match(engagement, /branchId: selectedCheckInBranch \|\| undefined/);
-  assert.match(engagement, /Primary location resolved securely/);
+  assert.match(engagement, /Primary Branch/);
+  assert.match(engagement, /Select branch/);
   assert.match(shell, /const branch = input\.branchId \? \{ branch_id: input\.branchId \} : \{\}/);
   assert.match(shell, /error: engagement\.error \?\? operations\.error/);
   assert.match(api, /AttendanceCheckIn = \{ branch_id\?: string/);

@@ -10,7 +10,7 @@ class StoreMemberRequest extends TenantFormRequest
     public function rules(): array
     {
         return [
-            'home_branch_id' => ['nullable', 'uuid', $this->tenantExists('gym_branches')],
+            'home_branch_id' => ['nullable', 'uuid', $this->tenantExists('gym_branches')->where('status', 'active')],
             'user_id' => [
                 'nullable', 'uuid', 'exists:users,id',
                 $this->tenantUnique('members', 'user_id'),

@@ -128,6 +128,96 @@ class BranchManagementWorkflowTest extends TestCase
         });
     }
 
+    public function test_primary_branch_stays_active_until_another_active_branch_is_promoted(): void
+    {
+        $owner = User::factory()->create();
+        $gym = Gym::factory()->create();
+        $this->attachRole($gym, $owner, UserRole::GymOwner);
+        $primary = $this->branch($gym, 'PRIMARY');
+        $replacement = $this->branch($gym, 'REPLACEMENT');
+        Sanctum::actingAs($owner);
+        $headers = $this->headers($gym);
+
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$primary->id}", [
+            'is_primary' => true, 'reason' => 'Set the admission fallback.',
+        ], $headers)->assertOk()->assertJsonPath('data.is_primary', true);
+
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$primary->id}", [
+            'status' => 'inactive', 'reason' => 'Attempt to retire the only primary.',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('status');
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$primary->id}", [
+            'is_primary' => false, 'reason' => 'Attempt to leave no primary.',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('is_primary');
+        $this->postJson("/api/v1/gyms/{$gym->id}/branches", [
+            'name' => 'Closed location', 'code' => 'CLOSED', 'status' => 'inactive', 'is_primary' => true,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('status');
+
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$replacement->id}", [
+            'status' => 'inactive', 'reason' => 'Prepare the replacement status test.',
+        ], $headers)->assertOk();
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$replacement->id}", [
+            'is_primary' => true, 'reason' => 'Attempt to promote an inactive branch.',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('status');
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$replacement->id}", [
+            'status' => 'active', 'is_primary' => true, 'reason' => 'Promote the active replacement.',
+        ], $headers)->assertOk()->assertJsonPath('data.is_primary', true);
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$primary->id}", [
+            'status' => 'inactive', 'reason' => 'Retire the former primary safely.',
+        ], $headers)->assertOk()->assertJsonPath('data.status', 'inactive');
+
+        app(TenantContext::class)->run($gym, function () use ($gym, $primary, $replacement): void {
+            $this->assertDatabaseHas('gym_branches', ['gym_id' => $gym->id, 'id' => $primary->id, 'is_primary' => false, 'status' => 'inactive']);
+            $this->assertDatabaseHas('gym_branches', ['gym_id' => $gym->id, 'id' => $replacement->id, 'is_primary' => true, 'status' => 'active']);
+        });
+    }
+
+    public function test_inactive_branch_cannot_receive_new_member_trainer_or_staff_assignments(): void
+    {
+        $owner = User::factory()->create();
+        $trainerUser = User::factory()->create();
+        $gym = Gym::factory()->create();
+        $this->attachRole($gym, $owner, UserRole::GymOwner);
+        $this->attachRole($gym, $trainerUser, UserRole::Trainer);
+        $active = $this->branch($gym, 'ACTIVE');
+        $inactive = $this->branch($gym, 'INACTIVE');
+        [$member, $staff] = app(TenantContext::class)->run($gym, fn (): array => [
+            Member::query()->create([
+                'home_branch_id' => $active->id, 'member_number' => 'ACTIVE-MEMBER', 'member_code' => '654399',
+                'first_name' => 'Active', 'last_name' => 'Member', 'email' => 'active-member@example.test',
+                'phone' => '+440000000099', 'status' => MemberStatus::Active,
+            ]),
+            StaffProfile::query()->create([
+                'user_id' => $trainerUser->id, 'employee_number' => 'ACTIVE-TRAINER',
+                'home_branch_id' => $active->id, 'status' => StaffStatus::Active,
+            ]),
+        ]);
+        Sanctum::actingAs($owner);
+        $headers = $this->headers($gym);
+        $this->patchJson("/api/v1/gyms/{$gym->id}/branches/{$inactive->id}", [
+            'status' => 'inactive', 'reason' => 'Close the unused location.',
+        ], $headers)->assertOk();
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/members", [
+            'first_name' => 'New', 'last_name' => 'Member', 'email' => 'new-at-inactive@example.test',
+            'phone' => '+440000000100', 'home_branch_id' => $inactive->id,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('home_branch_id');
+        $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+            'name' => 'Closed Branch Trainer', 'email' => 'closed-trainer@example.test',
+            'phone' => '+440000000101', 'home_branch_id' => $inactive->id, 'status' => 'active',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('home_branch_id');
+        $this->patchJson("/api/v1/gyms/{$gym->id}/members/{$member->id}", [
+            'home_branch_id' => $inactive->id, 'reason' => 'Attempt inactive assignment.',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('home_branch_id');
+        $this->patchJson("/api/v1/gyms/{$gym->id}/staff/{$staff->id}", [
+            'home_branch_id' => $inactive->id, 'reason' => 'Attempt inactive assignment.',
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('home_branch_id');
+
+        app(TenantContext::class)->run($gym, function () use ($member, $staff, $active): void {
+            $this->assertSame($active->id, $member->fresh()->home_branch_id);
+            $this->assertSame($active->id, $staff->fresh()->home_branch_id);
+        });
+    }
+
     private function branch(Gym $gym, string $code): GymBranch
     {
         return app(TenantContext::class)->run($gym, fn () => GymBranch::query()->create([

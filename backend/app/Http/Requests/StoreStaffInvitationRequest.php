@@ -25,7 +25,7 @@ class StoreStaffInvitationRequest extends TenantFormRequest
                 $this->tenantUnique('staff_profiles', 'employee_number'),
             ],
             'job_title' => ['nullable', 'string', 'max:120'],
-            'home_branch_id' => ['nullable', 'uuid', $this->tenantExists('gym_branches')],
+            'home_branch_id' => ['nullable', 'uuid', $this->tenantExists('gym_branches')->where('status', 'active')],
             'expires_in_days' => ['sometimes', 'integer', 'between:1,30'],
             'metadata' => ['nullable', 'array'],
         ];

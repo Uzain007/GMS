@@ -25,12 +25,12 @@ class ReportService
 {
     private const CACHE_SECONDS = 60;
 
-    private const REPORT_VERSION = 'v1';
+    private const REPORT_VERSION = 'v2';
 
     public function __construct(private readonly TenantContext $context) {}
 
     /** @return array<string, mixed> */
-    public function overview(string $fromDate, string $toDate, Currency $currency): array
+    public function overview(string $fromDate, string $toDate, Currency $currency, ?string $branchId = null): array
     {
         $gym = $this->context->gym();
         $timezone = $gym->timezone;
@@ -46,7 +46,7 @@ class ReportService
         $previousToExclusive = $from;
 
         $filterHash = hash('sha256', implode('|', [
-            self::REPORT_VERSION, $fromDate, $toDate, $currency->value, $timezone,
+            self::REPORT_VERSION, $fromDate, $toDate, $currency->value, $timezone, $branchId ?? 'all',
         ]));
         $cacheKey = "ironcore:gym:{$gym->id}:reports:overview:{$filterHash}";
 
@@ -58,6 +58,7 @@ class ReportService
             $toDate,
             $timezone,
             $currency,
+            $branchId,
             $from,
             $toExclusive,
             $previousFrom,
@@ -73,21 +74,24 @@ class ReportService
         string $toDate,
         string $timezone,
         Currency $currency,
+        ?string $branchId,
         CarbonImmutable $from,
         CarbonImmutable $toExclusive,
         CarbonImmutable $previousFrom,
         CarbonImmutable $previousToExclusive,
         int $days,
     ): array {
-        $current = $this->periodSummary($gymId, $currency, $from, $toExclusive);
-        $previous = $this->periodSummary($gymId, $currency, $previousFrom, $previousToExclusive);
+        $current = $this->periodSummary($gymId, $currency, $from, $toExclusive, $branchId);
+        $previous = $this->periodSummary($gymId, $currency, $previousFrom, $previousToExclusive, $branchId);
 
         $activeMembers = Member::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('home_branch_id', $branchId))
             ->where('status', MemberStatus::Active->value)
             ->count();
         $outstandingMinor = (int) Invoice::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('currency', $currency->value)
             ->where('status', InvoiceStatus::Open->value)
             ->sum('due_amount_minor');
@@ -99,6 +103,7 @@ class ReportService
                 'days' => $days,
                 'timezone' => $timezone,
                 'currency' => $currency->value,
+                'branch_id' => $branchId,
             ],
             'summary' => [
                 'active_members' => $activeMembers,
@@ -113,9 +118,9 @@ class ReportService
                 'class_utilization_change_bps' => $this->changeBasisPoints($current['class_utilization_bps'], $previous['class_utilization_bps']),
                 'membership_cancellations' => $current['membership_cancellations'],
             ],
-            'daily' => $this->dailySeries($gymId, $currency, $from, $toExclusive, $fromDate, $days, $timezone),
-            'member_status' => $this->memberStatusDistribution($gymId),
-            'payment_methods' => $this->paymentMethodMix($gymId, $currency, $from, $toExclusive),
+            'daily' => $this->dailySeries($gymId, $currency, $from, $toExclusive, $fromDate, $days, $timezone, $branchId),
+            'member_status' => $this->memberStatusDistribution($gymId, $branchId),
+            'payment_methods' => $this->paymentMethodMix($gymId, $currency, $from, $toExclusive, $branchId),
             'class_performance' => [
                 'sessions' => $current['class_sessions'],
                 'capacity' => $current['class_capacity'],
@@ -133,7 +138,7 @@ class ReportService
     }
 
     /** @return array<string, int> */
-    private function periodSummary(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive): array
+    private function periodSummary(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive, ?string $branchId): array
     {
         $settled = [
             PaymentStatus::Paid->value,
@@ -142,11 +147,13 @@ class ReportService
         ];
         $newMembers = Member::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('home_branch_id', $branchId))
             ->where('created_at', '>=', $from)
             ->where('created_at', '<', $toExclusive)
             ->count();
         $grossMinor = (int) Payment::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('currency', $currency->value)
             ->whereIn('status', $settled)
             ->where('paid_at', '>=', $from)
@@ -154,6 +161,7 @@ class ReportService
             ->sum('amount_minor');
         $refundedMinor = (int) PaymentRefund::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->whereHas('payment', fn (Builder $payment) => $payment->where('gym_id', $gymId)->where('branch_id', $branchId)))
             ->where('currency', $currency->value)
             ->where('status', RefundStatus::Succeeded->value)
             ->where('refunded_at', '>=', $from)
@@ -161,17 +169,20 @@ class ReportService
             ->sum('amount_minor');
         $visits = AttendanceRecord::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('checked_in_at', '>=', $from)
             ->where('checked_in_at', '<', $toExclusive)
             ->count();
         $cancellations = Membership::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('cancelled_at', '>=', $from)
             ->where('cancelled_at', '<', $toExclusive)
             ->count();
 
         $classes = ClassSession::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('status', '!=', ClassSessionStatus::Cancelled->value)
             ->where('starts_at', '>=', $from)
             ->where('starts_at', '<', $toExclusive)
@@ -210,28 +221,29 @@ class ReportService
         string $fromDate,
         int $days,
         string $timezone,
+        ?string $branchId,
     ): array {
         $settled = [PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
         $members = $this->dailyAggregate(
-            Member::query()->where('gym_id', $gymId)->where('created_at', '>=', $from)->where('created_at', '<', $toExclusive),
+            Member::query()->where('gym_id', $gymId)->when($branchId, fn (Builder $query) => $query->where('home_branch_id', $branchId))->where('created_at', '>=', $from)->where('created_at', '<', $toExclusive),
             'created_at',
             'COUNT(*)',
             $timezone,
         );
         $attendance = $this->dailyAggregate(
-            AttendanceRecord::query()->where('gym_id', $gymId)->where('checked_in_at', '>=', $from)->where('checked_in_at', '<', $toExclusive),
+            AttendanceRecord::query()->where('gym_id', $gymId)->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))->where('checked_in_at', '>=', $from)->where('checked_in_at', '<', $toExclusive),
             'checked_in_at',
             'COUNT(*)',
             $timezone,
         );
         $gross = $this->dailyAggregate(
-            Payment::query()->where('gym_id', $gymId)->where('currency', $currency->value)->whereIn('status', $settled)->where('paid_at', '>=', $from)->where('paid_at', '<', $toExclusive),
+            Payment::query()->where('gym_id', $gymId)->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))->where('currency', $currency->value)->whereIn('status', $settled)->where('paid_at', '>=', $from)->where('paid_at', '<', $toExclusive),
             'paid_at',
             'COALESCE(SUM(amount_minor), 0)',
             $timezone,
         );
         $refunds = $this->dailyAggregate(
-            PaymentRefund::query()->where('gym_id', $gymId)->where('currency', $currency->value)->where('status', RefundStatus::Succeeded->value)->where('refunded_at', '>=', $from)->where('refunded_at', '<', $toExclusive),
+            PaymentRefund::query()->where('gym_id', $gymId)->when($branchId, fn (Builder $query) => $query->whereHas('payment', fn (Builder $payment) => $payment->where('gym_id', $gymId)->where('branch_id', $branchId)))->where('currency', $currency->value)->where('status', RefundStatus::Succeeded->value)->where('refunded_at', '>=', $from)->where('refunded_at', '<', $toExclusive),
             'refunded_at',
             'COALESCE(SUM(amount_minor), 0)',
             $timezone,
@@ -284,10 +296,11 @@ class ReportService
     }
 
     /** @return list<array{status: string, count: int}> */
-    private function memberStatusDistribution(string $gymId): array
+    private function memberStatusDistribution(string $gymId, ?string $branchId): array
     {
         return Member::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('home_branch_id', $branchId))
             ->toBase()
             ->select('status')
             ->selectRaw('COUNT(*) AS aggregate_count')
@@ -300,12 +313,13 @@ class ReportService
     }
 
     /** @return list<array{method: string, count: int, net_minor: int}> */
-    private function paymentMethodMix(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive): array
+    private function paymentMethodMix(string $gymId, Currency $currency, CarbonImmutable $from, CarbonImmutable $toExclusive, ?string $branchId): array
     {
         $settled = [PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value];
 
         return Payment::query()
             ->where('gym_id', $gymId)
+            ->when($branchId, fn (Builder $query) => $query->where('branch_id', $branchId))
             ->where('currency', $currency->value)
             ->whereIn('status', $settled)
             ->where('paid_at', '>=', $from)

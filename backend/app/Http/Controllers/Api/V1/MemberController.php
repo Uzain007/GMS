@@ -10,11 +10,13 @@ use App\Http\Requests\UpdateMemberRequest;
 use App\Http\Resources\MemberResource;
 use App\Models\Member;
 use App\Models\Membership;
+use App\Models\GymBranch;
 use App\Services\AuditService;
 use App\Services\MemberCodeService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class MemberController extends Controller
 {
@@ -83,6 +85,10 @@ class MemberController extends Controller
         $model = Member::query()->findOrFail($member);
         $before = $model->toArray();
         $data = $request->safe()->except('reason');
+        if (isset($data['home_branch_id']) && $data['home_branch_id'] !== $model->home_branch_id
+            && ! GymBranch::query()->whereKey($data['home_branch_id'])->where('status', 'active')->exists()) {
+            throw ValidationException::withMessages(['home_branch_id' => ['Assign members only to an active branch.']]);
+        }
         if (array_key_exists('email', $data) && $data['email']) {
             $data['email'] = mb_strtolower($data['email']);
         }

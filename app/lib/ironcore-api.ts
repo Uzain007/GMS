@@ -238,7 +238,7 @@ export type NewProgressMeasurement = { member_id?: string; metric: ProgressMeasu
 export type UpdateProgressMeasurement = Omit<NewProgressMeasurement, "member_id"> & { reason: string };
 export type UpdateNotificationPreference = Partial<Omit<NotificationPreferenceRecord, "id" | "gym_id" | "member_id">>;
 export type ReportOverviewRecord = {
-  period: { from: string; to: string; days: number; timezone: string; currency: GymSummary["base_currency"] };
+  period: { from: string; to: string; days: number; timezone: string; currency: GymSummary["base_currency"]; branch_id?: string | null };
   summary: {
     active_members: number; new_members: number; new_members_change_bps: number | null;
     net_revenue_minor: number; net_revenue_change_bps: number | null; outstanding_minor: number;
@@ -1095,8 +1095,9 @@ export class IronCoreApi {
     return (await this.request<CursorPage<NotificationDeliveryRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/notification-deliveries?per_page=100`, {}, gymId)).data;
   }
 
-  async reportOverview(gymId: string, from: string, to: string, currency: GymSummary["base_currency"]): Promise<ReportOverviewRecord> {
+  async reportOverview(gymId: string, from: string, to: string, currency: GymSummary["base_currency"], branchId = ""): Promise<ReportOverviewRecord> {
     const params = new URLSearchParams({ from, to, currency });
+    if (branchId) params.set("branch_id", branchId);
     // Laravel calculates every aggregate after validating the selected route +
     // header tenant; the browser never receives or combines another gym's rows.
     return (await this.request<ApiEnvelope<ReportOverviewRecord>>(

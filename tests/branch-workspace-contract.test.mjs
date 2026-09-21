@@ -13,6 +13,8 @@ test("branch workspace exposes real tenant-backed management actions", async () 
   for (const label of ["View", "Edit", "Manage team", "Manage members", "Schedule class", "Deactivate", "Delete unused"]) {
     assert.match(ui, new RegExp(label));
   }
+  assert.match(ui, /Primary Branch/);
+  assert.doesNotMatch(ui, />Home branch</);
   for (const callback of ["onAssignBranchMember", "onAssignBranchStaff", "onCreateClassSession", "onDeleteBranch"]) {
     assert.match(ui, new RegExp(callback));
     assert.match(app, new RegExp(callback));

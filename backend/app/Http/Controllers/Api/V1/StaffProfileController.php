@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateOwnStaffProfileRequest;
 use App\Http\Requests\UpdateStaffProfileRequest;
 use App\Http\Requests\UpdateStaffProfileImageRequest;
 use App\Http\Resources\StaffProfileResource;
+use App\Models\GymBranch;
 use App\Models\StaffProfile;
 use App\Services\AuditService;
 use App\Services\StaffInvitationService;
@@ -20,6 +21,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class StaffProfileController extends Controller
@@ -118,6 +120,10 @@ class StaffProfileController extends Controller
         $roleGuard->ensureProfileCanBeManaged($request->user(), (string) $profile->tenant_role);
         $before = array_merge($profile->makeHidden(['profile_image_disk', 'profile_image_path'])->toArray(), ['role' => $profile->tenant_role]);
         $data = $request->safe()->except(['reason', 'role']);
+        if (isset($data['home_branch_id']) && $data['home_branch_id'] !== $profile->home_branch_id
+            && ! GymBranch::query()->whereKey($data['home_branch_id'])->where('status', 'active')->exists()) {
+            throw ValidationException::withMessages(['home_branch_id' => ['Assign staff only to an active branch.']]);
+        }
         if (isset($data['display_name'])) {
             $data['display_name'] = trim($data['display_name']);
         }

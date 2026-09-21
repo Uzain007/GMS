@@ -14,19 +14,28 @@ export type ReportData = {
   from: string;
   to: string;
   currency: Currency;
+  branchId: string;
+  branches: Array<{ id: string; name: string; isPrimary: boolean }>;
   loading: boolean;
   error: string | null;
-  onApply: (from: string, to: string, currency: Currency) => void;
+  onApply: (from: string, to: string, currency: Currency, branchId: string) => void;
   onReload: () => void;
 };
 
 const currencies: Currency[] = ["GBP", "USD", "PKR", "AED", "SAR"];
 
+function branchLabel(branch: { name: string; isPrimary: boolean }): string {
+  return branch.isPrimary && branch.name.trim().toLowerCase() !== "primary branch"
+    ? `${branch.name} · Primary Branch`
+    : branch.name;
+}
+
 function money(minor: number, currency: Currency): string {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(minor / 100);
 }
 
@@ -117,6 +126,10 @@ export function ReportManagement({ data }: { data: ReportData }) {
   const [draftFrom, setDraftFrom] = useState(data.from);
   const [draftTo, setDraftTo] = useState(data.to);
   const [draftCurrency, setDraftCurrency] = useState<Currency>(data.currency);
+  const [draftBranchId, setDraftBranchId] = useState(data.branchId);
+  const effectiveBranchId = draftBranchId === "" || data.branches.some((branch) => branch.id === draftBranchId)
+    ? draftBranchId
+    : data.branchId;
   const report = data.report;
   const rangeError = draftFrom && draftTo && draftFrom > draftTo ? "The From date must be before or the same as the To date." : null;
   const totalStatuses = useMemo(() => report?.member_status.reduce((sum, row) => sum + row.count, 0) ?? 0, [report]);
@@ -132,7 +145,7 @@ export function ReportManagement({ data }: { data: ReportData }) {
 
   function apply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    data.onApply(draftFrom, draftTo, draftCurrency);
+    data.onApply(draftFrom, draftTo, draftCurrency, effectiveBranchId);
   }
 
   function sortDaily(key: typeof dailySort.key) {
@@ -155,12 +168,13 @@ export function ReportManagement({ data }: { data: ReportData }) {
         <label>From<input type="date" value={draftFrom} max={draftTo} aria-invalid={Boolean(rangeError)} onInput={(event) => setDraftFrom(event.currentTarget.value)} required /></label>
         <label>To<input type="date" value={draftTo} min={draftFrom} aria-invalid={Boolean(rangeError)} onInput={(event) => setDraftTo(event.currentTarget.value)} required /></label>
         <label>Currency<select value={draftCurrency} onChange={(event) => setDraftCurrency(event.target.value as Currency)}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label>
+        <label>Branch<select value={effectiveBranchId} onChange={(event) => setDraftBranchId(event.target.value)}><option value="">All branches</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branchLabel(branch)}</option>)}</select></label>
         <button className="primary-button" disabled={data.loading || Boolean(rangeError)} type="submit"><CalendarRange size={16} /> Apply</button>
         {rangeError && <span className="form-error" role="alert">{rangeError}</span>}
       </form>
     </div>
 
-    <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Your gym report</strong><small>Figures use the selected date range and keep each currency separate.</small></span><button className="secondary-button" onClick={data.onReload} disabled={data.loading}><RefreshCw className={data.loading ? "spin" : ""} size={14} /> Refresh</button></div>
+    <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>Your gym report</strong><small>{report?.period.branch_id ? `${data.branches.find((branch) => branch.id === report.period.branch_id)?.name ?? "Selected branch"} · ` : "All branches · "}Figures use the selected date range and keep each currency separate.</small></span><button className="secondary-button" onClick={data.onReload} disabled={data.loading}><RefreshCw className={data.loading ? "spin" : ""} size={14} /> Refresh</button></div>
 
     {!report ? <EmptyReport error={data.error} loading={data.loading} onReload={data.onReload} /> : <>
       {data.error && <div className="form-error" role="alert">{data.error}</div>}
