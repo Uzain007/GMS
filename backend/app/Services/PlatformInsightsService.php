@@ -66,7 +66,7 @@ class PlatformInsightsService
                 }
 
                 $paymentQuery = SaasSubscriptionPayment::query()
-                    ->with(['price.plan', 'invoice', 'submittedBy:id,name,email', 'corrections', 'refunds'])
+                    ->with(['price.plan', 'invoice', 'submittedBy:id,name,email', 'corrections', 'refunds', 'approvalReversal'])
                     ->orderByDesc('created_at');
                 if ($search !== '' && ! $gymMatches) {
                     $like = '%'.addcslashes($search, '%_\\').'%';
@@ -327,6 +327,7 @@ class PlatformInsightsService
         return [
             'id' => $invoice->id, 'gym_id' => $gym->id, 'gym_name' => $gym->name,
             'subscription_id' => $invoice->gym_subscription_id,
+            'plan_price_id' => $invoice->subscription?->saas_plan_price_id,
             'plan_name' => $invoice->subscription?->plan_name_snapshot,
             'number' => $invoice->number, 'status' => $invoice->status->value,
             'currency' => $invoice->currency->value, 'amount_due_minor' => $invoice->amount_due_minor,
@@ -375,6 +376,10 @@ class PlatformInsightsService
             'review_reason' => $payment->review_reason,
             'correction_count' => $payment->corrections->count(),
             'refund_count' => $payment->refunds->count(),
+            'approval_reversal' => $payment->approvalReversal ? [
+                'reason' => $payment->approvalReversal->reason,
+                'reversed_at' => $payment->approvalReversal->reversed_at?->toIso8601String(),
+            ] : null,
             'created_at' => $payment->created_at?->toIso8601String(),
         ];
     }

@@ -36,6 +36,12 @@ class UpdateSaasPlanRequest extends FormRequest
             'price.billing_interval' => ['required_with:price', Rule::in(['monthly', 'yearly'])],
             'price.amount_minor' => ['required_with:price', 'integer', 'between:1,999999999999'],
             'price.trial_days' => ['sometimes', 'integer', 'between:0,90'],
+            'prices' => ['sometimes', 'array', 'min:1', 'max:10'],
+            'prices.*' => ['required', 'array:currency,billing_interval,amount_minor,trial_days'],
+            'prices.*.currency' => ['required', Rule::enum(Currency::class)],
+            'prices.*.billing_interval' => ['required', Rule::in(['monthly', 'yearly'])],
+            'prices.*.amount_minor' => ['required', 'integer', 'between:1,999999999999'],
+            'prices.*.trial_days' => ['sometimes', 'integer', 'between:0,90'],
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
         ];
     }

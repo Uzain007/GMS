@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSaasPlanPriceRequest;
 use App\Http\Requests\StoreSaasPlanRequest;
 use App\Http\Requests\UpdateSaasPlanRequest;
+use App\Http\Requests\DeleteSaasPlanRequest;
 use App\Http\Resources\SaasPlanPriceResource;
 use App\Http\Resources\SaasPlanResource;
 use App\Models\SaasPlan;
 use App\Services\SaasBillingService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class PlatformSaasPlanController extends Controller
 {
@@ -38,5 +40,12 @@ class PlatformSaasPlanController extends Controller
         SaasBillingService $billing,
     ): SaasPlanPriceResource {
         return new SaasPlanPriceResource($billing->addPrice($plan, $request->validated(), $request->user(), $request));
+    }
+
+    public function destroy(DeleteSaasPlanRequest $request, SaasPlan $plan, SaasBillingService $billing): Response
+    {
+        $billing->deleteUnusedDraftPlan($plan, $request->validated('reason'), $request->user(), $request);
+
+        return response()->noContent();
     }
 }

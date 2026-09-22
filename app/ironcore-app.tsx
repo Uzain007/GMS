@@ -67,7 +67,6 @@ import {
   type CreatedGym,
   type UpdateGym,
   type UpdateSaasPlan,
-  type NewSaasPlanPrice,
   type UpdateMember,
   type GymBankTransferSetting,
   type UpdateGymBankTransferSetting,
@@ -883,17 +882,20 @@ export function IronCoreApp() {
         if (sequence !== saasSequence.current) return;
         const failures = [plans, subscription, invoices, payments, paymentOptions]
           .filter((result): result is PromiseRejectedResult => result.status === "rejected");
-        setSaas((current) => ({
-          plans: plans.status === "fulfilled" ? plans.value : current.plans,
-          subscription: subscription.status === "fulfilled" ? subscription.value : current.subscription,
-          invoices: invoices.status === "fulfilled" ? invoices.value.data : current.invoices,
-          payments: payments.status === "fulfilled" ? payments.value.data : current.payments,
-          paymentOptions: paymentOptions.status === "fulfilled" ? paymentOptions.value : current.paymentOptions,
+        // Never combine a fresh subscription with stale financial rows after a
+        // partial request failure; empty failed slices make the unavailable
+        // state explicit instead of displaying contradictory balances.
+        setSaas({
+          plans: plans.status === "fulfilled" ? plans.value : [],
+          subscription: subscription.status === "fulfilled" ? subscription.value : null,
+          invoices: invoices.status === "fulfilled" ? invoices.value.data : [],
+          payments: payments.status === "fulfilled" ? payments.value.data : [],
+          paymentOptions: paymentOptions.status === "fulfilled" ? paymentOptions.value : emptySaasPaymentOptions,
           loading: false,
           error: failures.length > 0
             ? apiMessage(failures[0].reason, plans.status === "rejected" ? "Available plans could not be loaded." : "Some billing history is temporarily unavailable. Available plans remain selectable.")
             : null,
-        }));
+        });
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -1304,18 +1306,17 @@ export function IronCoreApp() {
     setSaasRefresh((value) => value + 1);
   }
 
-  async function updateSaasPlan(planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice): Promise<void> {
+  async function updateSaasPlan(planId: string, input: UpdateSaasPlan): Promise<void> {
     if (!api || user?.platform_role !== "super_admin") throw new Error("Only a super administrator can update platform plans.");
-    const updated = await api.updateSaasPlan(planId, {
-      ...input,
-      price: price ? {
-        currency: price.currency,
-        billing_interval: price.billing_interval,
-        amount_minor: price.amount_minor,
-        trial_days: price.trial_days,
-      } : undefined,
-    });
+    const updated = await api.updateSaasPlan(planId, input);
     setPlatformPlans((current) => current.map((plan) => plan.id === planId ? updated : plan).sort((left, right) => left.sort_order - right.sort_order));
+    setSaasRefresh((value) => value + 1);
+  }
+
+  async function deleteSaasPlan(planId: string, reason: string): Promise<void> {
+    if (!api || user?.platform_role !== "super_admin") throw new Error("Only a super administrator can delete an unused draft plan.");
+    await api.deleteSaasPlan(planId, reason);
+    setPlatformPlans((current) => current.filter((plan) => plan.id !== planId));
     setSaasRefresh((value) => value + 1);
   }
 
@@ -1481,6 +1482,7 @@ export function IronCoreApp() {
     onGenerateGymOwnerTemporaryPassword: (gymId, reason) => api!.generateGymOwnerTemporaryPassword(gymId, reason),
     onCreatePlan: createSaasPlan,
     onUpdatePlan: updateSaasPlan,
+    onDeletePlan: deleteSaasPlan,
     onLoadMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembers(params); },
     onExportMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembersExport(params); },
     onLoadBilling: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformBilling(params); },
@@ -1489,7 +1491,9 @@ export function IronCoreApp() {
     onLoadSaasPaymentReceipt: (gymId, paymentId) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasSubscriptionPaymentReceipt(gymId, paymentId); },
     onCorrectSaasPayment: async (gymId, paymentId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.correctSaasSubscriptionPayment(gymId, paymentId, input); },
     onRefundSaasPayment: async (gymId, paymentId, amountMinor, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.refundSaasSubscriptionPayment(gymId, paymentId, amountMinor, reason); },
+    onReverseSaasPaymentApproval: async (gymId, paymentId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.reverseSaasPaymentApproval(gymId, paymentId, reason); },
     onVoidSaasInvoice: async (gymId, invoiceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.voidSaasInvoice(gymId, invoiceId, reason); },
+    onReplaceSaasInvoice: async (gymId, invoiceId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.replaceSaasInvoice(gymId, invoiceId, input); },
     onLoadAnalytics: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAnalytics(params); },
     onLoadAudit: (filters) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformAuditLog(filters); },
     onExportAudit: async (format, filters) => { if (!api) throw new Error("The IronCore API is unavailable."); downloadBlob(await api.platformAuditExport(format, filters), `ironcore-audit-log.${format}`); },
@@ -1582,7 +1586,9 @@ export function IronCoreApp() {
     onLoadManualReceipt: loadSaasManualReceipt,
     onCorrectManualPayment: user.platform_role === "super_admin" ? async (paymentId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.correctSaasSubscriptionPayment(selectedGym.id, paymentId, input); setSaasRefresh((value) => value + 1); } : undefined,
     onRefundManualPayment: user.platform_role === "super_admin" ? async (paymentId, amountMinor, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.refundSaasSubscriptionPayment(selectedGym.id, paymentId, amountMinor, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onReverseManualPaymentApproval: user.platform_role === "super_admin" ? async (paymentId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.reverseSaasPaymentApproval(selectedGym.id, paymentId, reason); setSaasRefresh((value) => value + 1); } : undefined,
     onVoidInvoice: user.platform_role === "super_admin" ? async (invoiceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.voidSaasInvoice(selectedGym.id, invoiceId, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onReplaceInvoice: user.platform_role === "super_admin" ? async (invoiceId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.replaceSaasInvoice(selectedGym.id, invoiceId, input); setSaasRefresh((value) => value + 1); } : undefined,
     onOverrideBilling: user.platform_role === "super_admin" ? async (days, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.overrideSaasBilling(selectedGym.id, days, reason); setSaasRefresh((value) => value + 1); } : undefined,
     onLoadIronCoreReceipt: (paymentId) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasIronCoreReceipt(selectedGym.id, paymentId); },
     onExportPayments: user.platform_role === "super_admin" ? (format) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasPaymentReport(selectedGym.id, format); } : undefined,

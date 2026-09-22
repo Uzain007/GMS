@@ -1067,3 +1067,30 @@ body{font-size:14px;line-height:1.55}
   .modal-card,.member-modal{width:min(100%,calc(100vw - 16px));min-width:0}
   .table-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
 }
+
+/* SaaS billing financial controls keep long invoice/reference values inside the
+   table scroller while preserving readable actions at every supported width. */
+.saas-reference{display:block;max-width:190px;overflow-wrap:anywhere;white-space:normal;line-height:1.4}
+.saas-manual-payments .data-table,.saas-invoices .data-table{min-width:840px}
+.saas-manual-payments .table-actions,.saas-invoices .table-actions{display:flex;flex-wrap:wrap;gap:6px}
+.saas-manual-payments td,.saas-invoices td{vertical-align:top}
+.saas-price-editor{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.saas-price-editor fieldset{display:grid;gap:10px;min-width:0;margin:0;border:1px solid #e5e0ef;border-radius:12px;padding:14px}
+.saas-price-editor legend{padding:0 6px;color:var(--ink);font-size:var(--text-sm);font-weight:750}
+.saas-price-editor label{display:grid;gap:6px;color:#565864;font-size:var(--text-sm);font-weight:650}
+.saas-price-editor input{width:100%;min-height:40px;border:1px solid #dedee6;border-radius:9px;background:#fbfbfd;padding:9px 11px;font:inherit}
+.saas-workspace .billing-warning .finance-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+@media(max-width:768px){
+  .saas-price-editor{grid-template-columns:1fr}
+  .saas-workspace .billing-warning .finance-actions{width:100%}
+  .saas-workspace .billing-warning .finance-actions button{flex:1 1 210px}
+}
+
+@media(max-width:390px){
+  .saas-workspace{gap:12px}
+  .saas-workspace .module-heading,.billing-catalogue-head{gap:12px}
+  .saas-workspace .finance-actions{grid-template-columns:1fr}
+  .saas-workspace .finance-actions button{width:100%}
+  .saas-plan-card{padding:18px}
+}

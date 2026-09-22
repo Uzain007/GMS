@@ -12,6 +12,7 @@ use App\Models\SaasBillingInvoice;
 use App\Models\SaasBillingNotification;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
+use App\Models\SaasPaymentApprovalReversal;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\User;
 use App\Jobs\SendSaasBillingReminder;
@@ -197,6 +198,109 @@ class CompleteSaasBillingWorkflowTest extends TestCase
         Sanctum::actingAs($admin);
         $this->getJson('/api/v1/platform/billing?payment_status=pending')
             ->assertSuccessful()->assertJsonStructure(['data' => ['payments' => ['data', 'meta']]]);
+    }
+
+    public function test_mistaken_manual_payment_approval_is_reversed_once_without_becoming_a_refund(): void
+    {
+        [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        [, $price] = $this->plan('approval-reversal', 'active', ['cash']);
+        Sanctum::actingAs($owner);
+        $invoice = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-invoice", [
+            'saas_plan_price_id' => $price->id,
+            'method' => 'cash',
+            'idempotency_key' => 'approval-reversal-invoice-0001',
+        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data');
+        $payment = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments", [
+            'saas_billing_invoice_id' => $invoice['id'],
+            'method' => 'cash',
+            'payment_date' => today()->toDateString(),
+            'idempotency_key' => 'approval-reversal-payment-0001',
+        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data');
+
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $this->patchJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments/{$payment['id']}/review", [
+            'decision' => 'approve',
+            'reason' => 'Mistaken approval test payment.',
+        ], ['X-Gym-ID' => $gym->id])->assertSuccessful()->assertJsonPath('data.status', 'paid');
+
+        $url = "/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments/{$payment['id']}/approval-reversal";
+        $this->postJson($url, ['reason' => 'Bank reconciliation confirms that no money was received.'], ['X-Gym-ID' => $gym->id])
+            ->assertSuccessful()
+            ->assertJsonPath('data.status', 'voided')
+            ->assertJsonPath('data.approval_reversal.reason', 'Bank reconciliation confirms that no money was received.');
+        $this->postJson($url, ['reason' => 'A duplicate reversal attempt must fail.'], ['X-Gym-ID' => $gym->id])->assertUnprocessable();
+
+        app(TenantContext::class)->run($gym, function () use ($gym, $invoice, $payment): void {
+            $this->assertDatabaseHas('saas_subscription_payments', [
+                'gym_id' => $gym->id, 'id' => $payment['id'], 'status' => 'voided',
+                'refunded_amount_minor' => 0,
+            ]);
+            $this->assertDatabaseHas('saas_billing_invoices', [
+                'gym_id' => $gym->id, 'id' => $invoice['id'], 'amount_paid_minor' => 0,
+                'amount_remaining_minor' => 7900,
+            ]);
+            $this->assertSame(1, SaasPaymentApprovalReversal::query()->count());
+            $this->assertDatabaseHas('audit_logs', [
+                'gym_id' => $gym->id, 'event' => 'saas.subscription_payment.approval_reversed',
+            ]);
+        });
+    }
+
+    public function test_unpaid_manual_invoice_is_voided_and_replaced_without_losing_original_history(): void
+    {
+        [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        [, $price] = $this->plan('invoice-replacement', 'active', ['cash', 'bank_transfer']);
+        Sanctum::actingAs($owner);
+        $original = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-invoice", [
+            'saas_plan_price_id' => $price->id,
+            'method' => 'bank_transfer',
+            'idempotency_key' => 'replace-invoice-original-0001',
+        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data');
+
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+        $payload = [
+            'saas_plan_price_id' => $price->id,
+            'period_start' => today()->addDay()->toDateString(),
+            'due_date' => today()->addDays(3)->toDateString(),
+            'idempotency_key' => 'replace-invoice-corrected-0001',
+            'reason' => 'Correct the billing dates before the gym submits payment.',
+        ];
+        $replacement = $this->postJson("/api/v1/gyms/{$gym->id}/saas-billing-invoices/{$original['id']}/replace", $payload, ['X-Gym-ID' => $gym->id])
+            ->assertCreated()->assertJsonPath('data.status', 'upcoming')->json('data');
+        $this->postJson("/api/v1/gyms/{$gym->id}/saas-billing-invoices/{$original['id']}/replace", $payload, ['X-Gym-ID' => $gym->id])
+            ->assertSuccessful()->assertJsonPath('data.id', $replacement['id']);
+
+        app(TenantContext::class)->run($gym, function () use ($gym, $original, $replacement): void {
+            $this->assertDatabaseHas('saas_billing_invoices', [
+                'gym_id' => $gym->id, 'id' => $original['id'], 'status' => 'void',
+            ]);
+            $this->assertDatabaseHas('saas_billing_invoices', [
+                'gym_id' => $gym->id, 'id' => $replacement['id'], 'status' => 'upcoming',
+                'amount_due_minor' => 7900, 'amount_remaining_minor' => 7900,
+            ]);
+            $this->assertSame(2, SaasBillingInvoice::query()->count());
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gym->id, 'event' => 'saas.invoice.replaced']);
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $gym->id, 'event' => 'saas.invoice.replacement_created']);
+        });
+    }
+
+    public function test_only_unused_draft_saas_plans_can_be_permanently_deleted(): void
+    {
+        [$draft] = $this->plan('unused-draft', 'draft', ['cash']);
+        [$published] = $this->plan('published-plan', 'active', ['cash']);
+        $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+        Sanctum::actingAs($admin);
+
+        $this->deleteJson("/api/v1/platform/saas-plans/{$draft->id}", [
+            'reason' => 'Remove an unused duplicate draft before publication.',
+        ])->assertNoContent();
+        $this->assertDatabaseMissing('saas_plans', ['id' => $draft->id]);
+        $this->deleteJson("/api/v1/platform/saas-plans/{$published->id}", [
+            'reason' => 'Published plans must be archived instead.',
+        ])->assertUnprocessable();
+        $this->assertDatabaseHas('saas_plans', ['id' => $published->id, 'status' => 'active']);
     }
 
     /** @return array{User,Gym} */

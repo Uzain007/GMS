@@ -91,6 +91,8 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('role:super_admin');
         Route::post('/platform/saas-plans/{plan}/prices', [PlatformSaasPlanController::class, 'storePrice'])
             ->middleware('role:super_admin');
+        Route::delete('/platform/saas-plans/{plan}', [PlatformSaasPlanController::class, 'destroy'])
+            ->middleware('role:super_admin');
         Route::get('/platform/members/export', [MemberRosterController::class, 'platformExport'])
             ->middleware('role:super_admin');
         Route::get('/platform/member-directory', [PlatformInsightsController::class, 'members'])
@@ -297,9 +299,13 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/manual-payments/{payment}/refunds', [SaasSubscriptionController::class, 'refundManualPayment'])
                     ->middleware('role:super_admin');
+                Route::post('/saas-subscription/manual-payments/{payment}/approval-reversal', [SaasSubscriptionController::class, 'reverseManualPaymentApproval'])
+                    ->middleware('role:super_admin');
                 Route::patch('/saas-subscription/manual-payments/{payment}/review', [SaasSubscriptionController::class, 'reviewManualPayment'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-billing-invoices/{invoice}/void', [SaasSubscriptionController::class, 'voidInvoice'])
+                    ->middleware('role:super_admin');
+                Route::post('/saas-billing-invoices/{invoice}/replace', [SaasSubscriptionController::class, 'replaceInvoice'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/billing-override', [SaasSubscriptionController::class, 'overrideBillingRestriction'])
                     ->middleware('role:super_admin');

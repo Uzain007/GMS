@@ -14,6 +14,8 @@ use App\Http\Requests\ReviewSaasSubscriptionPaymentRequest;
 use App\Http\Requests\StoreSaasPaymentRefundRequest;
 use App\Http\Requests\VoidSaasInvoiceRequest;
 use App\Http\Requests\OverrideSaasBillingRestrictionRequest;
+use App\Http\Requests\ReplaceSaasInvoiceRequest;
+use App\Http\Requests\ReverseSaasPaymentApprovalRequest;
 use App\Http\Resources\GymSubscriptionResource;
 use App\Http\Resources\SaasBillingInvoiceResource;
 use App\Http\Resources\SaasPlanResource;
@@ -66,7 +68,9 @@ class SaasSubscriptionController extends Controller
     public function invoices(): AnonymousResourceCollection
     {
         return SaasBillingInvoiceResource::collection(
-            SaasBillingInvoice::query()->orderByDesc('period_end')->orderByDesc('created_at')->paginate(25)
+            SaasBillingInvoice::query()
+                ->with(['auditLogs' => fn ($query) => $query->whereIn('event', ['saas.invoice.replaced', 'saas.invoice.replacement_created'])->with('actor:id,name')->oldest('created_at')])
+                ->orderByDesc('period_end')->orderByDesc('created_at')->paginate(25)
         );
     }
 
@@ -94,7 +98,7 @@ class SaasSubscriptionController extends Controller
     {
         return SaasSubscriptionPaymentResource::collection(
             SaasSubscriptionPayment::query()
-                ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
+                ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name'])
                 ->orderByDesc('created_at')
                 ->paginate(25)
         );
@@ -123,7 +127,7 @@ class SaasSubscriptionController extends Controller
             return $correction;
         });
 
-        return new SaasSubscriptionPaymentResource($record->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']));
+        return new SaasSubscriptionPaymentResource($record->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']));
     }
 
     public function ironCoreReceipt(string $payment): Response
@@ -202,7 +206,7 @@ class SaasSubscriptionController extends Controller
 
         return response()->json([
             'data' => (new SaasSubscriptionPaymentResource($result['payment']->loadMissing([
-                'price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name',
+                'price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name',
             ])))->resolve($request),
             'meta' => ['idempotency_reused' => $result['reused']],
         ], $result['reused'] ? 200 : 201);
@@ -273,6 +277,43 @@ class SaasSubscriptionController extends Controller
     ): SaasBillingInvoiceResource {
         return new SaasBillingInvoiceResource($billing->voidInvoice(
             SaasBillingInvoice::query()->findOrFail($invoice),
+            $request->validated('reason'),
+            $request->user(),
+            $request,
+        ));
+    }
+
+    public function replaceInvoice(
+        ReplaceSaasInvoiceRequest $request,
+        string $invoice,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): JsonResponse {
+        $price = SaasPlanPrice::query()->with('plan')->findOrFail($request->validated('saas_plan_price_id'));
+        $result = $billing->replaceInvoice(
+            $context->gym(),
+            SaasBillingInvoice::query()->findOrFail($invoice),
+            $price,
+            $request->validated(),
+            $request->user(),
+            $request,
+        );
+
+        return response()->json([
+            'data' => (new SaasBillingInvoiceResource($result['invoice']))->resolve($request),
+            'meta' => ['idempotency_reused' => $result['reused']],
+        ], $result['reused'] ? 200 : 201);
+    }
+
+    public function reverseManualPaymentApproval(
+        ReverseSaasPaymentApprovalRequest $request,
+        string $payment,
+        SaasBillingService $billing,
+        TenantContext $context,
+    ): SaasSubscriptionPaymentResource {
+        return new SaasSubscriptionPaymentResource($billing->reverseManualPaymentApproval(
+            $context->gym(),
+            SaasSubscriptionPayment::query()->findOrFail($payment),
             $request->validated('reason'),
             $request->user(),
             $request,

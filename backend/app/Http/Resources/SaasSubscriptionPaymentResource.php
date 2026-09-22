@@ -47,6 +47,15 @@ class SaasSubscriptionPaymentResource extends JsonResource
                 'recorded_by' => $refund->recordedBy ? ['id' => $refund->recordedBy->id, 'name' => $refund->recordedBy->name] : null,
                 'refunded_at' => $refund->refunded_at?->toIso8601String(),
             ])->values()),
+            'approval_reversal' => $this->whenLoaded('approvalReversal', fn (): ?array => $this->approvalReversal ? [
+                'id' => $this->approvalReversal->id,
+                'reason' => $this->approvalReversal->reason,
+                'reversed_by' => $this->approvalReversal->reversedBy ? [
+                    'id' => $this->approvalReversal->reversedBy->id,
+                    'name' => $this->approvalReversal->reversedBy->name,
+                ] : null,
+                'reversed_at' => $this->approvalReversal->reversed_at?->toIso8601String(),
+            ] : null),
             'has_receipt' => filled($this->receipt_path),
             'receipt_original_name' => $this->receipt_original_name,
             'reviewed_at' => $this->reviewed_at,

@@ -2,7 +2,7 @@
 
 import {
   Archive, ArrowRight, BarChart3, Building2, CheckCircle2, ChevronDown, CircleDollarSign, Copy, Eye, EyeOff, FileClock, KeyRound, LayoutDashboard, LoaderCircle,
-  LogOut, Mail, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, UserRound, UsersRound, X,
+  LogOut, Mail, Menu, Pencil, Plus, Power, RefreshCw, Search, Settings, ShieldCheck, Trash2, UserRound, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
@@ -10,7 +10,7 @@ import {
   countryOptions, defaultTimezoneForCountry, normalizeCountryCode, normalizeTimezone, timezoneOptions,
 } from "./gym-location-options";
 import type {
-  AuditLogFilters, AuditLogRecord, AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan, NewSaasPlanPrice,
+  AuditLogFilters, AuditLogRecord, AuthenticatedUser, CreatedGym, GymOwnerAccount, GymSummary, NewGym, NewGymOwnerAccount, NewSaasPlan,
   Paginated, PlatformAnalyticsRecord, PlatformBillingRecord, PlatformMemberPage, SaasPlanRecord, UpdateGym, UpdateGymOwnerAccount, UpdateSaasPlan,
 } from "./lib/ironcore-api";
 import { SearchableSelect } from "./searchable-select";
@@ -37,7 +37,8 @@ export type PlatformPortalData = {
   onSendGymOwnerReset: (gymId: string, reason: string) => Promise<GymOwnerAccount>;
   onGenerateGymOwnerTemporaryPassword: (gymId: string, reason: string) => Promise<{ account: GymOwnerAccount; temporary_password: string }>;
   onCreatePlan: (input: NewSaasPlan) => Promise<void>;
-  onUpdatePlan: (planId: string, input: UpdateSaasPlan, price?: NewSaasPlanPrice) => Promise<void>;
+  onUpdatePlan: (planId: string, input: UpdateSaasPlan) => Promise<void>;
+  onDeletePlan: (planId: string, reason: string) => Promise<void>;
   onLoadMembers: (params: URLSearchParams) => Promise<PlatformMemberPage>;
   onExportMembers: (params: URLSearchParams) => Promise<Blob>;
   onLoadBilling: (params: URLSearchParams) => Promise<PlatformBillingRecord>;
@@ -46,7 +47,9 @@ export type PlatformPortalData = {
   onLoadSaasPaymentReceipt: PlatformBillingActions["onLoadReceipt"];
   onCorrectSaasPayment: PlatformBillingActions["onCorrectPayment"];
   onRefundSaasPayment: PlatformBillingActions["onRefundPayment"];
+  onReverseSaasPaymentApproval: PlatformBillingActions["onReversePaymentApproval"];
   onVoidSaasInvoice: PlatformBillingActions["onVoidInvoice"];
+  onReplaceSaasInvoice: PlatformBillingActions["onReplaceInvoice"];
   onLoadAnalytics: (params: URLSearchParams) => Promise<PlatformAnalyticsRecord>;
   onLoadAudit: (filters: AuditLogFilters) => Promise<Paginated<AuditLogRecord>>;
   onExportAudit: (format: "csv" | "xlsx" | "pdf", filters: AuditLogFilters) => Promise<void>;
@@ -215,7 +218,7 @@ function CreatePlanModal({ onClose, onCreate }: { onClose: () => void; onCreate:
       <div className="field-pair"><label>Plan name<input name="name" required maxLength={120} autoFocus /></label><label>Code<input name="code" required maxLength={60} pattern="[a-z0-9_-]+" /></label></div>
       <label>Description<textarea name="description" rows={2} maxLength={1000} /></label>
       <div className="field-trio"><label>Currency<select name="currency" defaultValue="GBP">{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label>Interval<select name="billing_interval" defaultValue="monthly"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label>Price<input name="amount" inputMode="decimal" required placeholder="79.00" /></label></div>
-      <div className="field-trio"><label>Member limit<input name="members" type="number" min="1" defaultValue="2500" required /></label><label>Branch limit<input name="branches" type="number" min="1" defaultValue="3" required /></label><label>Staff limit<input name="staff" type="number" min="1" defaultValue="25" required /></label></div>
+      <div className="field-trio"><label>Member limit<input name="members" type="number" min="1" defaultValue="2500" required /></label><label>Location limit<input name="branches" type="number" min="1" defaultValue="3" required /></label><label>Staff limit<input name="staff" type="number" min="1" defaultValue="25" required /></label></div>
       <div className="field-pair"><label>Trial days<input name="trial_days" type="number" min="0" max="90" defaultValue="14" required /></label><label>Sort order<input name="sort_order" type="number" min="0" defaultValue="100" required /></label></div>
       <div className="check-row"><label><input name="advanced_reports" type="checkbox" /> Advanced reports</label><label><input name="priority_support" type="checkbox" /> Priority support</label></div>
       <div className="check-row payment-method-checks"><label><input name="bank_transfer" type="checkbox" defaultChecked /> Bank transfer</label><label><input name="cash" type="checkbox" defaultChecked /> Cash</label><label><input name="stripe" type="checkbox" /> Debit/Credit Card · Stripe</label></div>
@@ -392,26 +395,33 @@ function GymManagementModal({ gym, onClose, onOpen, onUpdate, onDelete, onLoadOw
   </ModalShell>;
 }
 
-function PlanManagementModal({ plan, onClose, onUpdate }: {
+function PlanManagementModal({ plan, onClose, onUpdate, onDelete }: {
   plan: SaasPlanRecord;
   onClose: () => void;
   onUpdate: PlatformPortalData["onUpdatePlan"];
+  onDelete: PlatformPortalData["onDeletePlan"];
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const activePrice = plan.prices.find((price) => price.active) ?? plan.prices[0];
+  const [currency, setCurrency] = useState<GymSummary["base_currency"]>(plan.prices.find((price) => price.active)?.currency ?? "GBP");
+  const [lifecycleAction, setLifecycleAction] = useState<"archive" | "reactivate" | "delete" | null>(null);
+  const monthlyPrice = plan.prices.find((price) => price.active && price.currency === currency && price.billing_interval === "monthly");
+  const yearlyPrice = plan.prices.find((price) => price.active && price.currency === currency && price.billing_interval === "yearly");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const reason = String(form.get("reason"));
-    const nextPrice = {
-      currency: String(form.get("currency")) as GymSummary["base_currency"],
-      billing_interval: String(form.get("billing_interval")) as "monthly" | "yearly",
-      amount_minor: decimalToMinor(String(form.get("amount"))),
-      trial_days: Number(form.get("trial_days")), reason,
-    } satisfies NewSaasPlanPrice;
-    const priceChanged = !activePrice || activePrice.currency !== nextPrice.currency || activePrice.billing_interval !== nextPrice.billing_interval || activePrice.amount_minor !== nextPrice.amount_minor || activePrice.trial_days !== nextPrice.trial_days;
+    const priceRows = ([
+      { interval: "monthly" as const, amount: String(form.get("monthly_amount")).trim(), trial: Number(form.get("monthly_trial_days")), current: monthlyPrice },
+      { interval: "yearly" as const, amount: String(form.get("yearly_amount")).trim(), trial: Number(form.get("yearly_trial_days")), current: yearlyPrice },
+    ]).flatMap((row) => {
+      if (!row.amount) return [];
+      const amountMinor = decimalToMinor(row.amount);
+      return !row.current || row.current.amount_minor !== amountMinor || row.current.trial_days !== row.trial
+        ? [{ currency, billing_interval: row.interval, amount_minor: amountMinor, trial_days: row.trial }]
+        : [];
+    });
     setBusy(true); setError(null);
     try {
       await onUpdate(plan.id, {
@@ -423,9 +433,23 @@ function PlanManagementModal({ plan, onClose, onUpdate }: {
         },
         payment_methods: [form.get("bank_transfer") === "on" ? "bank_transfer" : null, form.get("cash") === "on" ? "cash" : null, form.get("stripe") === "on" ? "stripe" : null].filter((method): method is "bank_transfer" | "cash" | "stripe" => method !== null),
         reason,
-      }, priceChanged ? nextPrice : undefined);
+        prices: priceRows.length ? priceRows : undefined,
+      });
       onClose();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The SaaS plan could not be updated."); }
+    finally { setBusy(false); }
+  }
+
+  async function submitLifecycle(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!lifecycleAction) return;
+    const reason = String(new FormData(event.currentTarget).get("reason")).trim();
+    setBusy(true); setError(null);
+    try {
+      if (lifecycleAction === "delete") await onDelete(plan.id, reason);
+      else await onUpdate(plan.id, { status: lifecycleAction === "archive" ? "archived" : "active", reason });
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The plan lifecycle action could not be completed."); }
     finally { setBusy(false); }
   }
 
@@ -434,19 +458,22 @@ function PlanManagementModal({ plan, onClose, onUpdate }: {
     {editing ? <form onSubmit={submit}>
       <div className="field-pair"><label>Plan name<input name="name" required maxLength={160} defaultValue={plan.name} /></label><label>Status<select name="status" defaultValue={plan.status}><option value="draft">Draft / unpublished</option><option value="active">Active</option><option value="archived">Archived</option></select></label></div>
       <label>Description<textarea name="description" rows={2} maxLength={2000} defaultValue={plan.description ?? ""} /></label>
-      <div className="field-trio"><label>Currency<select name="currency" defaultValue={activePrice?.currency ?? "GBP"}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label>Interval<select name="billing_interval" defaultValue={activePrice?.billing_interval ?? "monthly"}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label>Price<input name="amount" required inputMode="decimal" defaultValue={activePrice ? (activePrice.amount_minor / 100).toFixed(2) : "0.00"} /></label></div>
-      <div className="field-trio"><label>Member limit<input name="members" type="number" min="1" required defaultValue={plan.feature_limits.members} /></label><label>Branch limit<input name="branches" type="number" min="1" required defaultValue={plan.feature_limits.branches} /></label><label>Staff limit<input name="staff" type="number" min="1" required defaultValue={plan.feature_limits.staff} /></label></div>
-      <div className="field-pair"><label>Trial days<input name="trial_days" type="number" min="0" max="90" defaultValue={activePrice?.trial_days ?? 0} /></label><label>Sort order<input name="sort_order" type="number" min="0" defaultValue={plan.sort_order} /></label></div>
+      <label>Price currency<select value={currency} onChange={(event) => setCurrency(event.target.value as GymSummary["base_currency"])}>{currencies.map((code) => <option key={code}>{code}</option>)}</select></label>
+      <div className="saas-price-editor"><fieldset><legend>Monthly price</legend><label>Amount<input name="monthly_amount" inputMode="decimal" placeholder="Not offered" defaultValue={monthlyPrice ? (monthlyPrice.amount_minor / 100).toFixed(2) : ""} /></label><label>Trial days<input name="monthly_trial_days" type="number" min="0" max="90" defaultValue={monthlyPrice?.trial_days ?? 0} /></label></fieldset><fieldset><legend>Yearly price</legend><label>Amount<input name="yearly_amount" inputMode="decimal" placeholder="Not offered" defaultValue={yearlyPrice ? (yearlyPrice.amount_minor / 100).toFixed(2) : ""} /></label><label>Trial days<input name="yearly_trial_days" type="number" min="0" max="90" defaultValue={yearlyPrice?.trial_days ?? 0} /></label></fieldset></div>
+      <div className="field-trio"><label>Member limit<input name="members" type="number" min="1" required defaultValue={plan.feature_limits.members} /></label><label>Location limit<input name="branches" type="number" min="1" required defaultValue={plan.feature_limits.branches} /></label><label>Staff limit<input name="staff" type="number" min="1" required defaultValue={plan.feature_limits.staff} /></label></div>
+      <label>Sort order<input name="sort_order" type="number" min="0" defaultValue={plan.sort_order} /></label>
       <div className="check-row"><label><input name="advanced_reports" type="checkbox" defaultChecked={plan.feature_limits.advanced_reports} /> Advanced reports</label><label><input name="priority_support" type="checkbox" defaultChecked={plan.feature_limits.priority_support} /> Priority support</label></div>
       <div className="check-row payment-method-checks"><label><input name="bank_transfer" type="checkbox" defaultChecked={plan.payment_methods.includes("bank_transfer")} /> Bank transfer</label><label><input name="cash" type="checkbox" defaultChecked={plan.payment_methods.includes("cash")} /> Cash</label><label><input name="stripe" type="checkbox" defaultChecked={plan.payment_methods.includes("stripe")} /> Stripe card</label></div>
       <label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} /></label>
       <div className="modal-note"><ShieldCheck size={17} />A changed price creates a new immutable price row. Existing subscriptions keep their accepted snapshots. Stripe remains optional.</div>
       <div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel edit</button><button className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save plan"}</button></div>
     </form> : <>
-      <dl className="platform-detail-grid"><div><dt>Status</dt><dd>{readable(plan.status)}</dd></div><div><dt>Code</dt><dd>{plan.code}</dd></div><div><dt>Current price</dt><dd>{activePrice ? `${money(activePrice.amount_minor, activePrice.currency)} / ${activePrice.billing_interval}` : "No price"}</dd></div><div><dt>Payments</dt><dd>{plan.payment_methods.map(readable).join(", ")}</dd></div><div><dt>Members</dt><dd>{plan.feature_limits.members.toLocaleString()}</dd></div><div><dt>Branches / staff</dt><dd>{plan.feature_limits.branches} / {plan.feature_limits.staff}</dd></div></dl>
+      <dl className="platform-detail-grid"><div><dt>Status</dt><dd>{readable(plan.status)}</dd></div><div><dt>Code</dt><dd>{plan.code}</dd></div><div><dt>Monthly price</dt><dd>{monthlyPrice ? `${money(monthlyPrice.amount_minor, monthlyPrice.currency)} / month` : `Not offered in ${currency}`}</dd></div><div><dt>Yearly price</dt><dd>{yearlyPrice ? `${money(yearlyPrice.amount_minor, yearlyPrice.currency)} / year` : `Not offered in ${currency}`}</dd></div><div><dt>Payments</dt><dd>{plan.payment_methods.map(readable).join(", ")}</dd></div><div><dt>Members</dt><dd>{plan.feature_limits.members.toLocaleString()}</dd></div><div><dt>Locations / staff</dt><dd>{plan.feature_limits.branches} / {plan.feature_limits.staff}</dd></div></dl>
+      <label>Displayed currency<select value={currency} onChange={(event) => setCurrency(event.target.value as GymSummary["base_currency"])}>{currencies.map((code) => <option key={code}>{code}</option>)}</select></label>
       <p className="platform-detail-copy">{plan.description ?? "No description"}</p>
-      <div className="platform-management-actions"><button className="secondary-button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit plan</button></div>
-      <div className="modal-note"><Archive size={17} />Use Edit plan to deactivate, unpublish or archive it without changing historical subscriptions.</div>
+      <div className="platform-management-actions"><button className="secondary-button" onClick={() => setEditing(true)}><Pencil size={15} /> Edit plan</button>{plan.status === "archived" ? <button className="primary-button" onClick={() => setLifecycleAction("reactivate")}><RefreshCw size={15} /> Reactivate</button> : <button className="secondary-button" onClick={() => setLifecycleAction("archive")}><Archive size={15} /> Archive</button>}{plan.status === "draft" && <button className="danger-button" onClick={() => setLifecycleAction("delete")}><Trash2 size={15} /> Delete unused draft</button>}</div>
+      <div className="modal-note"><Archive size={17} />Archiving removes a plan from new subscriptions while historical subscriptions and prices remain intact.</div>
+      {lifecycleAction && <form className="owner-action-form" onSubmit={submitLifecycle}><p>{lifecycleAction === "delete" ? "Permanent deletion is allowed only when this draft has no billing dependencies." : lifecycleAction === "archive" ? "This plan will disappear from the Gym Owner catalogue. Existing subscriptions remain unchanged." : "This plan will become available for new subscriptions again."}</p><label>Audit reason<textarea name="reason" required minLength={5} maxLength={1000} autoFocus /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setLifecycleAction(null)}>Cancel</button><button className={lifecycleAction === "delete" ? "danger-button" : "primary-button"} disabled={busy}>{busy ? "Saving…" : lifecycleAction === "delete" ? "Delete unused draft" : "Confirm"}</button></div></form>}
     </>}
   </ModalShell>;
 }
@@ -462,7 +489,9 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [archivedGyms, setArchivedGyms] = useState(false);
+  const [planList, setPlanList] = useState<"current" | "archived">("current");
   const filteredGyms = useMemo(() => data.gyms.filter((gym) => (archivedGyms ? gym.status === "cancelled" : gym.status !== "cancelled") && `${gym.name} ${gym.slug} ${gym.country_code} ${gym.status}`.toLowerCase().includes(query.toLowerCase())), [archivedGyms, data.gyms, query]);
+  const filteredPlans = useMemo(() => data.plans.filter((plan) => planList === "archived" ? plan.status === "archived" : plan.status !== "archived"), [data.plans, planList]);
   const activeGyms = data.gyms.filter((gym) => gym.status === "active").length;
   const trials = data.gyms.filter((gym) => gym.status === "trial").length;
   const attention = data.gyms.filter((gym) => ["past_due", "suspended"].includes(gym.status)).length;
@@ -498,8 +527,8 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
         </>}
         {view === "gyms" && <><section className="module-heading"><div><p className="eyebrow">Tenant registry</p><h2>Gyms</h2><p>View, edit, activate, deactivate or safely archive a gym with a recorded reason.</p></div><button className="primary-button" onClick={() => setGymModal(true)}><Plus size={17} /> Create gym</button></section><div className="billing-toggle gym-list-toggle" role="group" aria-label="Gym lifecycle list"><button className={!archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(false)}>Current gyms</button><button className={archivedGyms ? "active" : ""} onClick={() => setArchivedGyms(true)}>Archived gyms</button></div><section className="panel table-scroll">{data.loading ? <div className="table-state"><LoaderCircle className="spin" size={20} /> Loading gyms…</div> : <table className="data-table"><thead><tr><th>Gym</th><th>Country</th><th>Currency</th><th>Status</th><th /></tr></thead><tbody>{filteredGyms.map((gym) => <tr key={gym.id}><td><strong>{gym.name}</strong><small className="table-sub">{gym.slug}</small></td><td>{gym.country_code}</td><td>{gym.base_currency}</td><td><span className={`status ${gym.status}`}><i />{readable(gym.status)}</span></td><td><div className="table-action-group"><button className="table-action" onClick={() => setSelectedGym(gym)}><Eye size={13} /> View / manage</button>{gym.status !== "cancelled" && <button className="table-action" onClick={() => data.onOpenGym(gym)}>Open <ArrowRight size={13} /></button>}</div></td></tr>)}</tbody></table>}{!data.loading && filteredGyms.length === 0 && <div className="empty-state"><Search size={23} /><strong>{archivedGyms ? "No archived gyms" : "No gyms found"}</strong><span>{archivedGyms ? "Archived tenants stay here with their history retained." : "Change the search or create the first gym."}</span></div>}</section></>}
         {view === "members" && <PlatformMemberDirectory gyms={data.gyms} load={data.onLoadMembers} exportRows={data.onExportMembers} />}
-        {view === "plans" && <><section className="module-heading"><div><p className="eyebrow">Platform billing</p><h2>SaaS plans</h2><p>Manage catalogue details and append-only prices without changing accepted subscription history.</p></div><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={17} /> Publish plan</button></section><section className="platform-plan-grid">{data.plans.map((plan) => <article className="panel" key={plan.id}><div><span className={`status ${plan.status}`}><i />{readable(plan.status)}</span><small>{plan.code}</small></div><h3>{plan.name}</h3><p>{plan.description ?? "No description"}</p><ul>{plan.prices.filter((price) => price.active).map((price) => <li key={price.id}><strong>{money(price.amount_minor, price.currency)}</strong><span>/{price.billing_interval === "monthly" ? "month" : "year"}</span></li>)}</ul><small>{plan.feature_limits.members.toLocaleString()} members · {plan.feature_limits.branches.toLocaleString()} branches · {plan.feature_limits.staff.toLocaleString()} staff</small><small>Payments: {plan.payment_methods.map(readable).join(" · ")}</small><div className="platform-card-actions"><button className="secondary-button" onClick={() => setSelectedPlan(plan)}><Eye size={14} /> View / edit</button></div></article>)}{!data.loading && data.plans.length === 0 && <div className="empty-state panel"><CircleDollarSign size={24} /><strong>No plans published</strong><span>Create the first platform plan and immutable price.</span></div>}</section></>}
-        {view === "billing" && <PlatformBillingDashboard gyms={data.gyms} plans={data.plans} load={data.onLoadBilling} onOpenGym={data.onOpenGym} actions={{ onCreateInvoice: data.onCreateSaasInvoice, onReviewPayment: data.onReviewSaasPayment, onLoadReceipt: data.onLoadSaasPaymentReceipt, onCorrectPayment: data.onCorrectSaasPayment, onRefundPayment: data.onRefundSaasPayment, onVoidInvoice: data.onVoidSaasInvoice }} />}
+        {view === "plans" && <><section className="module-heading"><div><p className="eyebrow">Platform billing</p><h2>SaaS plans</h2><p>Manage catalogue details and append-only prices without changing accepted subscription history.</p></div><button className="primary-button" onClick={() => setPlanModal(true)}><Plus size={17} /> Publish plan</button></section><div className="billing-toggle plan-list-toggle" role="group" aria-label="SaaS plan lifecycle list"><button className={planList === "current" ? "active" : ""} onClick={() => setPlanList("current")}>Current plans</button><button className={planList === "archived" ? "active" : ""} onClick={() => setPlanList("archived")}>Archived plans</button></div><section className="platform-plan-grid">{filteredPlans.map((plan) => <article className="panel" key={plan.id}><div><span className={`status ${plan.status}`}><i />{readable(plan.status)}</span><small>{plan.code}</small></div><h3>{plan.name}</h3><p>{plan.description ?? "No description"}</p><ul>{plan.prices.filter((price) => price.active).map((price) => <li key={price.id}><strong>{money(price.amount_minor, price.currency)}</strong><span>/{price.billing_interval === "monthly" ? "month" : "year"}</span></li>)}</ul><small>{plan.feature_limits.members.toLocaleString()} members · {plan.feature_limits.branches.toLocaleString()} locations · {plan.feature_limits.staff.toLocaleString()} staff</small><small>Payments: {plan.payment_methods.map(readable).join(" · ")}</small><div className="platform-card-actions"><button className="secondary-button" onClick={() => setSelectedPlan(plan)}><Eye size={14} /> View / manage</button></div></article>)}{!data.loading && filteredPlans.length === 0 && <div className="empty-state panel"><CircleDollarSign size={24} /><strong>{planList === "archived" ? "No archived plans" : "No current plans"}</strong><span>{planList === "archived" ? "Archived plans remain available here for historical review." : "Create the first platform plan and immutable price."}</span></div>}</section></>}
+        {view === "billing" && <PlatformBillingDashboard gyms={data.gyms} plans={data.plans} load={data.onLoadBilling} onOpenGym={data.onOpenGym} actions={{ onCreateInvoice: data.onCreateSaasInvoice, onReviewPayment: data.onReviewSaasPayment, onLoadReceipt: data.onLoadSaasPaymentReceipt, onCorrectPayment: data.onCorrectSaasPayment, onRefundPayment: data.onRefundSaasPayment, onReversePaymentApproval: data.onReverseSaasPaymentApproval, onVoidInvoice: data.onVoidSaasInvoice, onReplaceInvoice: data.onReplaceSaasInvoice }} />}
         {view === "analytics" && <PlatformAnalytics load={data.onLoadAnalytics} />}
         {view === "audit" && <AuditLogManagement gyms={data.gyms} onLoad={data.onLoadAudit} onExport={data.onExportAudit} />}
         {view === "settings" && <><section className="module-heading"><div><p className="eyebrow">Platform settings</p><h2>Settings</h2><p>Tenant currencies and timezones are managed per gym; account security stays platform-wide.</p></div></section><section className="platform-settings-grid"><article className="panel"><CircleDollarSign size={21} /><h3>Tenant currency settings</h3><p>Each gym keeps its own current base currency. Changing Gym A never changes Gym B or any historical transaction snapshot.</p><div className="platform-settings-list">{data.gyms.map((gym) => <button key={gym.id} onClick={() => setSelectedGym(gym)}><span><strong>{gym.name}</strong><small>{gym.timezone}</small></span><b>{gym.base_currency}</b><Pencil size={14} /></button>)}</div></article><article className="panel"><ShieldCheck size={21} /><h3>Account security</h3><p>Manage your password, authenticator and recovery codes separately from tenant business settings.</p><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Open account security</button></article><article className="panel"><Power size={21} /><h3>Provider status</h3><p>Stripe remains optional. Cash and bank transfer continue independently; credentials stay in deployment configuration, never this browser.</p></article></section></>}
@@ -508,7 +537,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
     {gymModal && <CreateGymModal onClose={() => setGymModal(false)} onCreate={data.onCreateGym} onOpen={data.onOpenGym} />}
     {planModal && <CreatePlanModal onClose={() => setPlanModal(false)} onCreate={data.onCreatePlan} />}
     {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} onDelete={data.onDeleteGym} onLoadOwner={data.onLoadGymOwner} onCreateOwner={data.onCreateGymOwner} onUpdateOwner={data.onUpdateGymOwner} onSendReset={data.onSendGymOwnerReset} onGenerateTemporary={data.onGenerateGymOwnerTemporaryPassword} />}
-    {selectedPlan && <PlanManagementModal plan={selectedPlan} onClose={() => setSelectedPlan(null)} onUpdate={data.onUpdatePlan} />}
+    {selectedPlan && <PlanManagementModal plan={selectedPlan} onClose={() => setSelectedPlan(null)} onUpdate={data.onUpdatePlan} onDelete={data.onDeletePlan} />}
     {securityOpen && <AccountSecurityDialog onClose={() => setSecurityOpen(false)} onChangePassword={data.onChangePassword} mfa={data.mfa} />}
   </div>;
 }

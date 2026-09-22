@@ -11,6 +11,7 @@ class SaasBillingInvoiceResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'saas_plan_price_id' => $this->subscription?->saas_plan_price_id,
             'number' => $this->number,
             'status' => $this->status->value,
             'currency' => $this->currency->value,
@@ -29,6 +30,15 @@ class SaasBillingInvoiceResource extends JsonResource
             'paid_at' => $this->paid_at,
             'voided_at' => $this->voided_at,
             'void_reason' => $this->void_reason,
+            'correction_history' => $this->whenLoaded('auditLogs', fn () => $this->auditLogs->map(fn ($entry): array => [
+                'id' => $entry->id,
+                'action' => $entry->event,
+                'old_value' => $entry->before_values,
+                'new_value' => $entry->after_values,
+                'reason' => $entry->reason,
+                'actor' => $entry->actor ? ['id' => $entry->actor->id, 'name' => $entry->actor->name] : null,
+                'created_at' => $entry->created_at?->toIso8601String(),
+            ])->values()),
             'created_at' => $this->created_at,
         ];
     }

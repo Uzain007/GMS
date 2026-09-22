@@ -17,6 +17,7 @@ use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use App\Models\SaasPaymentRefund;
+use App\Models\SaasPaymentApprovalReversal;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\SubscriptionCheckoutSession;
 use App\Models\User;
@@ -26,6 +27,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -71,9 +73,9 @@ class SaasBillingService
         $before = $plan->load('prices')->toArray();
 
         return DB::transaction(function () use ($plan, $data, $actor, $request, $before): SaasPlan {
-            $priceData = $data['price'] ?? null;
-            $plan->update(collect($data)->except(['reason', 'price'])->all());
-            if ($priceData) {
+            $priceRows = $data['prices'] ?? (isset($data['price']) ? [$data['price']] : []);
+            $plan->update(collect($data)->except(['reason', 'price', 'prices'])->all());
+            foreach ($priceRows as $priceData) {
                 $plan->prices()->where('currency', $priceData['currency'])
                     ->where('billing_interval', $priceData['billing_interval'])
                     ->where('active', true)
@@ -116,6 +118,28 @@ class SaasBillingService
 
             return $price;
         });
+    }
+
+    public function deleteUnusedDraftPlan(SaasPlan $plan, string $reason, User $actor, Request $request): void
+    {
+        if ($plan->status !== SaasPlanStatus::Draft) {
+            throw ValidationException::withMessages(['plan' => ['Only an unused draft plan can be permanently deleted. Archive published plans instead.']]);
+        }
+
+        try {
+            DB::transaction(function () use ($plan, $reason, $actor, $request): void {
+                $locked = SaasPlan::query()->with('prices')->lockForUpdate()->findOrFail($plan->id);
+                $before = $locked->toArray();
+                $this->audit->record('platform.saas_plan.deleted', $locked, $actor, before: $before, reason: $reason, request: $request);
+                // Database RESTRICT foreign keys are the final cross-tenant
+                // guard: any checkout, payment or subscription history blocks
+                // removal without bypassing tenant RLS for a global pre-check.
+                $locked->prices()->delete();
+                $locked->delete();
+            });
+        } catch (QueryException) {
+            throw ValidationException::withMessages(['plan' => ['This draft has billing history or other dependencies and cannot be deleted. Archive it instead.']]);
+        }
     }
 
     /** @return array{checkout_url: string, idempotency_reused: bool} */
@@ -205,7 +229,7 @@ class SaasBillingService
     ): array {
         $existing = SaasSubscriptionPayment::query()
             ->where('idempotency_key', $data['idempotency_key'])
-            ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name'])
+            ->with(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name'])
             ->first();
         if ($existing) {
             return ['payment' => $existing, 'reused' => true];
@@ -228,7 +252,9 @@ class SaasBillingService
             throw ValidationException::withMessages(['saas_plan_price_id' => ['Select a SaaS plan price or renewal invoice.']]);
         }
         $price->loadMissing('plan');
-        $this->assertSelectablePrice($gym, $price);
+        if (! $invoice) {
+            $this->assertSelectablePrice($gym, $price);
+        }
         $method = PaymentMethod::from($data['method']);
         if (! in_array($method->value, $price->plan->payment_methods ?? [], true)) {
             throw ValidationException::withMessages(['method' => ['This payment method is not available for the selected SaaS plan.']]);
@@ -289,7 +315,7 @@ class SaasBillingService
                     request: $request,
                 );
 
-                return $payment->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+                return $payment->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']);
             });
         } catch (Throwable $exception) {
             if ($stored) {
@@ -447,7 +473,7 @@ class SaasBillingService
                 if ($sameDecision) {
                     // Network retries return the already-final result without a
                     // second activation, invoice mutation or duplicate audit row.
-                    return $locked->load(['price.plan', 'submittedBy', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+                    return $locked->load(['price.plan', 'submittedBy', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']);
                 }
                 throw ValidationException::withMessages(['payment' => ['Only a pending SaaS payment can be reviewed.']]);
             }
@@ -549,7 +575,7 @@ class SaasBillingService
                 );
             }
 
-            $fresh = $locked->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+            $fresh = $locked->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']);
             $this->audit->record(
                 $approved ? 'saas.subscription_payment.approved' : 'saas.subscription_payment.rejected',
                 $fresh,
@@ -620,7 +646,7 @@ class SaasBillingService
                 'total_refunded_minor' => $totalRefunded,
             ], reason: $data['reason'], request: $request);
 
-            return $locked->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name']);
+            return $locked->fresh()->load(['price.plan', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']);
         });
     }
 
@@ -644,6 +670,225 @@ class SaasBillingService
             }
             $this->audit->record('saas.invoice.voided', $locked->fresh(), $actor, $before, $locked->fresh()->toArray(), $reason, $request);
             return $locked->fresh();
+        });
+    }
+
+    /** @return array{invoice:SaasBillingInvoice,reused:bool} */
+    public function replaceInvoice(
+        Gym $gym,
+        SaasBillingInvoice $invoice,
+        SaasPlanPrice $price,
+        array $data,
+        User $actor,
+        Request $request,
+    ): array {
+        $providerId = 'ironcore_replacement_'.hash('sha256', $gym->id.'|'.$invoice->id.'|'.$data['idempotency_key']);
+        $existing = SaasBillingInvoice::query()->where('provider_invoice_id', $providerId)->first();
+        if ($existing) {
+            return ['invoice' => $existing->load(['auditLogs.actor:id,name']), 'reused' => true];
+        }
+
+        return DB::transaction(function () use ($gym, $invoice, $price, $data, $actor, $request, $providerId): array {
+            $locked = SaasBillingInvoice::query()->with(['subscription.customer'])->lockForUpdate()->findOrFail($invoice->id);
+            if ($locked->amount_paid_minor > 0 || $locked->status === SaasInvoiceStatus::Paid) {
+                throw ValidationException::withMessages(['invoice' => ['Paid or partially paid invoices cannot be replaced. Use the appropriate payment correction, reversal or refund workflow.']]);
+            }
+            if (in_array($locked->status, [SaasInvoiceStatus::Void, SaasInvoiceStatus::Cancelled], true)) {
+                throw ValidationException::withMessages(['invoice' => ['This invoice is already closed and cannot be replaced again.']]);
+            }
+            if (SaasSubscriptionPayment::query()->where('saas_billing_invoice_id', $locked->id)
+                ->whereIn('status', [PaymentStatus::Pending->value, PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value])
+                ->lockForUpdate()->exists()) {
+                throw ValidationException::withMessages(['invoice' => ['Resolve the linked payment submission before replacing this invoice.']]);
+            }
+
+            $subscription = $locked->subscription;
+            if (! $subscription || $subscription->provider !== PaymentProvider::Manual) {
+                throw ValidationException::withMessages(['invoice' => ['Only IronCore-managed manual invoices can be replaced here.']]);
+            }
+            $price->loadMissing('plan');
+            if ($subscription->status === SaasSubscriptionStatus::Incomplete) {
+                $this->assertSelectablePrice($gym, $price);
+            } elseif ($subscription->saas_plan_price_id !== $price->id) {
+                throw ValidationException::withMessages(['saas_plan_price_id' => ['An active subscription invoice must keep its accepted plan price. Use a separate subscription plan-change workflow.']]);
+            }
+
+            $periodStart = Carbon::parse($data['period_start'], $gym->timezone)->startOfDay();
+            $periodEnd = $price->billing_interval === 'yearly'
+                ? $periodStart->copy()->addYearNoOverflow()
+                : $periodStart->copy()->addMonthNoOverflow();
+            $dueAt = Carbon::parse($data['due_date'], $gym->timezone)->startOfDay();
+            $today = now($gym->timezone)->startOfDay();
+            $status = $dueAt->isFuture()
+                ? SaasInvoiceStatus::Upcoming
+                : ($dueAt->lt($today) ? SaasInvoiceStatus::PastDue : SaasInvoiceStatus::Due);
+            $before = $locked->toArray();
+            $subscriptionBefore = $subscription->toArray();
+
+            if ($subscription->status === SaasSubscriptionStatus::Incomplete) {
+                $subscription->update([
+                    'saas_plan_id' => $price->plan->id,
+                    'saas_plan_price_id' => $price->id,
+                    'plan_code_snapshot' => $price->plan->code,
+                    'plan_name_snapshot' => $price->plan->name,
+                    'feature_limits_snapshot' => $price->plan->feature_limits,
+                    'currency' => $price->currency,
+                    'amount_minor' => $price->amount_minor,
+                    'billing_interval' => $price->billing_interval,
+                ]);
+            }
+
+            $locked->update([
+                'status' => SaasInvoiceStatus::Void,
+                'voided_at' => now(),
+                'voided_by' => $actor->id,
+                'void_reason' => 'Replaced after audited correction: '.$data['reason'],
+            ]);
+            $replacement = SaasBillingInvoice::query()->create([
+                'billing_customer_id' => $locked->billing_customer_id,
+                'gym_subscription_id' => $subscription->id,
+                'provider_invoice_id' => $providerId,
+                'number' => 'IC-SAAS-'.Str::upper((string) Str::ulid()),
+                'status' => $status,
+                'currency' => $price->currency,
+                'amount_due_minor' => $price->amount_minor,
+                'amount_paid_minor' => 0,
+                'amount_remaining_minor' => $price->amount_minor,
+                'available_at' => now(),
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'due_at' => $dueAt,
+                'grace_ends_at' => $dueAt->copy()->addDays($subscription->grace_period_days),
+            ]);
+            $subscriptionChanges = ['latest_invoice_id' => $providerId];
+            if ($subscription->next_billing_at && $locked->period_start
+                && $subscription->next_billing_at->equalTo($locked->period_start)) {
+                $subscriptionChanges['next_billing_at'] = $periodStart;
+            }
+            $subscription->update($subscriptionChanges);
+
+            $this->audit->record('saas.invoice.replaced', $locked->fresh(), $actor, before: $before, after: [
+                'status' => SaasInvoiceStatus::Void->value,
+                'replacement_invoice_id' => $replacement->id,
+                'replacement_invoice_number' => $replacement->number,
+                'replacement_amount_minor' => $replacement->amount_due_minor,
+                'replacement_currency' => $replacement->currency->value,
+                'replacement_period_start' => $replacement->period_start?->toIso8601String(),
+                'replacement_period_end' => $replacement->period_end?->toIso8601String(),
+                'replacement_due_at' => $replacement->due_at?->toIso8601String(),
+            ], reason: $data['reason'], request: $request);
+            if ($subscriptionBefore !== $subscription->fresh()->toArray()) {
+                $this->audit->record('saas.subscription.corrected_with_invoice', $subscription->fresh(), $actor,
+                    before: $subscriptionBefore, after: $subscription->fresh()->toArray(), reason: $data['reason'], request: $request);
+            }
+            $this->audit->record('saas.invoice.replacement_created', $replacement, $actor, before: [
+                'replaces_invoice_id' => $locked->id,
+                'replaces_invoice_number' => $locked->number,
+            ], after: $replacement->toArray(), reason: $data['reason'], request: $request);
+
+            return ['invoice' => $replacement->fresh()->load(['auditLogs.actor:id,name']), 'reused' => false];
+        });
+    }
+
+    public function reverseManualPaymentApproval(
+        Gym $gym,
+        SaasSubscriptionPayment $payment,
+        string $reason,
+        User $actor,
+        Request $request,
+    ): SaasSubscriptionPayment {
+        return DB::transaction(function () use ($gym, $payment, $reason, $actor, $request): SaasSubscriptionPayment {
+            $locked = SaasSubscriptionPayment::query()
+                ->with(['invoice', 'subscription', 'refunds', 'approvalReversal'])
+                ->lockForUpdate()->findOrFail($payment->id);
+            if ($locked->approvalReversal) {
+                throw ValidationException::withMessages(['payment' => ['This approval has already been reversed.']]);
+            }
+            if ($locked->status !== PaymentStatus::Paid || $locked->refunded_amount_minor > 0 || $locked->refunds->isNotEmpty()) {
+                throw ValidationException::withMessages(['payment' => ['Only a fully paid, unrefunded manual payment can have its mistaken approval reversed.']]);
+            }
+            if (! $locked->invoice || ! $locked->subscription) {
+                throw ValidationException::withMessages(['payment' => ['The linked invoice and subscription are required for a safe reversal.']]);
+            }
+
+            $invoice = SaasBillingInvoice::query()->lockForUpdate()->findOrFail($locked->invoice->id);
+            $subscription = GymSubscription::query()->lockForUpdate()->findOrFail($locked->subscription->id);
+            if ($invoice->status !== SaasInvoiceStatus::Paid || $invoice->amount_paid_minor < 1) {
+                throw ValidationException::withMessages(['payment' => ['The linked invoice is no longer in the paid state expected by this approval.']]);
+            }
+            if ($invoice->period_start && $subscription->current_period_start
+                && ! $invoice->period_start->equalTo($subscription->current_period_start)) {
+                throw ValidationException::withMessages(['payment' => ['A later subscription period is already active. Reverse its linked transactions in order before changing this approval.']]);
+            }
+            if (SaasSubscriptionPayment::query()->where('saas_billing_invoice_id', $invoice->id)
+                ->where('id', '!=', $locked->id)
+                ->whereNotIn('status', [PaymentStatus::Rejected->value, PaymentStatus::Voided->value])
+                ->lockForUpdate()->exists()) {
+                throw ValidationException::withMessages(['payment' => ['Another payment is linked to this invoice, so automatic approval reversal is not safe.']]);
+            }
+
+            $reversal = SaasPaymentApprovalReversal::query()->create([
+                'saas_subscription_payment_id' => $locked->id,
+                'reversed_by' => $actor->id,
+                'previous_payment_status' => $locked->status->value,
+                'invoice_status_before' => $invoice->status->value,
+                'invoice_amount_paid_before' => $invoice->amount_paid_minor,
+                'invoice_amount_remaining_before' => $invoice->amount_remaining_minor,
+                'subscription_status_before' => $subscription->status->value,
+                'reason' => $reason,
+                'reversed_at' => now(),
+                'created_at' => now(),
+            ]);
+
+            $dueAt = $invoice->due_at?->copy()->setTimezone($gym->timezone);
+            $today = now($gym->timezone)->startOfDay();
+            $invoiceStatus = $dueAt?->isFuture()
+                ? SaasInvoiceStatus::Upcoming
+                : (($dueAt && $dueAt->lt($today)) ? SaasInvoiceStatus::PastDue : SaasInvoiceStatus::Due);
+            $invoice->update([
+                'status' => $invoiceStatus,
+                'amount_paid_minor' => 0,
+                'amount_remaining_minor' => $invoice->amount_due_minor,
+                'paid_at' => null,
+            ]);
+            $locked->update(['status' => PaymentStatus::Voided]);
+
+            $targetStatus = $subscription->trial_ends_at?->isFuture() === true
+                ? SaasSubscriptionStatus::Trialing
+                : SaasSubscriptionStatus::PastDue;
+            $restrictionExpired = $invoice->grace_ends_at?->copy()->setTimezone($gym->timezone)->lt(now($gym->timezone)) === true;
+            $subscription->update([
+                'status' => $targetStatus,
+                'billing_restricted_at' => $restrictionExpired ? ($subscription->billing_restricted_at ?? now()) : null,
+            ]);
+            $this->gymStatus->synchronize(
+                $gym,
+                $targetStatus,
+                trialEndsAt: $targetStatus === SaasSubscriptionStatus::Trialing ? $subscription->trial_ends_at : null,
+                actor: $actor,
+                reason: 'Mistaken SaaS payment approval reversed: '.$reason,
+                request: $request,
+            );
+            $this->audit->record('saas.subscription_payment.approval_reversed', $reversal, $actor, before: [
+                'payment_status' => PaymentStatus::Paid->value,
+                'invoice_status' => SaasInvoiceStatus::Paid->value,
+                'invoice_amount_paid_minor' => $reversal->invoice_amount_paid_before,
+                'invoice_amount_remaining_minor' => $reversal->invoice_amount_remaining_before,
+                'subscription_status' => $reversal->subscription_status_before,
+            ], after: [
+                'payment_status' => PaymentStatus::Voided->value,
+                'invoice_status' => $invoiceStatus->value,
+                'invoice_amount_paid_minor' => 0,
+                'invoice_amount_remaining_minor' => $invoice->amount_due_minor,
+                'subscription_status' => $targetStatus->value,
+                'billing_restricted_at' => $subscription->fresh()->billing_restricted_at?->toIso8601String(),
+            ], reason: $reason, request: $request);
+
+            return $locked->fresh()->load([
+                'price.plan', 'submittedBy:id,name,email', 'invoice',
+                'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name',
+                'approvalReversal.reversedBy:id,name',
+            ]);
         });
     }
 

@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SaasSubscriptionPayment extends Model
 {
@@ -77,5 +78,10 @@ class SaasSubscriptionPayment extends Model
     public function refunds(): HasMany
     {
         return $this->hasMany(SaasPaymentRefund::class, 'saas_subscription_payment_id')->oldest('created_at');
+    }
+
+    public function approvalReversal(): HasOne
+    {
+        return $this->hasOne(SaasPaymentApprovalReversal::class, 'saas_subscription_payment_id');
     }
 }

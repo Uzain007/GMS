@@ -91,3 +91,32 @@ test("automated SaaS lifecycle and platform intelligence remain tenant-safe", as
   assert.match(dashboard, /session-billing-reminder/);
   assert.match(dashboard, /Grace period remaining/);
 });
+
+test("SaaS financial corrections preserve original history and remain Super Admin controlled", async () => {
+  const [migration, service, routes, tenantUi, platformUi, planUi] = await Promise.all([
+    read("backend/database/migrations/2026_09_21_000041_add_saas_payment_approval_reversals.php"),
+    read("backend/app/Services/SaasBillingService.php"),
+    read("backend/routes/api.php"),
+    read("app/saas-billing-management.tsx"),
+    read("app/platform-insights.tsx"),
+    read("app/platform-portal.tsx"),
+  ]);
+  assert.match(migration, /saas_payment_approval_reversals/);
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/);
+  assert.match(migration, /saas_approval_reversal_payment_unique/);
+  assert.match(service, /public function replaceInvoice/);
+  assert.match(service, /public function reverseManualPaymentApproval/);
+  assert.match(service, /lockForUpdate/);
+  assert.match(service, /saas\.subscription_payment\.approval_reversed/);
+  assert.match(routes, /approval-reversal/);
+  assert.match(routes, /saas-billing-invoices\/\{invoice\}\/replace/);
+  assert.match(routes, /middleware\('role:super_admin'\)/);
+  assert.match(tenantUi, /Pay by bank transfer/);
+  assert.match(tenantUi, /Pay by cash/);
+  assert.match(tenantUi, /Reverse approval/);
+  assert.match(tenantUi, /Correct \/ replace/);
+  assert.match(platformUi, /Use only when no money was received/);
+  assert.match(planUi, /Archived plans/);
+  assert.match(planUi, /Delete unused draft/);
+  assert.match(planUi, /Location limit/);
+});
