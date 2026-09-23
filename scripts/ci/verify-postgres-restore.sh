@@ -117,14 +117,14 @@ SELECT set_config('ironcore.current_user_id', '${fixture_user}', false);
 SELECT set_config('ironcore.current_gym_id', '${fixture_gym_a}', false);
 INSERT INTO gym_user (gym_id, user_id, role, status, joined_at, created_at, updated_at)
 VALUES ('${fixture_gym_a}', '${fixture_user}', 'gym_owner', 'active', now(), now(), now());
-INSERT INTO members (id, gym_id, member_number, first_name, last_name, status, created_at, updated_at)
-VALUES ('${fixture_member_a}', '${fixture_gym_a}', 'RESTORE-A', 'Synthetic', 'Member A', 'active', now(), now());
+INSERT INTO members (id, gym_id, member_number, member_code, first_name, last_name, status, created_at, updated_at)
+VALUES ('${fixture_member_a}', '${fixture_gym_a}', 'RESTORE-A', '111111', 'Synthetic', 'Member A', 'active', now(), now());
 
 SELECT set_config('ironcore.current_gym_id', '${fixture_gym_b}', false);
 INSERT INTO gym_user (gym_id, user_id, role, status, joined_at, created_at, updated_at)
 VALUES ('${fixture_gym_b}', '${fixture_user}', 'gym_owner', 'active', now(), now(), now());
-INSERT INTO members (id, gym_id, member_number, first_name, last_name, status, created_at, updated_at)
-VALUES ('${fixture_member_b}', '${fixture_gym_b}', 'RESTORE-B', 'Synthetic', 'Member B', 'active', now(), now());
+INSERT INTO members (id, gym_id, member_number, member_code, first_name, last_name, status, created_at, updated_at)
+VALUES ('${fixture_member_b}', '${fixture_gym_b}', 'RESTORE-B', '222222', 'Synthetic', 'Member B', 'active', now(), now());
 
 COMMIT;
 SQL
