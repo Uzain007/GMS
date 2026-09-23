@@ -83,6 +83,8 @@ $tenant->run($gym, function () use ($gym, &$tokens): void {
             'id' => (string) \Illuminate\Support\Str::uuid(),
             'gym_id' => (string) $gym->getKey(),
             'member_number' => sprintf('LOAD-%04d', $index),
+            // Bulk inserts bypass Member::creating, so provide tenant-unique codes explicitly.
+            'member_code' => sprintf('%06d', $index),
             'first_name' => 'Synthetic',
             'last_name' => "Member {$index}",
             'status' => MemberStatus::Active->value,
