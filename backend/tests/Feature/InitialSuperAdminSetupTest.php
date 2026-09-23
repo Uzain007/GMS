@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\UserRole;
 use App\Models\Gym;
 use App\Models\User;
+use App\Support\DatabaseIdentityContext;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -23,6 +24,13 @@ class InitialSuperAdminSetupTest extends TestCase
 
         $this->setupKey = str_repeat('setup-owner-', 4);
         config(['initial_setup.key_hash' => hash('sha256', $this->setupKey)]);
+
+        // Redis persists named limiter buckets across test methods, unlike the
+        // refreshed database. A per-test TEST-NET address preserves the real
+        // five-per-minute production limit while isolating each test case.
+        $this->withServerVariables([
+            'REMOTE_ADDR' => '198.51.100.'.((abs(crc32($this->name())) % 254) + 1),
+        ]);
     }
 
     public function test_fresh_install_reports_that_owner_setup_is_required_and_configured(): void
@@ -84,10 +92,12 @@ class InitialSuperAdminSetupTest extends TestCase
         $this->assertSame(UserRole::SuperAdmin, $user->platform_role);
         $this->assertTrue(Hash::check('OwnerPassword9!', $user->password));
         $this->assertAuthenticatedAs($user);
-        $this->assertDatabaseHas('audit_logs', [
-            'actor_id' => $user->id,
-            'event' => 'platform.initial_super_admin.created',
-        ]);
+        app(DatabaseIdentityContext::class)->run($user, function () use ($user): void {
+            $this->assertDatabaseHas('audit_logs', [
+                'actor_id' => $user->id,
+                'event' => 'platform.initial_super_admin.created',
+            ]);
+        });
 
         $this->getJson('/api/v1/setup/super-admin')
             ->assertOk()

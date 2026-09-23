@@ -98,7 +98,9 @@ class BranchManagementWorkflowTest extends TestCase
             'reason' => 'Remove linked branch',
         ], $this->headers($gym))->assertUnprocessable()->assertJsonValidationErrors('branch');
 
-        $this->assertNotNull($member->fresh());
+        app(TenantContext::class)->run($gym, function () use ($member): void {
+            $this->assertNotNull($member->fresh());
+        });
     }
 
     public function test_only_empty_non_primary_branch_can_be_deleted_and_cross_tenant_id_is_hidden(): void

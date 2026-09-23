@@ -124,10 +124,12 @@ class GymLocationValidationTest extends TestCase
         ], $headers)->assertUnprocessable()
             ->assertJsonValidationErrors('timezone');
 
-        $this->assertDatabaseHas('gym_branches', [
-            'id' => $branchId,
-            'gym_id' => $gym->id,
-            'timezone' => 'Asia/Dubai',
-        ]);
+        app(TenantContext::class)->run($gym, function () use ($branchId, $gym): void {
+            $this->assertDatabaseHas('gym_branches', [
+                'id' => $branchId,
+                'gym_id' => $gym->id,
+                'timezone' => 'Asia/Dubai',
+            ]);
+        });
     }
 }
