@@ -119,6 +119,14 @@ export function extractMetaContent(html, name) {
   return null;
 }
 
+export function hasProductionShellMarkers(html) {
+  return (
+    html.includes("IRONCORE") &&
+    /<main\b[^>]*\bclass\s*=\s*["'][^"']*\bboot-page\b[^"']*["'][^>]*>/i.test(html) &&
+    html.includes("Securing your workspace")
+  );
+}
+
 function assertSameOrigin(response, origin, label) {
   if (new URL(response.url).origin !== origin) {
     throw new Error(`${label} redirected outside the reviewed deployment origin.`);
@@ -251,8 +259,8 @@ async function verifyDeployment(target, expectedCommit) {
   if (!/<title>IronCore \| Gym management, built to scale<\/title>/i.test(html)) {
     throw new Error("Homepage title does not match the reviewed IronCore release.");
   }
-  if (!html.includes("IRONCORE") || !html.includes("Preview gym portal")) {
-    throw new Error("Homepage is missing the platform-shell smoke markers.");
+  if (!hasProductionShellMarkers(html)) {
+    throw new Error("Homepage is missing the production boot-shell smoke markers.");
   }
 
   const releaseCommit = extractMetaContent(html, "ironcore-release")?.toLowerCase();

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   extractMetaContent,
+  hasProductionShellMarkers,
   validateExpectedCommit,
   validateTargetUrl,
 } from "../scripts/smoke/deployed-web.mjs";
@@ -83,4 +84,24 @@ test("release marker parsing and expected commit validation are deterministic", 
   assert.equal(validateExpectedCommit(sha.toUpperCase()), sha);
   assert.equal(validateExpectedCommit(undefined), null);
   assert.throws(() => validateExpectedCommit("2ddc641"), /full Git commit SHA/);
+});
+
+test("deployed smoke requires the real production boot shell", () => {
+  const productionShell = `
+    <main class="boot-page">
+      <div class="auth-brand"><b>IRONCORE</b></div>
+      <span>Securing your workspace…</span>
+    </main>
+  `;
+
+  assert.equal(hasProductionShellMarkers(productionShell), true);
+  assert.equal(
+    hasProductionShellMarkers(productionShell.replace("boot-page", "landing-page")),
+    false,
+  );
+  assert.equal(
+    hasProductionShellMarkers(productionShell.replace("Securing your workspace…", "Preview gym portal")),
+    false,
+  );
+  assert.equal(hasProductionShellMarkers(productionShell.replace("IRONCORE", "GYM")), false);
 });
