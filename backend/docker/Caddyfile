@@ -7,6 +7,9 @@
 # injected PORT is authoritative; 8000 is only a safe local image fallback.
 :{$PORT:8000} {
 	root * /var/www/html/public
+	# Railway terminates TLS; keep this policy host-only so future nested API
+	# domains are not forced onto HTTPS before their certificates are reviewed.
+	header Strict-Transport-Security "max-age=63072000"
 	encode zstd gzip
 	php_fastcgi 127.0.0.1:9000
 	file_server
