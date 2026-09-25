@@ -50,6 +50,7 @@ import type {
 } from "./lib/ironcore-api";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
 import { formatGymDateTime, formatGymDay, formatGymMonth } from "./lib/gym-time";
+import { isoDateInputValue } from "./lib/form-values";
 
 type MemberView = "home" | "pass" | "classes" | "training" | "progress" | "account";
 
@@ -176,7 +177,7 @@ function MemberPaymentsCard({ data, actions }: { data: MemberPortalData; actions
         method,
         idempotency_key: paymentRequestKey(),
         bank_reference: String(form.get("bank_reference")) || undefined,
-        transferred_on: String(form.get("transferred_on")) || undefined,
+        transferred_on: method === "bank_transfer" ? isoDateInputValue(form, "transferred_on") : undefined,
         receipt: receipt instanceof File && receipt.size > 0 ? receipt : undefined,
       });
       if (checkout) window.location.assign(checkout);

@@ -11,6 +11,7 @@ import type {
   SaasPaymentOptions, SaasPlanRecord, SaasSubscriptionPaymentRecord,
   NewSaasPaymentCorrection, ReplaceSaasBillingInvoice,
 } from "./lib/ironcore-api";
+import { isoDateInputValue } from "./lib/form-values";
 
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 
@@ -187,7 +188,7 @@ function ManualPaymentModal({ choice, paymentOptions, onClose, onSubmit }: {
     setBusy(true); setError(null);
     try {
       await onSubmit({ priceId: choice.priceId, invoiceId: choice.invoiceId, method: choice.method,
-        reference: String(form.get("reference")).trim() || undefined, paymentDate: String(form.get("payment_date")) || undefined,
+        reference: String(form.get("reference")).trim() || undefined, paymentDate: isoDateInputValue(form, "payment_date"),
         notes: String(form.get("notes")).trim() || undefined,
         idempotencyKey: requestKey(), receipt: receipt instanceof File && receipt.size > 0 ? receipt : undefined });
       onClose();

@@ -76,3 +76,22 @@ test("bank transfers require a real transfer date at both UI and API boundaries"
   assert.match(paymentRequest, /required_if:method,bank_transfer/);
   assert.match(saasRequest, /required_if:method,'.PaymentMethod::BankTransfer->value/);
 });
+
+test("payment forms submit only present ISO date values", async () => {
+  const [helper, finance, member, saas] = await Promise.all([
+    read("app/lib/form-values.ts"),
+    read("app/financial-management.tsx"),
+    read("app/member-portal.tsx"),
+    read("app/saas-billing-management.tsx"),
+  ]);
+
+  assert.match(helper, /const ISO_DATE_INPUT/);
+  assert.match(helper, /typeof value !== "string"/);
+  assert.match(helper, /ISO_DATE_INPUT\.test\(normalized\)/);
+  assert.match(finance, /payment_date: method === "cash" \? isoDateInputValue\(value, "payment_date"\) : undefined/);
+  assert.match(finance, /transferred_on: method === "bank_transfer" \? isoDateInputValue\(value, "transferred_on"\) : undefined/);
+  assert.match(member, /transferred_on: method === "bank_transfer" \? isoDateInputValue\(form, "transferred_on"\) : undefined/);
+  assert.match(saas, /paymentDate: isoDateInputValue\(form, "payment_date"\)/);
+  assert.doesNotMatch(finance, /payment_date: String\(value\.get/);
+  assert.doesNotMatch(finance, /transferred_on: String\(value\.get/);
+});
