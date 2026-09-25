@@ -37,6 +37,7 @@ class SaasBillingService
         private readonly StripePlatformBillingService $stripe,
         private readonly AuditService $audit,
         private readonly GymSaasStatusService $gymStatus,
+        private readonly ReceiptFileProcessor $receiptFiles,
     ) {}
 
     public function createPlan(array $data, User $actor, Request $request): SaasPlan
@@ -1045,29 +1046,44 @@ class SaasBillingService
     private function storeManualReceipt(SaasSubscriptionPayment $payment, UploadedFile $receipt): array
     {
         $disk = (string) config('filesystems.default');
-        $extension = $receipt->guessExtension() ?: 'bin';
+        $prepared = $this->receiptFiles->prepare($receipt);
         $directory = "gyms/{$payment->gym_id}/saas-billing/{$payment->getKey()}/bank-transfer";
-        $path = Storage::disk($disk)->putFileAs(
-            $directory,
-            $receipt,
-            Str::uuid().'.'.$extension,
-            ['visibility' => 'private'],
-        );
-        if (! $path) {
-            throw ValidationException::withMessages(['receipt' => ['The SaaS bank-transfer receipt could not be stored.']]);
-        }
+        $path = $directory.'/'.Str::uuid().'.'.$prepared['extension'];
 
-        return [
-            'disk' => $disk,
-            'path' => $path,
-            'attributes' => [
-                'receipt_disk' => $disk,
-                'receipt_path' => $path,
-                'receipt_original_name' => Str::limit(basename($receipt->getClientOriginalName()), 240, ''),
-                'receipt_mime_type' => (string) $receipt->getMimeType(),
-                'receipt_size_bytes' => (int) $receipt->getSize(),
-                'receipt_sha256' => hash_file('sha256', $receipt->getRealPath()),
-            ],
-        ];
+        try {
+            $stream = fopen($prepared['path'], 'rb');
+            if (! is_resource($stream)) {
+                throw new \RuntimeException('The processed receipt could not be opened.');
+            }
+            try {
+                $stored = Storage::disk($disk)->put($path, $stream, [
+                    'visibility' => 'private',
+                    'mimetype' => $prepared['mime_type'],
+                ]);
+            } finally {
+                fclose($stream);
+            }
+            if (! $stored) {
+                throw ValidationException::withMessages(['receipt' => ['The SaaS bank-transfer receipt could not be stored.']]);
+            }
+
+            return [
+                'disk' => $disk,
+                'path' => $path,
+                'attributes' => [
+                    'receipt_disk' => $disk,
+                    'receipt_path' => $path,
+                    'receipt_original_name' => Str::limit(basename($receipt->getClientOriginalName()), 240, ''),
+                    'receipt_mime_type' => $prepared['mime_type'],
+                    'receipt_size_bytes' => $prepared['size_bytes'],
+                    'receipt_sha256' => $prepared['content_sha256'],
+                ],
+            ];
+        } catch (Throwable $exception) {
+            Storage::disk($disk)->delete($path);
+            throw $exception;
+        } finally {
+            $this->receiptFiles->cleanup($prepared);
+        }
     }
 }

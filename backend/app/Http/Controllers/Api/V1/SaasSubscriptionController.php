@@ -333,7 +333,7 @@ class SaasSubscriptionController extends Controller
     public function manualPaymentReceipt(string $payment): StreamedResponse
     {
         $record = SaasSubscriptionPayment::query()->findOrFail($payment);
-        abort_unless(filled($record->receipt_path), 404);
+        abort_unless(filled($record->receipt_path) && $record->receipt_deleted_at === null, 404);
         $disk = Storage::disk($record->receipt_disk);
         abort_unless($disk->exists($record->receipt_path), 404);
         $disposition = (new ResponseHeaderBag())->makeDisposition(

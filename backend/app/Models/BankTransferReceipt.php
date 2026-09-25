@@ -15,7 +15,7 @@ class BankTransferReceipt extends Model
         'payment_id', 'member_id', 'membership_id', 'invoice_id', 'submitted_by',
         'reviewed_by', 'bank_reference', 'transferred_on', 'storage_disk', 'storage_path',
         'original_name', 'mime_type', 'size_bytes', 'content_sha256',
-        'reviewed_at', 'review_reason',
+        'file_deleted_at', 'reviewed_at', 'review_reason',
     ];
 
     protected function casts(): array
@@ -23,6 +23,7 @@ class BankTransferReceipt extends Model
         return [
             'size_bytes' => 'integer',
             'transferred_on' => 'immutable_date',
+            'file_deleted_at' => 'immutable_datetime',
             'reviewed_at' => 'immutable_datetime',
         ];
     }

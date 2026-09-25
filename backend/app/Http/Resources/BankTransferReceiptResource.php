@@ -20,6 +20,7 @@ class BankTransferReceiptResource extends JsonResource
             'original_name' => $this->original_name,
             'mime_type' => $this->mime_type,
             'size_bytes' => $this->size_bytes,
+            'file_available' => $this->file_deleted_at === null,
             'submitted_at' => $this->created_at?->toIso8601String(),
             'reviewed_at' => $this->reviewed_at?->toIso8601String(),
             'review_reason' => $this->review_reason,

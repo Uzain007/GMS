@@ -367,7 +367,7 @@ class PlatformInsightsService
             'payment_date' => $payment->payment_date?->toDateString(),
             'effective_payment_date' => $effectiveDate,
             'notes' => $payment->notes,
-            'has_receipt' => filled($payment->receipt_path),
+            'has_receipt' => filled($payment->receipt_path) && $payment->receipt_deleted_at === null,
             'submitted_by' => $payment->submittedBy ? [
                 'id' => $payment->submittedBy->id,
                 'name' => $payment->submittedBy->name,

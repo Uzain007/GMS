@@ -56,7 +56,7 @@ class SaasSubscriptionPaymentResource extends JsonResource
                 ] : null,
                 'reversed_at' => $this->approvalReversal->reversed_at?->toIso8601String(),
             ] : null),
-            'has_receipt' => filled($this->receipt_path),
+            'has_receipt' => filled($this->receipt_path) && $this->receipt_deleted_at === null,
             'receipt_original_name' => $this->receipt_original_name,
             'reviewed_at' => $this->reviewed_at,
             'review_reason' => $this->review_reason,

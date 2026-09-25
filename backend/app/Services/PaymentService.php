@@ -30,6 +30,7 @@ class PaymentService
         private readonly AuditService $audit,
         private readonly StripeGatewayService $stripe,
         private readonly AutomatedMembershipBillingService $membershipBilling,
+        private readonly ReceiptFileProcessor $receiptFiles,
     ) {}
 
     /** @return array{payment: Payment, checkout_url: ?string, reused: bool} */
@@ -345,19 +346,26 @@ class PaymentService
         ?string $transferredOn,
     ): array {
         $disk = (string) config('filesystems.default');
-        $extension = $receipt->guessExtension() ?: 'bin';
+        $prepared = $this->receiptFiles->prepare($receipt);
         $directory = "gyms/{$payment->gym_id}/payments/{$payment->getKey()}/bank-transfer";
-        $path = Storage::disk($disk)->putFileAs(
-            $directory,
-            $receipt,
-            Str::uuid().'.'.$extension,
-            ['visibility' => 'private'],
-        );
-        if (! $path) {
-            throw ValidationException::withMessages(['receipt' => ['The bank-transfer receipt could not be stored.']]);
-        }
-
+        $path = $directory.'/'.Str::uuid().'.'.$prepared['extension'];
         try {
+            $stream = fopen($prepared['path'], 'rb');
+            if (! is_resource($stream)) {
+                throw new \RuntimeException('The processed receipt could not be opened.');
+            }
+            try {
+                $stored = Storage::disk($disk)->put($path, $stream, [
+                    'visibility' => 'private',
+                    'mimetype' => $prepared['mime_type'],
+                ]);
+            } finally {
+                fclose($stream);
+            }
+            if (! $stored) {
+                throw ValidationException::withMessages(['receipt' => ['The bank-transfer receipt could not be stored.']]);
+            }
+
             $model = BankTransferReceipt::query()->create([
                 'payment_id' => $payment->getKey(),
                 'member_id' => $member->getKey(),
@@ -369,13 +377,15 @@ class PaymentService
                 'storage_disk' => $disk,
                 'storage_path' => $path,
                 'original_name' => Str::limit(basename($receipt->getClientOriginalName()), 240, ''),
-                'mime_type' => (string) $receipt->getMimeType(),
-                'size_bytes' => (int) $receipt->getSize(),
-                'content_sha256' => hash_file('sha256', $receipt->getRealPath()),
+                'mime_type' => $prepared['mime_type'],
+                'size_bytes' => $prepared['size_bytes'],
+                'content_sha256' => $prepared['content_sha256'],
             ]);
         } catch (Throwable $exception) {
             Storage::disk($disk)->delete($path);
             throw $exception;
+        } finally {
+            $this->receiptFiles->cleanup($prepared);
         }
 
         return ['model' => $model, 'disk' => $disk, 'path' => $path];

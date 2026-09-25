@@ -159,6 +159,32 @@ class OptionalPaymentMethodsTest extends TestCase
         ])->assertNotFound();
     }
 
+    public function test_member_receipt_images_are_processed_before_private_storage(): void
+    {
+        Storage::fake('local');
+        config(['filesystems.default' => 'local']);
+        [, $memberUser, $gym, , , , $invoice] = $this->contract('IMAGE');
+        Sanctum::actingAs($memberUser);
+
+        $payment = $this->post("/api/v1/gyms/{$gym->id}/member/payments", [
+            'invoice_id' => $invoice['id'],
+            'method' => 'bank_transfer',
+            'idempotency_key' => 'member-image-receipt',
+            'transferred_on' => today()->toDateString(),
+            'receipt' => UploadedFile::fake()->image('receipt.jpg', 2400, 1800),
+        ], ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.bank_transfer_receipt.mime_type', 'image/jpeg')
+            ->assertJsonPath('data.bank_transfer_receipt.file_available', true)
+            ->json('data');
+
+        $receipt = app(TenantContext::class)->run($gym, fn () => Payment::query()
+            ->with('bankTransferReceipt')->findOrFail($payment['id'])->bankTransferReceipt);
+        Storage::disk('local')->assertExists($receipt->storage_path);
+        $this->assertLessThanOrEqual(\App\Services\ReceiptFileProcessor::TARGET_BYTES, $receipt->size_bytes);
+        $this->assertNotFalse(getimagesize(Storage::disk('local')->path($receipt->storage_path)));
+    }
+
     public function test_bank_transfer_can_be_rejected_without_settling_invoice(): void
     {
         Storage::fake('local');

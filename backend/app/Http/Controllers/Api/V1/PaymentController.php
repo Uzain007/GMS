@@ -86,6 +86,7 @@ class PaymentController extends Controller
 
     public static function streamReceipt(\App\Models\BankTransferReceipt $receipt): StreamedResponse
     {
+        abort_unless($receipt->file_deleted_at === null, 404);
         $disk = Storage::disk($receipt->storage_disk);
         abort_unless($disk->exists($receipt->storage_path), 404);
         $disposition = (new ResponseHeaderBag())->makeDisposition(

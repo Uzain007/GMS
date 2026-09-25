@@ -23,7 +23,7 @@ class SaasSubscriptionPayment extends Model
         'payment_date', 'notes', 'refunded_amount_minor',
         'receipt_disk', 'receipt_path', 'receipt_original_name',
         'receipt_mime_type', 'receipt_size_bytes', 'receipt_sha256',
-        'reviewed_at', 'review_reason', 'paid_at',
+        'receipt_deleted_at', 'reviewed_at', 'review_reason', 'paid_at',
     ];
 
     protected $hidden = [
@@ -40,6 +40,7 @@ class SaasSubscriptionPayment extends Model
             'refunded_amount_minor' => 'integer',
             'payment_date' => 'immutable_date',
             'receipt_size_bytes' => 'integer',
+            'receipt_deleted_at' => 'immutable_datetime',
             'reviewed_at' => 'immutable_datetime',
             'paid_at' => 'immutable_datetime',
         ];

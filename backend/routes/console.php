@@ -11,3 +11,6 @@ Artisan::command('ironcore:status', function (): void {
 // the command service, so forced PostgreSQL RLS remains active throughout.
 Schedule::command('ironcore:saas-billing')->dailyAt('01:00')->withoutOverlapping();
 Schedule::command('ironcore:membership-billing')->dailyAt('01:15')->withoutOverlapping();
+// Delete only private receipt objects after their 12-month retention period;
+// the command leaves every financial and audit record intact.
+Schedule::command('ironcore:receipt-retention')->dailyAt('02:00')->withoutOverlapping();

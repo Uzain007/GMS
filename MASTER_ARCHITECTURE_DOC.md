@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.59.0 — audited SaaS invoice replacement and approval reversal controls |
-| Last verified | 21 September 2026 |
+| MAD version | 0.60.0 — private receipt compression and file-retention lifecycle |
+| Last verified | 25 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Audited SaaS invoice void-and-replace, mistaken-approval reversal and complete catalogue/payment recovery UX implemented locally; approval pending |
+| Active milestone | Private member/SaaS receipt image processing and 12-month object retention implemented locally; approval pending |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -457,10 +457,11 @@ The payment-status upgrade runs one explicit gym at a time while PostgreSQL FORC
 | `transferred_on` | date | yes | optional member-reported transfer date; never treated as settlement evidence by itself |
 | `storage_disk`, `storage_path` | varchar | no | private object locator under `gyms/{gym_id}/payments/{payment_id}`; never returned by resources |
 | `original_name`, `mime_type`, `size_bytes`, `content_sha256` | mixed | no | validated PDF/image metadata and integrity digest |
+| `file_deleted_at` | timestamp | yes | object-retention completion marker; financial and receipt metadata remain permanent |
 | `reviewed_at`, `review_reason` | timestamp/text | yes | mandatory reason recorded on approval/rejection |
-| `created_at`, `updated_at` | timestamp | yes | indexes `(gym_id, member_id, created_at)`, `(gym_id, reviewed_at, created_at)` |
+| `created_at`, `updated_at` | timestamp | yes | indexes include `(gym_id, file_deleted_at, created_at)` for bounded retention scans |
 
-Receipts are streamed only after tenant middleware, role/member-self authorization, Eloquent scoping and forced PostgreSQL RLS. Responses are private/no-store, attachment-only, MIME-sniff protected and never expose an object-store URL.
+Receipts are streamed only after tenant middleware, role/member-self authorization, Eloquent scoping and forced PostgreSQL RLS. Responses are private/no-store, attachment-only, MIME-sniff protected and never expose an object-store URL. Validated JPEG, PNG and WebP uploads are re-encoded before private storage with a 500 KB target, bounded dimensions and a readability floor; when that target cannot be reached safely the smallest readable candidate is retained. PDFs are validated and stored without image transformation.
 
 ### `gym_bank_transfer_settings` — encrypted tenant payment instructions
 
@@ -574,11 +575,14 @@ Stripe subscriptions are activated only by signed provider events. Cash and bank
 | `idempotency_key`, `reference` | varchar | no/yes | tenant-unique retry key; bank reference required while cash reference is optional |
 | `payment_date` | date | yes | required for both methods and presented as transfer date for bank or payment date for cash |
 | `notes` | text | yes | bounded optional submitter context; never provider credentials |
-| receipt metadata | mixed | yes | private tenant-prefixed PDF/image locator, digest, MIME and size; required for bank transfer |
+| receipt metadata | mixed | yes | private tenant-prefixed PDF/image locator, digest, MIME and stored size; required for bank transfer |
+| `receipt_deleted_at` | timestamp | yes | object-retention completion marker; original payment and receipt metadata remain permanent |
 | `reviewed_at`, `review_reason`, `paid_at` | mixed | yes | mandatory decision evidence and settlement time |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status, method and price indexes |
 
 Manual subscription payments never enter the gym-member `payments` table. Selecting cash or bank first creates an idempotent Incomplete manual contract plus a visible numbered invoice from the authoritative price; evidence is then linked to that invoice. One pending manual request is allowed per gym. Approval atomically marks the invoice Paid and the subscription Active, moves a Trial/Past-due tenant to Active, clears its trial end and records the paid period start/end; rejection preserves invoice/evidence without granting service and allows a corrected resubmission. Signed paid or failed Stripe invoices apply the same Active/Past-due tenant lifecycle. Suspended and Cancelled tenant states remain explicit Super Admin overrides and are never reopened by billing automation.
+
+Private member-payment and SaaS receipt objects are retained for 12 calendar months from record creation. The tenant-scoped scheduler deletes only the storage object, verifies its absence and records the corresponding deletion timestamp; it never removes or clears payment, invoice, transaction, reference, approval, audit, path, digest or other financial metadata. IronCore has no dispute/legal-hold status today, so no hold exemption is claimed; such a mechanism must be designed before a future policy requires retention beyond 12 months.
 
 ### `saas_payment_corrections` — append-only SaaS payment annotations
 
@@ -1151,7 +1155,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - Production uses separate frontend, Laravel API, PostgreSQL 17, Redis and S3-compatible storage services; free frontend hosting is not a safe substitute for the stateful API/database/queue stack.
 - HTTPS, exact CORS/Sanctum origins, secure cookies, trusted proxy configuration and environment-only secrets are mandatory before launch.
-- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs `ironcore:membership-billing` daily at 01:15 alongside the existing SaaS billing lifecycle, with overlap locks and the same PostgreSQL/Redis configuration as the web process.
+- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs SaaS billing at 01:00, `ironcore:membership-billing` at 01:15 and tenant-scoped `ironcore:receipt-retention` at 02:00, all with overlap locks and the same PostgreSQL/Redis/storage configuration as the web process.
 - Platform bank transfer is enabled only when `SAAS_BANK_ACCOUNT_NAME`, `SAAS_BANK_NAME` and `SAAS_BANK_ACCOUNT_NUMBER_OR_IBAN` are all configured; routing details and instructions are optional. These platform values are commercially and technically separate from every gym's encrypted member-payment bank settings.
 - The production backend image runs Caddy and PHP-FPM under Supervisor. Caddy binds to Railway's injected `PORT` (with `8000` only as an image-local fallback), serves Laravel exclusively from `public/` and forwards PHP requests to the private PHP-FPM listener. Local Docker Compose retains its explicit `php artisan serve` override.
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
@@ -1187,6 +1191,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 | Milestone / feature | Status | Notes |
 | --- | --- | --- |
+| Private receipt compression and 12-month object retention | Implemented locally; approval pending | JPEG/PNG/WebP receipts target 500 KB with a readability fallback, PDFs bypass image processing, and the existing single scheduler deletes only expired private objects while permanent tenant financial metadata remains intact. No dispute/legal-hold mechanism currently exists. |
 | Post-deployment stabilization — owner UX, audit, billing corrections and offboarding | Implemented locally; approval pending | One-time owner credentials are copyable only until dismissal; owner/invitation mail uses the shared provider; paid SaaS corrections are append-only; audit history exposes the existing encrypted log; suspended/archived tenants cannot log in; real history blocks hard deletion. |
 | IronCore Beta — member payment and access lifecycle | Implemented locally; approval pending | Cash and bank transfer use distinct required business dates; owners/managers can reason-amend member contracts; a daily idempotent renewal invoice/reminder/grace workflow restricts overdue QR, check-in, booking and coaching access and restores it after full payment; member and staff sessions have six- and ten-hour absolute limits. |
 | IronCore Beta v0.1 — Railway public API container | Implemented locally; approval pending | The backend image now supervises Caddy plus PHP-FPM, listens on Railway's dynamic `PORT`, serves only Laravel's public directory and preserves the existing local Compose command overrides. `/up` remains process liveness and `/api/v1/health/readiness` remains the PostgreSQL/Redis readiness gate. |
