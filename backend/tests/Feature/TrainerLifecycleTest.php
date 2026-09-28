@@ -11,6 +11,7 @@ use App\Models\Member;
 use App\Models\StaffProfile;
 use App\Models\User;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,44 @@ use Tests\TestCase;
 class TrainerLifecycleTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_trainer_assignment_visibility_uses_the_gym_calendar_day(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-24 20:30:00', 'UTC'));
+
+        try {
+            [$owner, $gym] = $this->tenant();
+            $gym->update(['timezone' => 'Asia/Karachi']);
+            $branch = $this->branch($gym, 'LOCALDAY');
+            $member = $this->member($gym, $branch, 'LOCAL-DAY');
+            Sanctum::actingAs($owner);
+
+            $trainerId = $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+                'name' => 'Local Day Trainer',
+                'email' => 'local-day-trainer@example.test',
+                'phone' => '+44 7700 900325',
+                'home_branch_id' => $branch->id,
+                'status' => 'active',
+            ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data.id');
+
+            $assignmentId = $this->postJson("/api/v1/gyms/{$gym->id}/trainer-assignments", [
+                'trainer_staff_profile_id' => $trainerId,
+                'member_id' => $member->id,
+                'starts_on' => '2026-09-25',
+            ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data.id');
+
+            $trainer = app(TenantContext::class)->run(
+                $gym,
+                fn () => StaffProfile::query()->with('user')->findOrFail($trainerId),
+            );
+            Sanctum::actingAs($trainer->user);
+            $this->getJson("/api/v1/gyms/{$gym->id}/trainer-assignments", ['X-Gym-ID' => $gym->id])
+                ->assertOk()
+                ->assertJsonFragment(['id' => $assignmentId]);
+        } finally {
+            $this->travelBack();
+        }
+    }
 
     public function test_owner_can_complete_the_trainer_class_coaching_plan_and_portal_journey(): void
     {

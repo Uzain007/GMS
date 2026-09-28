@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\WorkoutPlan;
 use App\Models\WorkoutPlanExercise;
 use App\Models\WorkoutSession;
+use App\Support\TenantClock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -64,7 +65,9 @@ class TrainingService
             // trail preserve history without deleting tenant evidence.
             $assignment->update([
                 'status' => TrainerAssignmentStatus::Inactive,
-                'ends_on' => $assignment->starts_on->isAfter(today()) ? $assignment->starts_on : today(),
+                'ends_on' => $assignment->starts_on->toDateString() > TenantClock::businessDate()
+                    ? $assignment->starts_on
+                    : TenantClock::businessDate(),
             ]);
             $fresh = $assignment->fresh(['trainer.user', 'member']);
             $this->audit->record('trainer_assignment.ended', $fresh, $actor, $before, $fresh->toArray(), $reason, $request);

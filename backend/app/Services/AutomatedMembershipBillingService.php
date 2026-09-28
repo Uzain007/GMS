@@ -11,6 +11,7 @@ use App\Models\Invoice;
 use App\Models\Member;
 use App\Models\Membership;
 use App\Models\NotificationPreference;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -84,8 +85,8 @@ class AutomatedMembershipBillingService
                             'paid_amount_minor' => 0,
                             'due_amount_minor' => $locked->price_amount_minor,
                             'issued_at' => now(),
-                            'due_at' => CarbonImmutable::parse($cycleDate, 'UTC')->endOfDay(),
-                            'grace_ends_at' => CarbonImmutable::parse($cycleDate, 'UTC')->endOfDay()->addDays($locked->grace_period_days),
+                            'due_at' => TenantClock::localDate($cycleDate)->endOfDay()->utc(),
+                            'grace_ends_at' => TenantClock::localDate($cycleDate)->endOfDay()->addDays($locked->grace_period_days)->utc(),
                             'notes' => 'Automated membership renewal invoice.',
                             'metadata' => ['source' => 'membership_billing_lifecycle'],
                         ]);
@@ -150,7 +151,7 @@ class AutomatedMembershipBillingService
 
     private function nextCycle(Membership $membership): ?CarbonImmutable
     {
-        $from = CarbonImmutable::parse($membership->next_billing_at ?? today());
+        $from = CarbonImmutable::parse($membership->next_billing_at ?? TenantClock::businessDate(), 'UTC');
         return match ($membership->billing_interval) {
             BillingInterval::Weekly => $from->addWeeks($membership->interval_count),
             BillingInterval::Monthly => $from->addMonthsNoOverflow($membership->interval_count),

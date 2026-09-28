@@ -12,6 +12,7 @@ use App\Models\MembershipPlan;
 use App\Services\AuditService;
 use App\Services\MemberCodeService;
 use App\Services\MemberImportPreviewService;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -106,7 +107,7 @@ class ProcessMemberImport implements ShouldQueue
                     $plan = $planId ? $plans->get($planId) : null;
                     if (! $plan) continue;
                     $member = collect($memberRows)->firstWhere('id', $memberId);
-                    $startsAt = CarbonImmutable::parse($member['joined_at'] ?: today());
+                    $startsAt = CarbonImmutable::parse($member['joined_at'] ?: TenantClock::businessDate(), 'UTC');
                     $membershipRows[] = [
                         'id' => (string) Str::uuid(), 'gym_id' => app(TenantContext::class)->id(),
                         'member_id' => $memberId, 'plan_id' => $plan->id,

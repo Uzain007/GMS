@@ -12,7 +12,7 @@ class StoreSaasBillingInvoiceRequest extends TenantFormRequest
             'saas_plan_price_id' => ['required', 'uuid', 'exists:saas_plan_prices,id'],
             'amount_minor' => ['required', 'integer', 'min:1'],
             'currency' => ['required', Rule::in(['GBP', 'USD', 'PKR', 'AED', 'SAR'])],
-            'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'due_date' => ['required', 'date_format:Y-m-d', 'after_or_equal:'.$this->tenantToday()],
             'idempotency_key' => ['required', 'string', 'min:16', 'max:120'],
             'reason' => ['required', 'string', 'min:5', 'max:1000'],
         ];

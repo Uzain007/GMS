@@ -1,5 +1,13 @@
 const ISO_DATE_INPUT = /^\d{4}-\d{2}-\d{2}$/;
 
+export function optionalStringInputValue(form: FormData, field: string): string | undefined {
+  const value = form.get(field);
+  if (typeof value !== "string") return undefined;
+
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
 export function isoDateInputValue(form: FormData, field: string): string | undefined {
   const value = form.get(field);
   if (typeof value !== "string") return undefined;

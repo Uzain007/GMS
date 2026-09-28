@@ -19,7 +19,7 @@ class StoreMemberPaymentRequest extends TenantFormRequest
             ])],
             'idempotency_key' => ['required', 'string', 'max:120'],
             'bank_reference' => ['nullable', 'string', 'max:160'],
-            'transferred_on' => ['nullable', 'required_if:method,bank_transfer', 'date', 'before_or_equal:today'],
+            'transferred_on' => ['nullable', 'required_if:method,bank_transfer', 'date_format:Y-m-d', 'before_or_equal:'.$this->tenantToday()],
             'receipt' => [
                 'required_if:method,'.PaymentMethod::BankTransfer->value,
                 'file',

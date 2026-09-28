@@ -14,6 +14,7 @@ use App\Models\WorkoutPlan;
 use App\Enums\MembershipStatus;
 use Illuminate\Validation\ValidationException;
 use App\Tenancy\TenantContext;
+use App\Support\TenantClock;
 
 class TrainingAccessService
 {
@@ -100,8 +101,8 @@ class TrainingAccessService
     {
         $membership = Membership::query()->where('member_id', $member->getKey())
             ->where('status', MembershipStatus::Active->value)
-            ->whereDate('starts_at', '<=', today())
-            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', today()))
+            ->whereDate('starts_at', '<=', TenantClock::businessDate())
+            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', TenantClock::businessDate()))
             ->latest('starts_at')->first();
         if ($membership?->billing_restricted_at) {
             throw ValidationException::withMessages([
@@ -116,8 +117,8 @@ class TrainingAccessService
             ->where('trainer_staff_profile_id', $trainerId)
             ->where('member_id', $memberId)
             ->where('status', TrainerAssignmentStatus::Active->value)
-            ->whereDate('starts_on', '<=', today())
-            ->where(fn ($query) => $query->whereNull('ends_on')->orWhereDate('ends_on', '>=', today()))
+            ->whereDate('starts_on', '<=', TenantClock::businessDate())
+            ->where(fn ($query) => $query->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()))
             ->exists();
     }
 

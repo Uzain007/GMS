@@ -13,6 +13,7 @@ use App\Models\TrainerMemberAssignment;
 use App\Models\WorkoutPlan;
 use App\Services\TrainingAccessService;
 use App\Services\TrainingService;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -33,8 +34,8 @@ class WorkoutPlanController extends Controller
             $assignedMembers = TrainerMemberAssignment::query()->select('member_id')
                 ->where('trainer_staff_profile_id', $trainer->getKey())
                 ->where('status', TrainerAssignmentStatus::Active->value)
-                ->whereDate('starts_on', '<=', today())
-                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', today()));
+                ->whereDate('starts_on', '<=', TenantClock::businessDate())
+                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()));
             $query->where('trainer_staff_profile_id', $trainer->getKey())
                 ->whereIn('member_id', $assignedMembers);
         } else {

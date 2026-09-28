@@ -1,4 +1,5 @@
 const localDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+const calendarDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function zonedParts(value: Date, timeZone: string): Record<string, number> {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -15,6 +16,26 @@ function zonedParts(value: Date, timeZone: string): Record<string, number> {
   return Object.fromEntries(parts
     .filter((part) => part.type !== "literal")
     .map((part) => [part.type, Number(part.value)]));
+}
+
+export function dateInputValueInTimeZone(timeZone: string, value = new Date()): string {
+  const parts = zonedParts(value, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+export function formatCalendarDate(value: string): string {
+  const match = calendarDatePattern.exec(value);
+  if (!match) throw new Error("A calendar date in YYYY-MM-DD format is required.");
+  const [, year, month, day] = match.map(Number);
+
+  // Laravel DATE fields are calendar values, not UTC instants. Formatting an
+  // explicit UTC date prevents browsers west of UTC from showing the prior day.
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
 export function zonedLocalDateTimeToIso(value: string, timeZone: string): string {

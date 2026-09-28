@@ -176,7 +176,7 @@ const demoFinance: FinanceData = {
   branches: [{ id: "demo-branch-1", name: "Manchester Central" }],
   summary: { grossMinor: 25700, refundedMinor: 1000, netMinor: 24700, pendingMinor: 0, outstandingMinor: 4900, currency: "GBP" },
   gateway: { status: "active", chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true, accountId: "acct_demo••4812", requirements: [] },
-  stripeConfigured: true, stripeAvailable: true,
+  stripeConfigured: true, stripeAvailable: true, timezone: "Europe/London",
   actorRole: "gym_owner", loading: false, error: null, onReload: () => undefined,
   onCreateInvoice: async () => undefined, onCreatePayment: async () => null, onRefund: async () => undefined,
   onReviewBankTransfer: async () => undefined, onLoadReceipt: async () => new Blob(),
@@ -196,7 +196,7 @@ const demoSaasBilling: SaasBillingData = {
     { id: "saas-invoice-2", number: "IC-2026-0074", status: "paid", currency: "GBP", amount_due_minor: 7900, amount_paid_minor: 7900, amount_remaining_minor: 0, hosted_invoice_url: null, invoice_pdf_url: null, period_start: "2026-07-01T00:00:00Z", period_end: "2026-08-01T00:00:00Z", due_at: null, paid_at: "2026-07-01T00:02:00Z", created_at: "2026-07-01T00:00:00Z" },
   ],
   payments: [], paymentOptions: { cash_available: true, bank_transfer_available: false, stripe_configured: true, platform_bank_details: null },
-  baseCurrency: "GBP", actorRole: "super_admin", loading: false, error: null,
+  baseCurrency: "GBP", timezone: "Europe/London", actorRole: "super_admin", loading: false, error: null,
   onReload: () => undefined, onCheckout: async () => "", onPrepareManualInvoice: async () => demoSaasInvoice, onManualPayment: async () => undefined, onReviewManualPayment: async () => undefined, onLoadManualReceipt: async () => new Blob(), onPortal: async () => "", onCreatePlan: async () => undefined,
 };
 const demoEngagement: EngagementData = {
@@ -1562,6 +1562,7 @@ export function IronCoreApp() {
     gateway: finance.gateway ? { status: finance.gateway.status, chargesEnabled: finance.gateway.charges_enabled, payoutsEnabled: finance.gateway.payouts_enabled, detailsSubmitted: finance.gateway.details_submitted, accountId: finance.gateway.provider_account_id, requirements: finance.gateway.requirements?.currently_due ?? [] } : null,
     stripeConfigured: finance.stripeConfigured,
     stripeAvailable: finance.stripeAvailable,
+    timezone: selectedGym.timezone,
     actorRole: selectedGym.role, loading: finance.loading, error: finance.error,
     onReload: () => setFinanceRefresh((value) => value + 1), onCreateInvoice: createInvoice, onCreatePayment: createPayment, onRefund: refundPayment, onReviewBankTransfer: reviewBankTransfer, onLoadReceipt: loadPaymentReceipt, onConnectStripe: connectStripe, onRefreshStripe: refreshStripe,
   };
@@ -1572,6 +1573,7 @@ export function IronCoreApp() {
     payments: saas.payments,
     paymentOptions: saas.paymentOptions,
     baseCurrency: selectedGym.base_currency,
+    timezone: selectedGym.timezone,
     actorRole: selectedGym.role,
     loading: saas.loading,
     error: saas.error,

@@ -8,7 +8,7 @@ use App\Http\Requests\UpdateClassSessionRequest;
 use App\Http\Resources\ClassSessionResource;
 use App\Models\ClassSession;
 use App\Services\ClassBookingService;
-use Carbon\CarbonImmutable;
+use App\Support\TenantClock;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
@@ -17,8 +17,12 @@ class ClassSessionController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $from = CarbonImmutable::parse((string) $request->input('from', now()->startOfDay()->toIso8601String()));
-        $to = CarbonImmutable::parse((string) $request->input('to', now()->addDays(30)->endOfDay()->toIso8601String()));
+        $from = $request->filled('from')
+            ? TenantClock::localDate((string) $request->input('from'))->utc()
+            : TenantClock::startOfToday()->utc();
+        $to = $request->filled('to')
+            ? TenantClock::localDate((string) $request->input('to'))->utc()
+            : TenantClock::startOfToday()->addDays(30)->endOfDay()->utc();
         if ($to->isBefore($from) || $from->diffInDays($to) > 92) {
             throw ValidationException::withMessages(['to' => ['Class schedule ranges must be ordered and no longer than 92 days.']]);
         }

@@ -102,6 +102,7 @@ class MembershipLifecycleTest extends TestCase
             ->assertJsonPath('data.membership_id', $membership['id'])
             ->json('data');
 
+        $paymentDate = now($gym->timezone)->toDateString();
         $cashPayload = [
             'member_id' => $member['id'],
             'membership_id' => $membership['id'],
@@ -111,7 +112,7 @@ class MembershipLifecycleTest extends TestCase
             'amount_minor' => 5999,
             'currency' => Currency::GBP->value,
             'idempotency_key' => 'membership-lifecycle-cash',
-            'payment_date' => today()->toDateString(),
+            'payment_date' => $paymentDate,
         ];
         $this->postJson("/api/v1/gyms/{$gym->id}/payments", array_diff_key($cashPayload, ['payment_date' => true]), $headers)
             ->assertUnprocessable()->assertJsonValidationErrors('payment_date');
@@ -121,11 +122,11 @@ class MembershipLifecycleTest extends TestCase
             ->assertJsonPath('data.status', 'paid')
             ->json('data');
 
-        app(TenantContext::class)->run($gym, function () use ($payment, $membership): void {
+        app(TenantContext::class)->run($gym, function () use ($payment, $membership, $paymentDate, $gym): void {
             $saved = Payment::query()->findOrFail($payment['id']);
             $this->assertSame($membership['id'], $saved->membership_id);
             $this->assertSame(0, $saved->invoice->due_amount_minor);
-            $this->assertSame(today()->toDateString(), $saved->paid_at?->toDateString());
+            $this->assertSame($paymentDate, $saved->paid_at?->setTimezone($gym->timezone)->toDateString());
         });
 
         $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member['id']}/access-credential", [], $headers)

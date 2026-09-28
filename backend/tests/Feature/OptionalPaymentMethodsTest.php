@@ -17,6 +17,7 @@ use App\Models\PaymentGatewayAccount;
 use App\Models\User;
 use App\Services\PaymentService;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -68,6 +69,52 @@ class OptionalPaymentMethodsTest extends TestCase
         Sanctum::actingAs($memberUser);
         $this->getJson("/api/v1/gyms/{$gym->id}/member/payments", $headers)
             ->assertOk()->assertJsonPath('data.0.status', 'paid');
+    }
+
+    public function test_member_and_staff_payment_dates_follow_the_gym_calendar_day(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-24 20:30:00', 'UTC'));
+        Storage::fake('local');
+        config(['filesystems.default' => 'local']);
+
+        try {
+            [$owner, $memberUser, $gym, $branch, $member, $membership, $invoice] = $this->contract('LOCAL-DATE');
+            $gym->update(['timezone' => 'Asia/Karachi']);
+            $localToday = '2026-09-25';
+
+            Sanctum::actingAs($memberUser);
+            $this->post("/api/v1/gyms/{$gym->id}/member/payments", [
+                'invoice_id' => $invoice['id'],
+                'method' => 'bank_transfer',
+                'idempotency_key' => 'member-local-calendar-date',
+                'transferred_on' => $localToday,
+                'receipt' => UploadedFile::fake()->create('local-date.pdf', 20, 'application/pdf'),
+            ], ['X-Gym-ID' => $gym->id, 'Accept' => 'application/json'])
+                ->assertCreated()
+                ->assertJsonPath('data.bank_transfer_receipt.transferred_on', $localToday);
+
+            [$cashOwner, , $cashGym, $cashBranch, $cashMember, $cashMembership, $cashInvoice] = $this->contract('LOCAL-CASH');
+            $cashGym->update(['timezone' => 'Asia/Karachi']);
+            Sanctum::actingAs($cashOwner);
+            $cashPaymentId = $this->postJson("/api/v1/gyms/{$cashGym->id}/payments", [
+                'member_id' => $cashMember->id,
+                'membership_id' => $cashMembership['id'],
+                'invoice_id' => $cashInvoice['id'],
+                'branch_id' => $cashBranch->id,
+                'method' => 'cash',
+                'amount_minor' => $cashInvoice['due_amount_minor'],
+                'currency' => Currency::GBP->value,
+                'idempotency_key' => 'staff-local-calendar-date',
+                'payment_date' => $localToday,
+            ], ['X-Gym-ID' => $cashGym->id])->assertCreated()->json('data.id');
+
+            app(TenantContext::class)->run($cashGym, function () use ($cashPaymentId, $localToday): void {
+                $payment = Payment::query()->findOrFail($cashPaymentId);
+                $this->assertSame($localToday, $payment->paid_at->setTimezone('Asia/Karachi')->toDateString());
+            });
+        } finally {
+            $this->travelBack();
+        }
     }
 
     public function test_member_bank_transfer_receipt_is_private_and_requires_admin_review(): void

@@ -28,8 +28,8 @@ class StoreSaasSubscriptionPaymentRequest extends TenantFormRequest
             ],
             'payment_date' => [
                 'required',
-                'date',
-                'before_or_equal:today',
+                'date_format:Y-m-d',
+                'before_or_equal:'.$this->tenantToday(),
             ],
             'notes' => ['nullable', 'string', 'max:2000'],
             'receipt' => [

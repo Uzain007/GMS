@@ -25,7 +25,7 @@ use App\Services\AttendanceService;
 use App\Services\AuditService;
 use App\Services\PaymentService;
 use App\Services\StripeGatewayService;
-use Carbon\CarbonImmutable;
+use App\Support\TenantClock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -198,8 +198,8 @@ class MemberSelfServiceController extends Controller
     public function attendance(Request $request): AnonymousResourceCollection
     {
         $member = $this->memberFor($request);
-        $from = CarbonImmutable::parse((string) $request->input('from', today()->subDays(29)->toDateString()))->startOfDay();
-        $to = CarbonImmutable::parse((string) $request->input('to', today()->toDateString()))->endOfDay();
+        $from = TenantClock::localDate((string) $request->input('from', TenantClock::startOfToday()->subDays(29)->toDateString()))->startOfDay()->utc();
+        $to = TenantClock::localDate((string) $request->input('to', TenantClock::businessDate()))->endOfDay()->utc();
         if ($to->isBefore($from) || $from->diffInDays($to) > 90) {
             throw ValidationException::withMessages([
                 'to' => ['Member attendance ranges must be ordered and no longer than 90 days.'],

@@ -20,11 +20,11 @@ class StorePaymentRequest extends TenantFormRequest
             'currency' => ['required', Rule::enum(Currency::class)],
             'idempotency_key' => ['required', 'string', 'max:120'],
             'paid_at' => ['nullable', 'date', 'before_or_equal:now'],
-            'payment_date' => ['nullable', 'required_if:method,'.PaymentMethod::Cash->value, 'date', 'before_or_equal:today'],
+            'payment_date' => ['nullable', 'required_if:method,'.PaymentMethod::Cash->value, 'date_format:Y-m-d', 'before_or_equal:'.$this->tenantToday()],
             'notes' => ['nullable', 'string', 'max:2000'],
             'metadata' => ['nullable', 'array'],
             'bank_reference' => ['nullable', 'string', 'max:160'],
-            'transferred_on' => ['nullable', 'required_if:method,bank_transfer', 'date', 'before_or_equal:today'],
+            'transferred_on' => ['nullable', 'required_if:method,bank_transfer', 'date_format:Y-m-d', 'before_or_equal:'.$this->tenantToday()],
             'receipt' => [
                 'required_if:method,'.PaymentMethod::BankTransfer->value,
                 'file',

@@ -274,7 +274,7 @@ test("check-ins hash QR secrets and class bookings lock capacity with FIFO promo
   assert.match(attendance, /hash\('sha256', \$plaintext\)/);
   assert.match(attendance, /hash\('sha256', \$data\['credential'\]\)/);
   assert.match(attendance, /activeMembershipFor/);
-  assert.match(attendance, /whereDate\('starts_at', '<=', today\(\)\)/);
+  assert.match(attendance, /whereDate\('starts_at', '<=', TenantClock::businessDate\(\)\)/);
   assert.match(attendance, /AttendanceStatus::CheckedIn/);
   assert.doesNotMatch(credential, /plaintext|credential_token/);
   assert.match(bookings, /ClassSession::query\(\)->lockForUpdate\(\)/);
@@ -349,8 +349,8 @@ test("trainer access, append-only history and notification jobs fail closed", as
   assert.match(job, /implements ShouldQueue/);
   assert.match(job, /\$context->run\(\$gym/);
   for (const controller of [assignmentController, planController]) {
-    assert.match(controller, /whereDate\('starts_on', '<=', today\(\)\)/);
-    assert.match(controller, /orWhereDate\('ends_on', '>=', today\(\)\)/);
+    assert.match(controller, /whereDate\('starts_on', '<=', TenantClock::businessDate\(\)\)/);
+    assert.match(controller, /orWhereDate\('ends_on', '>=', TenantClock::businessDate\(\)\)/);
   }
   for (const adapter of [sms, push]) {
     assert.match(adapter, /FILTER_VALIDATE_URL/);

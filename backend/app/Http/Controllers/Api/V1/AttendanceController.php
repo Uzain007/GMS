@@ -13,7 +13,7 @@ use App\Models\Member;
 use App\Models\MemberAccessCredential;
 use App\Enums\AccessCredentialStatus;
 use App\Services\AttendanceService;
-use Carbon\CarbonImmutable;
+use App\Support\TenantClock;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -23,8 +23,8 @@ class AttendanceController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $from = CarbonImmutable::parse((string) $request->input('from', today()->toDateString()))->startOfDay();
-        $to = CarbonImmutable::parse((string) $request->input('to', today()->toDateString()))->endOfDay();
+        $from = TenantClock::localDate((string) $request->input('from', TenantClock::businessDate()))->startOfDay()->utc();
+        $to = TenantClock::localDate((string) $request->input('to', TenantClock::businessDate()))->endOfDay()->utc();
         if ($to->isBefore($from) || $from->diffInDays($to) > 31) {
             throw ValidationException::withMessages(['to' => ['Attendance ranges must be ordered and no longer than 31 days.']]);
         }

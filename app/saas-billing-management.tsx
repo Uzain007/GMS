@@ -12,6 +12,7 @@ import type {
   NewSaasPaymentCorrection, ReplaceSaasBillingInvoice,
 } from "./lib/ironcore-api";
 import { isoDateInputValue } from "./lib/form-values";
+import { dateInputValueInTimeZone } from "./lib/gym-time";
 
 type Currency = "GBP" | "USD" | "PKR" | "AED" | "SAR";
 
@@ -22,6 +23,7 @@ export type SaasBillingData = {
   payments: SaasSubscriptionPaymentRecord[];
   paymentOptions: SaasPaymentOptions;
   baseCurrency: Currency;
+  timezone: string;
   actorRole: IronCoreRole;
   readOnly?: boolean;
   loading: boolean;
@@ -172,9 +174,10 @@ type ManualChoice = {
   invoiceNumber?: string | null;
 };
 
-function ManualPaymentModal({ choice, paymentOptions, onClose, onSubmit }: {
+function ManualPaymentModal({ choice, paymentOptions, timezone, onClose, onSubmit }: {
   choice: ManualChoice;
   paymentOptions: SaasPaymentOptions;
+  timezone: string;
   onClose: () => void;
   onSubmit: SaasBillingData["onManualPayment"];
 }) {
@@ -215,7 +218,7 @@ function ManualPaymentModal({ choice, paymentOptions, onClose, onSubmit }: {
         paymentOptions.platform_bank_details?.routing_details ? `Routing: ${paymentOptions.platform_bank_details.routing_details}` : "",
       ].filter(Boolean).join("\n"))}>Copy all payment details</button>{paymentOptions.platform_bank_details.payment_instructions && <p>{paymentOptions.platform_bank_details.payment_instructions}</p>}</section>}
       <label>{choice.method === "cash" ? "Reference (optional)" : "Bank transfer reference"}<input name="reference" required={choice.method === "bank_transfer"} minLength={choice.method === "bank_transfer" ? 2 : undefined} maxLength={160} autoFocus={choice.method === "cash"} /></label>
-      <label>{choice.method === "cash" ? "Payment date" : "Transfer date"}<input name="payment_date" type="date" max={new Date().toISOString().slice(0, 10)} defaultValue={new Date().toISOString().slice(0, 10)} required /></label>
+      <label>{choice.method === "cash" ? "Payment date" : "Transfer date"}<input name="payment_date" type="date" max={dateInputValueInTimeZone(timezone)} defaultValue={dateInputValueInTimeZone(timezone)} required /></label>
       {choice.method === "bank_transfer" && <label>Payment receipt<input name="receipt" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /><small>Private PDF or image, maximum 10 MB.</small></label>}
       <label>Note (optional)<textarea name="notes" maxLength={2000} rows={3} placeholder="Add any information for the IronCore billing team." /></label>
       <div className="modal-safety"><ShieldCheck size={17} /><span><strong>Platform review required</strong><small>The subscription activates only after a Super Admin verifies this payment. Member-payment records remain separate.</small></span></div>
@@ -440,7 +443,7 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
 
     <section className="panel table-scroll saas-invoices"><div className="panel-title"><div><p className="eyebrow">Recurring invoices</p><h3>Billing history</h3></div><small>Platform subscription records</small></div><table className="data-table"><thead><tr><th>Invoice</th><th>Period / due</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>{data.invoices.map((invoice) => { const eligible = !["paid", "void", "cancelled"].includes(invoice.status) && invoice.amount_paid_minor === 0 && invoice.amount_remaining_minor > 0; const invoicePending = data.payments.some((payment) => payment.status === "pending" && payment.invoice?.id === invoice.id); return <tr key={invoice.id}><td><strong className="saas-reference">{invoice.number ?? "Pending number"}</strong>{Boolean(invoice.correction_history?.length) && <small className="table-sub">{invoice.correction_history!.length} audited correction(s)</small>}</td><td>{date(invoice.period_end)}<small className="table-sub">Due {date(invoice.due_at)}</small></td><td><strong>{money(invoice.amount_due_minor, invoice.currency)}</strong><small className="table-sub">Outstanding {money(invoice.amount_remaining_minor, invoice.currency)}</small></td><td><span className={`status ${invoice.status}`}><i />{readable(invoice.status)}</span>{invoicePending && <small className="table-sub">Payment under review</small>}</td><td><div className="table-actions">{invoice.hosted_invoice_url?.startsWith("https://") && <a className="table-link" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">View <ArrowUpRight size={13} /></a>}{canManage && eligible && !invoicePending && data.paymentOptions.bank_transfer_available && <button className="table-action" onClick={() => setManualChoice({ invoiceId: invoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer", amountMinor: invoice.amount_remaining_minor, currency: invoice.currency, invoiceNumber: invoice.number })}>Pay by bank transfer</button>}{canManage && eligible && !invoicePending && data.paymentOptions.cash_available && <button className="table-action" onClick={() => setManualChoice({ invoiceId: invoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash", amountMinor: invoice.amount_remaining_minor, currency: invoice.currency, invoiceNumber: invoice.number })}>Pay by cash</button>}{data.actorRole === "super_admin" && data.onReplaceInvoice && eligible && !invoicePending && <button className="table-action" onClick={() => setReplacing(invoice)}>Correct / replace</button>}{data.actorRole === "super_admin" && data.onVoidInvoice && eligible && !invoicePending && <button className="table-action" onClick={() => setVoiding(invoice)}>Void</button>}</div></td></tr>; })}</tbody></table>{data.invoices.length === 0 && <div className="empty-state"><FileText size={24} /><strong>No recurring invoices yet</strong><span>Invoices appear after a cash, bank-transfer or Stripe subscription is approved.</span></div>}</section>
     {modal && data.onCreatePlan && <PlanModal currency={data.baseCurrency} onClose={() => setModal(false)} onCreate={data.onCreatePlan} />}
-    {manualChoice && <ManualPaymentModal choice={manualChoice} paymentOptions={data.paymentOptions} onClose={() => setManualChoice(null)} onSubmit={data.onManualPayment} />}
+    {manualChoice && <ManualPaymentModal choice={manualChoice} paymentOptions={data.paymentOptions} timezone={data.timezone} onClose={() => setManualChoice(null)} onSubmit={data.onManualPayment} />}
     {reviewing && <ManualReviewModal payment={reviewing} onClose={() => setReviewing(null)} onSubmit={data.onReviewManualPayment} />}
     {correcting && data.onCorrectManualPayment && <PaymentCorrectionModal payment={correcting} onClose={() => setCorrecting(null)} onSubmit={data.onCorrectManualPayment} />}
     {refunding && data.onRefundManualPayment && <BillingActionModal title="Record SaaS refund" amount={{ value: refunding.amount_minor - (refunding.refunded_amount_minor ?? 0), currency: refunding.currency }} onClose={() => setRefunding(null)} onSubmit={(reason, amount) => data.onRefundManualPayment!(refunding.id, amount ?? 0, reason)} />}

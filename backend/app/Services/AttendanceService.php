@@ -14,6 +14,7 @@ use App\Models\Member;
 use App\Models\MemberAccessCredential;
 use App\Models\Membership;
 use App\Models\User;
+use App\Support\TenantClock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -245,8 +246,8 @@ class AttendanceService
         $membership = Membership::query()
             ->where('member_id', $member->getKey())
             ->where('status', MembershipStatus::Active->value)
-            ->whereDate('starts_at', '<=', today())
-            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', today()))
+            ->whereDate('starts_at', '<=', TenantClock::businessDate())
+            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', TenantClock::businessDate()))
             ->lockForUpdate()
             ->first();
         if (! $membership) {
@@ -269,8 +270,8 @@ class AttendanceService
         $membership = Membership::query()
             ->where('member_id', $member->getKey())
             ->where('status', MembershipStatus::Active->value)
-            ->whereDate('starts_at', '<=', today())
-            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', today()))
+            ->whereDate('starts_at', '<=', TenantClock::businessDate())
+            ->where(fn ($query) => $query->whereNull('ends_at')->orWhereDate('ends_at', '>=', TenantClock::businessDate()))
             ->lockForUpdate()
             ->first();
         if (! $membership) {

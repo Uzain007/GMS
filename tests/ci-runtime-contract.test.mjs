@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const workflow = await readFile(".github/workflows/quality.yml", "utf8");
+const securityScan = await readFile("scripts/security/scan-secrets.sh", "utf8");
 const databaseBootstrap = await readFile("scripts/ci/prepare-postgres.php", "utf8");
 const runtimeTest = await readFile(
   "backend/tests/Feature/ProductionRuntimeGateTest.php",
@@ -52,6 +53,12 @@ test("CI is read-only and exercises locked web checks plus live PostgreSQL and R
   assert.match(workflow, /DB_USERNAME: ironcore_app/);
   assert.match(workflow, /php artisan test --fail-on-skipped --fail-on-risky/);
   assert.match(workflow, /composer audit --no-interaction/);
+  assert.match(securityScan, /command -v rg/);
+  assert.match(securityScan, /command -v rg\.exe/);
+  assert.match(securityScan, /"\$\{scanner\}" --hidden/);
+  assert.match(securityScan, /scan_status=\$\?/);
+  assert.match(securityScan, /"\$\{scan_status\}" -ne 1/);
+  assert.match(securityScan, /exit 1/);
   const buildPosition = workflow.indexOf("npm run build");
   const contractsPosition = workflow.indexOf("node --test tests/*.test.mjs");
   assert.ok(buildPosition !== -1 && buildPosition < contractsPosition);

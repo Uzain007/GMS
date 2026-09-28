@@ -12,6 +12,7 @@ use App\Models\Member;
 use App\Models\TrainerMemberAssignment;
 use App\Services\TrainingAccessService;
 use App\Services\TrainingService;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -31,8 +32,8 @@ class TrainerAssignmentController extends Controller
             // responses as soon as the server-authoritative boundary closes.
             $query->where('trainer_staff_profile_id', $trainer->getKey())
                 ->where('status', TrainerAssignmentStatus::Active->value)
-                ->whereDate('starts_on', '<=', today())
-                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', today()));
+                ->whereDate('starts_on', '<=', TenantClock::businessDate())
+                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()));
         } else {
             foreach (['member_id', 'trainer_staff_profile_id', 'status'] as $filter) {
                 if ($request->filled($filter)) {

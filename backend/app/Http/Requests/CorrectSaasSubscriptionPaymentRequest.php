@@ -3,10 +3,9 @@
 namespace App\Http\Requests;
 
 use App\Enums\PaymentMethod;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class CorrectSaasSubscriptionPaymentRequest extends FormRequest
+class CorrectSaasSubscriptionPaymentRequest extends TenantFormRequest
 {
     public function authorize(): bool
     {
@@ -18,7 +17,7 @@ class CorrectSaasSubscriptionPaymentRequest extends FormRequest
         return [
             'reference' => ['nullable', 'string', 'max:160'],
             'method' => ['nullable', Rule::in([PaymentMethod::Cash->value, PaymentMethod::BankTransfer->value])],
-            'payment_date' => ['nullable', 'date', 'before_or_equal:today'],
+            'payment_date' => ['nullable', 'date_format:Y-m-d', 'before_or_equal:'.$this->tenantToday()],
             'amount_minor' => ['nullable', 'integer', 'min:1'],
             'internal_notes' => ['nullable', 'string', 'max:2000'],
             'metadata' => ['nullable', 'array', 'max:25'],

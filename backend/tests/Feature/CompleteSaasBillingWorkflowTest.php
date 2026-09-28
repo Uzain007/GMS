@@ -18,6 +18,7 @@ use App\Models\User;
 use App\Jobs\SendSaasBillingReminder;
 use App\Services\AutomatedSaasBillingService;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -120,6 +121,51 @@ class CompleteSaasBillingWorkflowTest extends TestCase
             'receipt' => UploadedFile::fake()->create('proof.pdf', 20, 'application/pdf'),
         ], ['Accept' => 'application/json', 'X-Gym-ID' => $otherGym->id])
             ->assertCreated()->assertJsonPath('data.has_receipt', true);
+    }
+
+    public function test_saas_payment_and_invoice_dates_follow_the_selected_gym_calendar_day(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-24 20:30:00', 'UTC'));
+
+        try {
+            [$owner, $paymentGym] = $this->tenant(UserRole::GymOwner);
+            $paymentGym->update(['timezone' => 'Asia/Karachi']);
+            [, $price] = $this->plan('local-calendar', 'active', ['cash']);
+            Sanctum::actingAs($owner);
+            $invoice = $this->postJson("/api/v1/gyms/{$paymentGym->id}/saas-subscription/manual-invoice", [
+                'saas_plan_price_id' => $price->id,
+                'method' => 'cash',
+                'idempotency_key' => 'local-calendar-invoice-0001',
+            ], ['X-Gym-ID' => $paymentGym->id])->assertCreated()->json('data');
+
+            $payment = $this->postJson("/api/v1/gyms/{$paymentGym->id}/saas-subscription/manual-payments", [
+                'saas_billing_invoice_id' => $invoice['id'],
+                'method' => 'cash',
+                'payment_date' => '2026-09-25',
+                'idempotency_key' => 'local-calendar-payment-0001',
+            ], ['X-Gym-ID' => $paymentGym->id])->assertCreated()->json('data');
+
+            [, $invoiceGym] = $this->tenant(UserRole::GymOwner);
+            $invoiceGym->update(['timezone' => 'Asia/Karachi']);
+            $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
+            Sanctum::actingAs($admin);
+            $this->postJson("/api/v1/gyms/{$paymentGym->id}/saas-subscription/manual-payments/{$payment['id']}/corrections", [
+                'payment_date' => '2026-09-25',
+                'reason' => 'Verify the selected gym calendar date boundary.',
+            ], ['X-Gym-ID' => $paymentGym->id])->assertOk()
+                ->assertJsonPath('data.effective_payment_date', '2026-09-25');
+
+            $this->postJson("/api/v1/gyms/{$invoiceGym->id}/saas-billing-invoices", [
+                'saas_plan_price_id' => $price->id,
+                'amount_minor' => $price->amount_minor,
+                'currency' => 'GBP',
+                'due_date' => '2026-09-25',
+                'idempotency_key' => 'local-calendar-published-invoice-0001',
+                'reason' => 'Verify the selected gym calendar date boundary.',
+            ], ['X-Gym-ID' => $invoiceGym->id])->assertCreated();
+        } finally {
+            $this->travelBack();
+        }
     }
 
     public function test_super_admin_can_publish_one_idempotent_invoice_that_only_its_owner_can_see(): void

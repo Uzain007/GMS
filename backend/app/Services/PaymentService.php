@@ -15,6 +15,7 @@ use App\Models\Membership;
 use App\Models\Payment;
 use App\Models\PaymentRefund;
 use App\Models\User;
+use App\Support\TenantClock;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -267,9 +268,10 @@ class PaymentService
                 $this->applyPaymentToInvoice($invoice, $locked->amount_minor);
                 if ($invoice->fresh()->status === InvoiceStatus::Paid && $locked->membership_id) {
                     $membership = Membership::query()->lockForUpdate()->findOrFail($locked->membership_id);
+                    $today = TenantClock::businessDate();
                     if ($membership->status === MembershipStatus::Pending
-                        && $membership->starts_at->lte(today())
-                        && (! $membership->ends_at || $membership->ends_at->gte(today()))) {
+                        && $membership->starts_at->toDateString() <= $today
+                        && (! $membership->ends_at || $membership->ends_at->toDateString() >= $today)) {
                         $membership->update(['status' => MembershipStatus::Active]);
                         $this->audit->record(
                             'membership.activated_from_payment', $membership->fresh(), $actor,
@@ -430,7 +432,7 @@ class PaymentService
         if (! empty($data['payment_date'])) {
             // Preserve the entered business date instead of silently replacing
             // a historical cash payment with the current timestamp.
-            return CarbonImmutable::parse($data['payment_date'], 'UTC')->startOfDay();
+            return TenantClock::localDate($data['payment_date'])->startOfDay()->utc();
         }
 
         return isset($data['paid_at']) ? CarbonImmutable::parse($data['paid_at']) : CarbonImmutable::now();

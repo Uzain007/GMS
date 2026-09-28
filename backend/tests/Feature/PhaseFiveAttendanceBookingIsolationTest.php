@@ -17,6 +17,7 @@ use App\Models\Membership;
 use App\Models\MembershipPlan;
 use App\Models\User;
 use App\Tenancy\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -65,6 +66,44 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.member.member_code', $member->member_code)
             ->assertJsonPath('data.method', 'member_code');
+    }
+
+    public function test_local_calendar_day_allows_membership_qr_and_check_in_before_utc_day_changes(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-09-24 20:30:00', 'UTC'));
+
+        try {
+            [$owner, $gym, $branch] = $this->tenant();
+            $gym->update(['timezone' => 'Asia/Karachi']);
+            $member = app(TenantContext::class)->run($gym, function () use ($branch): Member {
+                $member = $this->memberWithMembership($branch, 'MBR-LOCAL-DAY');
+                Membership::query()->where('member_id', $member->getKey())->update([
+                    'starts_at' => '2026-09-25',
+                    'ends_at' => '2026-09-25',
+                ]);
+
+                return $member;
+            });
+
+            Sanctum::actingAs($owner);
+            $headers = ['X-Gym-ID' => $gym->id];
+            $credential = $this->postJson(
+                "/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential",
+                [],
+                $headers,
+            )->assertCreated()->json('data.credential');
+
+            $attendanceId = $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+                'branch_id' => $branch->id,
+                'credential' => $credential,
+            ], $headers)->assertCreated()->assertJsonPath('data.method', 'qr')->json('data.id');
+
+            $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
+                ->assertOk()
+                ->assertJsonFragment(['id' => $attendanceId]);
+        } finally {
+            $this->travelBack();
+        }
     }
 
     public function test_single_primary_location_is_resolved_when_mobile_frontend_has_no_branch_value(): void

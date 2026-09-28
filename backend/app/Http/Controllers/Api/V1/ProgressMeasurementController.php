@@ -15,8 +15,8 @@ use App\Models\MemberProgressMeasurement;
 use App\Models\TrainerMemberAssignment;
 use App\Services\ProgressService;
 use App\Services\TrainingAccessService;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
@@ -25,8 +25,12 @@ class ProgressMeasurementController extends Controller
 {
     public function index(Request $request, TenantContext $tenant, TrainingAccessService $access): AnonymousResourceCollection
     {
-        $from = CarbonImmutable::parse((string) $request->input('from', now()->subYear()->startOfDay()->toIso8601String()));
-        $to = CarbonImmutable::parse((string) $request->input('to', now()->endOfDay()->toIso8601String()));
+        $from = $request->filled('from')
+            ? TenantClock::localDate((string) $request->input('from'))->utc()
+            : TenantClock::startOfToday()->subYear()->utc();
+        $to = $request->filled('to')
+            ? TenantClock::localDate((string) $request->input('to'))->utc()
+            : TenantClock::startOfToday()->endOfDay()->utc();
         if ($to->isBefore($from) || $from->diffInDays($to) > 732) {
             throw ValidationException::withMessages(['to' => ['Progress history must be ordered and no longer than two years.']]);
         }
@@ -46,8 +50,8 @@ class ProgressMeasurementController extends Controller
             $assignedMembers = TrainerMemberAssignment::query()->select('member_id')
                 ->where('trainer_staff_profile_id', $trainer->getKey())
                 ->where('status', TrainerAssignmentStatus::Active->value)
-                ->whereDate('starts_on', '<=', today())
-                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', today()));
+                ->whereDate('starts_on', '<=', TenantClock::businessDate())
+                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()));
             $query->whereIn('member_id', $assignedMembers);
         } elseif ($request->filled('member_id')) {
             $query->where('member_id', $request->input('member_id'));

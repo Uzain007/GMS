@@ -109,7 +109,7 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
     const form = new FormData(event.currentTarget);
     setBusy(true); setError(null);
     try {
-      const temporaryPassword = setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined;
+      const temporaryPassword = createOwner && setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined;
       const result = await onCreate({
         name: String(form.get("name")),
         legal_name: String(form.get("legal_name")) || undefined,
@@ -123,8 +123,8 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
           phone: createOwner ? String(form.get("owner_phone")) : undefined,
           setup_method: createOwner ? setupMethod : undefined,
           temporary_password: temporaryPassword,
-          temporary_password_confirmation: setupMethod === "temporary_password" ? String(form.get("temporary_password_confirmation")) : undefined,
-          require_password_change: setupMethod === "temporary_password" ? true : undefined,
+          temporary_password_confirmation: createOwner && setupMethod === "temporary_password" ? String(form.get("temporary_password_confirmation")) : undefined,
+          require_password_change: createOwner && setupMethod === "temporary_password" ? true : undefined,
         },
       });
       setCreated(result);

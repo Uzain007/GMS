@@ -22,6 +22,13 @@ abstract class TenantFormRequest extends FormRequest
         return app(TenantContext::class)->id();
     }
 
+    protected function tenantToday(): string
+    {
+        // Calendar-only business dates follow the selected gym, not the API
+        // server's UTC day, so valid local payments are not rejected at midnight.
+        return now(app(TenantContext::class)->gym()->timezone)->toDateString();
+    }
+
     protected function tenantExists(string $table, string $column = 'id'): Exists
     {
         return Rule::exists($table, $column)
