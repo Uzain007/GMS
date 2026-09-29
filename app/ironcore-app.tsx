@@ -155,6 +155,8 @@ const demoStaff: StaffData = {
   branches: [{ id: "demo-branch-1", name: "Manchester Central" }], loading: false, error: null, actorRole: "gym_owner", onReload: () => undefined,
   onCreateTrainer: async () => ({ setupLink: null, existingAccount: false }),
   onInvite: async () => `${typeof window === "undefined" ? "https://ironcore.example" : window.location.origin}/#demo-invitation`,
+  onResendInvite: async () => `${typeof window === "undefined" ? "https://ironcore.example" : window.location.origin}/#demo-invitation-resent`,
+  onRevokeInvite: async () => undefined,
   onUpdate: async () => undefined,
   onUpdateImage: async () => undefined,
   onDelete: async () => undefined,
@@ -219,6 +221,7 @@ const demoEngagement: EngagementData = {
   actorRole: "gym_owner", loading: false, error: null, onReload: () => undefined,
   onCheckIn: async () => undefined, onCheckOut: async () => undefined, onCreateSession: async () => undefined, onUpdateSession: async () => undefined,
   onBook: async (sessionId, memberId) => ({ id: "demo-booking-new", gym_id: "demo-gym", class_session_id: sessionId, member_id: memberId ?? "demo-1", membership_id: "demo-membership-1", status: sessionId === "class-1" ? "waitlisted" : "booked", waitlist_sequence: sessionId === "class-1" ? 9 : null, booked_at: new Date().toISOString(), promoted_at: null, cancelled_at: null, checked_in_at: null, cancellation_reason: null }),
+  onLoadRoster: async (sessionId) => demoEngagement.bookings.filter((booking) => booking.class_session_id === sessionId),
   onCancel: async () => undefined, onAttend: async () => undefined,
   onEnsureCredential: async (memberId) => ({ credential: "icqr_demo_7e11966a00e524d7921fe9c4a6572cd02d1ddf6ae72344967a0a522c4a72a103", memberCode: demoMembers.find((member) => member.id === memberId)?.memberCode ?? "104287" }),
   onRotateCredential: async (memberId) => ({ credential: "icqr_demo_replaced_7e11966a00e524d7921fe9c4a6572cd02d1ddf6ae72344967a0a522c4a72a103", memberCode: demoMembers.find((member) => member.id === memberId)?.memberCode ?? "104287" }),
@@ -226,7 +229,7 @@ const demoEngagement: EngagementData = {
 const demoCoaching: CoachingData = {
   readOnly: true,
   timezone: "Europe/London",
-  assignments: [{ id: "assign-1", gym_id: "demo-gym", trainer_staff_profile_id: "demo-staff-2", member_id: "demo-1", trainer: { id: "demo-staff-2", name: "Daniel Reed" }, member: { id: "demo-1", member_number: "MBR-1042", member_code: "104287", name: "Amelia Hart" }, status: "active", starts_on: "2026-08-01", ends_on: null, notes: "Strength coaching", created_at: "2026-08-01T09:00:00Z" }],
+  assignments: [{ id: "assign-1", gym_id: "demo-gym", trainer_staff_profile_id: "demo-staff-2", member_id: "demo-1", trainer: { id: "demo-staff-2", name: "Daniel Reed" }, member: { id: "demo-1", member_number: "MBR-1042", member_code: "104287", name: "Amelia Hart" }, status: "active", effective_status: "active", is_current: true, starts_on: "2026-08-01", ends_on: null, notes: "Strength coaching", created_at: "2026-08-01T09:00:00Z" }],
   plans: [{ id: "workout-plan-1", gym_id: "demo-gym", member_id: "demo-1", trainer_staff_profile_id: "demo-staff-2", member: { id: "demo-1", member_number: "MBR-1042", member_code: "104287", name: "Amelia Hart" }, trainer: { id: "demo-staff-2", name: "Daniel Reed" }, title: "12-week strength foundation", goal: "Build confident compound movement and consistent weekly training.", notes: null, starts_on: "2026-08-01", ends_on: "2026-10-24", status: "active", exercises: [{ id: "exercise-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Back squat", instructions: "Controlled three-second descent with a stable brace.", day_number: 1, sort_order: 1, target_sets: 4, target_reps_min: 6, target_reps_max: 8, target_load_grams: 55000, target_duration_seconds: null, rest_seconds: 120 }, { id: "exercise-2", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", name: "Romanian deadlift", instructions: "Maintain a neutral spine and controlled hip hinge.", day_number: 1, sort_order: 2, target_sets: 3, target_reps_min: 8, target_reps_max: 10, target_load_grams: 45000, target_duration_seconds: null, rest_seconds: 90 }], created_at: "2026-08-01T10:00:00Z" }],
   sessions: [{ id: "workout-session-1", gym_id: "demo-gym", workout_plan_id: "workout-plan-1", member_id: "demo-1", plan: { id: "workout-plan-1", title: "12-week strength foundation" }, member: { id: "demo-1", member_number: "MBR-1042", member_code: "104287", name: "Amelia Hart" }, performed_at: "2026-08-06T17:30:00Z", duration_seconds: 3120, notes: "Strong technique throughout.", sets: [{ id: "set-1", gym_id: "demo-gym", workout_plan_exercise_id: "exercise-1", exercise_name: "Back squat", set_number: 1, reps: 8, load_grams: 52500, duration_seconds: null, distance_metres: null, rpe: 7 }], created_at: "2026-08-06T18:22:00Z" }],
   measurements: [
@@ -1194,6 +1197,17 @@ export function IronCoreApp() {
     // servers or referrers. Acceptance removes it immediately after use.
     return `${window.location.origin}${window.location.pathname}#invite_gym=${encodeURIComponent(selectedGym.id)}&invite_token=${encodeURIComponent(created.acceptance_token)}`;
   }
+  async function resendStaffInvitation(invitationId: string): Promise<string> {
+    if (!api || !selectedGym) throw new Error("Select a gym first.");
+    const resent = await api.resendStaffInvitation(selectedGym.id, invitationId);
+    setStaffRefresh((value) => value + 1);
+    return `${window.location.origin}${window.location.pathname}#invite_gym=${encodeURIComponent(selectedGym.id)}&invite_token=${encodeURIComponent(resent.acceptance_token)}`;
+  }
+  async function revokeStaffInvitation(invitationId: string): Promise<void> {
+    if (!api || !selectedGym) throw new Error("Select a gym first.");
+    await api.revokeStaffInvitation(selectedGym.id, invitationId);
+    setStaffRefresh((value) => value + 1);
+  }
   async function createTrainer(input: NewTrainer): Promise<TrainerSetup> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     const created = await api.createTrainer(selectedGym.id, input);
@@ -1226,29 +1240,34 @@ export function IronCoreApp() {
     return api.staffProfileImage(selectedGym.id, staffId);
   }, [api, selectedGym]);
 
+  function refreshFinanceState(): void {
+    setFinanceRefresh((value) => value + 1);
+    setReportRefresh((value) => value + 1);
+  }
+
   async function createInvoice(input: NewFinanceInvoice): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     await api.createInvoice(selectedGym.id, input);
-    setFinanceRefresh((value) => value + 1);
+    refreshFinanceState();
   }
 
   async function createPayment(input: NewFinancePayment): Promise<string | null> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     const result = await api.createPayment(selectedGym.id, input);
-    setFinanceRefresh((value) => value + 1);
+    refreshFinanceState();
     return result.checkout_url;
   }
 
   async function refundPayment(paymentId: string, amountMinor: number, reason: string): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     await api.createRefund(selectedGym.id, paymentId, amountMinor, reason);
-    setFinanceRefresh((value) => value + 1);
+    refreshFinanceState();
   }
 
   async function reviewBankTransfer(paymentId: string, decision: "approve" | "reject", reason: string): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     await api.reviewBankTransfer(selectedGym.id, paymentId, decision, reason);
-    setFinanceRefresh((value) => value + 1);
+    refreshFinanceState();
   }
 
   async function loadPaymentReceipt(paymentId: string): Promise<Blob> {
@@ -1334,6 +1353,7 @@ export function IronCoreApp() {
   async function createClassSession(input: NewClassSession): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.createClassSession(selectedGym.id, input); setEngagementRefresh((value) => value + 1); }
   async function updateClassSession(sessionId: string, input: UpdateClassSession): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.updateClassSession(selectedGym.id, sessionId, input); setEngagementRefresh((value) => value + 1); }
   async function bookClass(sessionId: string, memberId?: string): Promise<ClassBookingRecord> { if (!api || !selectedGym) throw new Error("Select a gym first."); const booking = await api.bookClass(selectedGym.id, sessionId, memberId); setEngagementRefresh((value) => value + 1); return booking; }
+  async function loadClassRoster(sessionId: string): Promise<ClassBookingRecord[]> { if (!api || !selectedGym) throw new Error("Select a gym first."); return api.classSessionBookings(selectedGym.id, sessionId); }
   async function cancelBooking(bookingId: string, reason: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.cancelClassBooking(selectedGym.id, bookingId, reason); setEngagementRefresh((value) => value + 1); }
   async function attendBooking(bookingId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.attendClassBooking(selectedGym.id, bookingId); setEngagementRefresh((value) => value + 1); }
   async function ensureCredential(memberId: string): Promise<{ credential: string; memberCode: string }> {
@@ -1549,7 +1569,7 @@ export function IronCoreApp() {
     rows: staff.rows.map((row) => ({ id: row.id, name: row.user.name, email: row.user.email, phone: row.phone, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, hiredAt: row.hired_at, hasProfileImage: row.has_profile_image })),
     invitations: staff.invitations.map((row) => ({ id: row.id, email: row.email, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, expiresAt: row.expires_at })),
     branches: operations.branches.map((branch) => ({ id: branch.id, name: branch.name, status: branch.status })), loading: staff.loading, error: staff.error, actorRole: selectedGym.role,
-    onReload: () => setStaffRefresh((value) => value + 1), onCreateTrainer: createTrainer, onInvite: inviteStaff, onUpdate: updateStaff, onUpdateImage: updateStaffImage, onDelete: deleteStaff, onLoadImage: loadStaffImage,
+    onReload: () => setStaffRefresh((value) => value + 1), onCreateTrainer: createTrainer, onInvite: inviteStaff, onResendInvite: resendStaffInvitation, onRevokeInvite: revokeStaffInvitation, onUpdate: updateStaff, onUpdateImage: updateStaffImage, onDelete: deleteStaff, onLoadImage: loadStaffImage,
   };
   const financeSummary = finance.summary ?? { gross_minor: 0, refunded_minor: 0, net_minor: 0, pending_minor: 0, outstanding_minor: 0, currency: selectedGym.base_currency };
   const liveFinance: FinanceData = {
@@ -1614,6 +1634,7 @@ export function IronCoreApp() {
     onCreateSession: createClassSession,
     onUpdateSession: updateClassSession,
     onBook: bookClass,
+    onLoadRoster: loadClassRoster,
     onCancel: cancelBooking,
     onAttend: attendBooking,
     onEnsureCredential: ensureCredential,

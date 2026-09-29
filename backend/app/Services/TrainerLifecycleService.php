@@ -27,18 +27,19 @@ class TrainerLifecycleService
     /** @return array{profile: StaffProfile, setup_token: ?string, existing_account: bool} */
     public function create(array $data, User $actor, Request $request, ?UploadedFile $image = null): array
     {
-        $this->roleGuard->ensureRoleCanBeGranted($actor, UserRole::Trainer->value);
+        $role = UserRole::from($data['role']);
+        $this->roleGuard->ensureRoleCanBeGranted($actor, $role->value);
         $email = mb_strtolower($data['email']);
         $storedImage = null;
 
         try {
-            return DB::transaction(function () use ($data, $actor, $request, $image, $email, &$storedImage): array {
+            return DB::transaction(function () use ($data, $actor, $request, $image, $email, $role, &$storedImage): array {
                 $user = User::query()->whereRaw('LOWER(email) = ?', [$email])->lockForUpdate()->first();
                 $existingAccount = $user !== null;
 
                 if ($user?->isSuperAdmin()) {
                     throw ValidationException::withMessages([
-                        'email' => ['A platform administrator account cannot be added as a gym trainer.'],
+                        'email' => ['A platform administrator account cannot be added as gym staff.'],
                     ]);
                 }
 
@@ -66,7 +67,7 @@ class TrainerLifecycleService
                 DB::table('gym_user')->insert([
                     'gym_id' => $this->tenant->id(),
                     'user_id' => $user->getKey(),
-                    'role' => UserRole::Trainer->value,
+                    'role' => $role->value,
                     'status' => $data['status'],
                     'joined_at' => $now,
                     'created_at' => $now,
@@ -79,8 +80,12 @@ class TrainerLifecycleService
                     'display_name' => $data['name'],
                     'contact_email' => $email,
                     'phone' => $data['phone'],
-                    'employee_number' => $this->nextEmployeeNumber(),
-                    'job_title' => 'Trainer',
+                    'employee_number' => $data['employee_number'] ?? $this->nextEmployeeNumber(),
+                    'job_title' => $data['job_title'] ?? match ($role) {
+                        UserRole::GymManager => 'Gym Manager',
+                        UserRole::Receptionist => 'Receptionist',
+                        default => 'Trainer',
+                    },
                     'status' => StaffStatus::from($data['status']),
                     'hired_at' => $now->toDateString(),
                 ]);
@@ -101,9 +106,9 @@ class TrainerLifecycleService
                     $profile->update($storedImage);
                 }
 
-                $profile->setAttribute('tenant_role', UserRole::Trainer->value);
+                $profile->setAttribute('tenant_role', $role->value);
                 $this->audit->record(
-                    'staff.trainer_created',
+                    'staff.employee_created',
                     $profile,
                     $actor,
                     after: $this->auditSnapshot($profile),
@@ -141,6 +146,7 @@ class TrainerLifecycleService
                 $fresh = $profile->fresh('user');
                 $fresh->setAttribute('tenant_role', $profile->tenant_role);
                 $this->audit->record('staff.profile_image_updated', $fresh, $actor, $before, $this->auditSnapshot($fresh), $reason, $request);
+
                 return $fresh;
             });
         } catch (\Throwable $exception) {
@@ -149,6 +155,7 @@ class TrainerLifecycleService
         }
 
         $this->deleteImageObject($previous);
+
         return $fresh;
     }
 
@@ -168,10 +175,12 @@ class TrainerLifecycleService
             $fresh = $profile->fresh('user');
             $fresh->setAttribute('tenant_role', $profile->tenant_role);
             $this->audit->record('staff.profile_image_removed', $fresh, $actor, $before, $this->auditSnapshot($fresh), $reason, $request);
+
             return $fresh;
         });
 
         $this->deleteImageObject($previous);
+
         return $fresh;
     }
 
@@ -227,6 +236,7 @@ class TrainerLifecycleService
         if (! $profile->profile_image_disk || ! $profile->profile_image_path) {
             return null;
         }
+
         return ['disk' => $profile->profile_image_disk, 'path' => $profile->profile_image_path];
     }
 

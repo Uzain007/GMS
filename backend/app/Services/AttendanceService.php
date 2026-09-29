@@ -6,8 +6,8 @@ use App\Enums\AccessCredentialStatus;
 use App\Enums\AttendanceMethod;
 use App\Enums\AttendanceStatus;
 use App\Enums\BranchStatus;
-use App\Enums\MemberStatus;
 use App\Enums\MembershipStatus;
+use App\Enums\MemberStatus;
 use App\Models\AttendanceRecord;
 use App\Models\GymBranch;
 use App\Models\Member;
@@ -22,6 +22,8 @@ use Illuminate\Validation\ValidationException;
 
 class AttendanceService
 {
+    private const MAX_OPEN_HOURS = 24;
+
     public function __construct(private readonly AuditService $audit) {}
 
     /** @return array{credential: MemberAccessCredential, plaintext: string, created: bool} */
@@ -54,6 +56,7 @@ class AttendanceService
     {
         return DB::transaction(function () use ($member, $data, $actor, $request): array {
             $this->activeMembershipForCredential($member);
+
             return $this->createCredential($member, $data, $actor, $request);
         });
     }
@@ -125,6 +128,7 @@ class AttendanceService
     {
         if ($credential->expires_at && $credential->expires_at->isPast()) {
             $credential->update(['status' => AccessCredentialStatus::Expired]);
+
             return null;
         }
 
@@ -158,6 +162,7 @@ class AttendanceService
     public function checkIn(array $data, User $actor, Request $request): AttendanceRecord
     {
         return DB::transaction(function () use ($data, $actor, $request): AttendanceRecord {
+            $this->closeStaleOpenRecords($actor, $request);
             $branchId = $this->resolveAdmissionBranch($data['branch_id'] ?? null);
             $branch = GymBranch::query()->findOrFail($branchId);
             if ($branch->status !== BranchStatus::Active) {
@@ -293,6 +298,7 @@ class AttendanceService
 
     public function ensureClassPresence(Member $member, Membership $membership, string $branchId, User $actor): AttendanceRecord
     {
+        $this->closeStaleOpenRecords($actor);
         $existing = AttendanceRecord::query()
             ->where('member_id', $member->getKey())
             ->where('status', AttendanceStatus::CheckedIn->value)
@@ -301,10 +307,42 @@ class AttendanceService
             if ($existing->branch_id !== $branchId) {
                 throw ValidationException::withMessages(['attendance' => ['The member is currently checked in at another branch.']]);
             }
+
             return $existing;
         }
 
         return $this->createPresence($member, $membership, $branchId, $actor, AttendanceMethod::Manual);
+    }
+
+    public function closeStaleOpenRecords(?User $actor = null, ?Request $request = null): int
+    {
+        return DB::transaction(function () use ($actor, $request): int {
+            $records = AttendanceRecord::query()
+                ->where('status', AttendanceStatus::CheckedIn->value)
+                ->where('checked_in_at', '<=', now()->subHours(self::MAX_OPEN_HOURS))
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($records as $record) {
+                $automaticCheckoutAt = $record->checked_in_at->addHours(self::MAX_OPEN_HOURS);
+                $record->update([
+                    'status' => AttendanceStatus::CheckedOut,
+                    'checked_out_at' => $automaticCheckoutAt,
+                    'checked_out_by' => null,
+                ]);
+                $this->audit->record(
+                    'attendance.stale_session_closed',
+                    $record->fresh(),
+                    $actor,
+                    before: ['status' => AttendanceStatus::CheckedIn->value],
+                    after: ['status' => AttendanceStatus::CheckedOut->value, 'checked_out_at' => $automaticCheckoutAt->toIso8601String()],
+                    reason: 'Open attendance exceeded the 24-hour safety window.',
+                    request: $request,
+                );
+            }
+
+            return $records->count();
+        });
     }
 
     /** @return array{Member, ?MemberAccessCredential, AttendanceMethod} */
@@ -321,6 +359,7 @@ class AttendanceService
                 }
                 throw ValidationException::withMessages(['credential' => ['The QR credential is invalid or expired.']]);
             }
+
             return [Member::query()->lockForUpdate()->findOrFail($credential->member_id), $credential, AttendanceMethod::Qr];
         }
 
@@ -330,6 +369,7 @@ class AttendanceService
         if (! $member) {
             throw ValidationException::withMessages(['member_code' => ['No member matches this code in the selected gym.']]);
         }
+
         return [$member, null, isset($data['member_code']) ? AttendanceMethod::MemberCode : AttendanceMethod::Manual];
     }
 

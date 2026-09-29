@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Gym Admin trainer lifecycle is API-backed and role-fixed", async () => {
+test("Gym Admin employee lifecycle is API-backed and role constrained", async () => {
   const [routes, request, controller, service, client, staff, app] = await Promise.all([
     read("backend/routes/api.php"),
     read("backend/app/Http/Requests/StoreTrainerRequest.php"),
@@ -18,14 +18,18 @@ test("Gym Admin trainer lifecycle is API-backed and role-fixed", async () => {
   assert.match(routes, /Route::post\('\/staff', \[StaffProfileController::class, 'store'\]\)/);
   assert.match(routes, /Route::delete\('\/staff\/\{staff\}', \[StaffProfileController::class, 'destroy'\]\)/);
   assert.match(request, /home_branch_id'[\s\S]*tenantExists\('gym_branches'\)/);
-  assert.doesNotMatch(request, /'role'/);
-  assert.match(service, /UserRole::Trainer->value/);
+  assert.match(request, /'role'[\s\S]*UserRole::GymManager->[\s\S]*UserRole::Receptionist->[\s\S]*UserRole::Trainer->/);
+  assert.match(request, /UserRole::Trainer->value/);
+  assert.match(service, /ensureRoleCanBeGranted/);
+  assert.match(service, /UserRole::from\(\$data\['role'\]\)/);
   assert.match(service, /where\('gym_id', \$this->tenant->id\(\)\)/);
   assert.match(controller, /account_setup_token/);
   assert.match(client, /async createTrainer\(/);
   assert.match(client, /body: form/);
-  assert.match(staff, /Create trainer/);
-  for (const field of ["Name", "Email", "Phone", "Profile image", "Branch", "Status"]) assert.match(staff, new RegExp(field));
+  assert.match(staff, /Create employee/);
+  for (const field of ["Name", "Role", "Employee no.", "Job title", "Email", "Phone", "Profile image", "Branch", "Status"]) assert.match(staff, new RegExp(field));
+  assert.match(staff, /Resend/);
+  assert.match(staff, /Revoke/);
   assert.match(app, /setStaffRefresh/);
 });
 

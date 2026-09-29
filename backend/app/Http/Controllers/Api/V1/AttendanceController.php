@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\AccessCredentialStatus;
 use App\Enums\AttendanceStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\IssueAccessCredentialRequest;
@@ -11,7 +12,6 @@ use App\Http\Resources\MemberAccessCredentialResource;
 use App\Models\AttendanceRecord;
 use App\Models\Member;
 use App\Models\MemberAccessCredential;
-use App\Enums\AccessCredentialStatus;
 use App\Services\AttendanceService;
 use App\Support\TenantClock;
 use Illuminate\Http\JsonResponse;
@@ -21,8 +21,9 @@ use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
 {
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(Request $request, AttendanceService $service): AnonymousResourceCollection
     {
+        $service->closeStaleOpenRecords($request->user(), $request);
         $from = TenantClock::localDate((string) $request->input('from', TenantClock::businessDate()))->startOfDay()->utc();
         $to = TenantClock::localDate((string) $request->input('to', TenantClock::businessDate()))->endOfDay()->utc();
         if ($to->isBefore($from) || $from->diffInDays($to) > 31) {
@@ -30,7 +31,11 @@ class AttendanceController extends Controller
         }
 
         $query = AttendanceRecord::query()->with(['member', 'branch'])
-            ->whereBetween('checked_in_at', [$from, $to])
+            // A still-open presence remains visible even when it began before
+            // the selected day; the same row is what duplicate prevention sees.
+            ->where(fn ($attendance) => $attendance
+                ->whereBetween('checked_in_at', [$from, $to])
+                ->orWhere('status', AttendanceStatus::CheckedIn->value))
             ->orderByDesc('checked_in_at')->orderByDesc('id');
         foreach (['branch_id', 'member_id', 'status'] as $filter) {
             if ($request->filled($filter)) {
@@ -80,6 +85,7 @@ class AttendanceController extends Controller
             $request->user(),
             $request,
         );
+
         return response()->json(['data' => $this->credentialData(
             $request, $memberModel, $result['credential'], $result['plaintext'],
         )], $result['created'] ? 201 : 200);

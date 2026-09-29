@@ -20,6 +20,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ReportService
 {
@@ -45,8 +46,9 @@ class ReportService
         $previousFrom = $fromLocal->subDays($days)->utc();
         $previousToExclusive = $from;
 
+        $revision = Cache::get($this->revisionKey((string) $gym->id), 'initial');
         $filterHash = hash('sha256', implode('|', [
-            self::REPORT_VERSION, $fromDate, $toDate, $currency->value, $timezone, $branchId ?? 'all',
+            self::REPORT_VERSION, $revision, $fromDate, $toDate, $currency->value, $timezone, $branchId ?? 'all',
         ]));
         $cacheKey = "ironcore:gym:{$gym->id}:reports:overview:{$filterHash}";
 
@@ -65,6 +67,18 @@ class ReportService
             $previousToExclusive,
             $days,
         ));
+    }
+
+    public function invalidateGym(string $gymId): void
+    {
+        // Revisioned keys avoid broad cache flushes and preserve strict tenant
+        // isolation while making a committed finance transition visible now.
+        Cache::forever($this->revisionKey($gymId), (string) Str::uuid());
+    }
+
+    private function revisionKey(string $gymId): string
+    {
+        return "ironcore:gym:{$gymId}:reports:revision";
     }
 
     /** @return array<string, mixed> */

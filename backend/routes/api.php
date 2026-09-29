@@ -1,11 +1,11 @@
 <?php
 
-use App\Http\Controllers\Api\V1\AuthController;
-use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AccountSecurityController;
 use App\Http\Controllers\Api\V1\AttendanceController;
-use App\Http\Controllers\Api\V1\BranchController;
+use App\Http\Controllers\Api\V1\AuditLogController;
+use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BankTransferSettingController;
+use App\Http\Controllers\Api\V1\BranchController;
 use App\Http\Controllers\Api\V1\ClassBookingController;
 use App\Http\Controllers\Api\V1\ClassSessionController;
 use App\Http\Controllers\Api\V1\GymController;
@@ -13,9 +13,9 @@ use App\Http\Controllers\Api\V1\GymOwnerAccountController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\InitialSuperAdminController;
 use App\Http\Controllers\Api\V1\InvoiceController;
+use App\Http\Controllers\Api\V1\MemberAccountInvitationController;
 use App\Http\Controllers\Api\V1\MemberController;
 use App\Http\Controllers\Api\V1\MemberDataExportController;
-use App\Http\Controllers\Api\V1\MemberAccountInvitationController;
 use App\Http\Controllers\Api\V1\MemberImportController;
 use App\Http\Controllers\Api\V1\MemberRosterController;
 use App\Http\Controllers\Api\V1\MemberSelfServiceController;
@@ -25,15 +25,15 @@ use App\Http\Controllers\Api\V1\MfaController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentGatewayController;
-use App\Http\Controllers\Api\V1\PlatformSaasPlanController;
 use App\Http\Controllers\Api\V1\PlatformInsightsController;
+use App\Http\Controllers\Api\V1\PlatformSaasPlanController;
 use App\Http\Controllers\Api\V1\ProgressMeasurementController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SaasSubscriptionController;
 use App\Http\Controllers\Api\V1\StaffInvitationController;
 use App\Http\Controllers\Api\V1\StaffProfileController;
-use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\StripeBillingWebhookController;
+use App\Http\Controllers\Api\V1\StripeWebhookController;
 use App\Http\Controllers\Api\V1\TrainerAssignmentController;
 use App\Http\Controllers\Api\V1\WorkoutPlanController;
 use App\Http\Controllers\Api\V1\WorkoutSessionController;
@@ -224,6 +224,10 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/staff-invitations', [StaffInvitationController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::post('/staff-invitations', [StaffInvitationController::class, 'store'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/staff-invitations/{invitation}/resend', [StaffInvitationController::class, 'resend'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/staff-invitations/{invitation}/revoke', [StaffInvitationController::class, 'revoke'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/membership-plans', [MembershipPlanController::class, 'index'])

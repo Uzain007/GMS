@@ -14,11 +14,14 @@ use Illuminate\Validation\ValidationException;
 
 class InvoiceService
 {
-    public function __construct(private readonly AuditService $audit) {}
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly ReportService $reports,
+    ) {}
 
     public function create(array $data, User $actor, Request $request): Invoice
     {
-        return DB::transaction(function () use ($data, $actor, $request): Invoice {
+        $invoice = DB::transaction(function () use ($data, $actor, $request): Invoice {
             // Both lookups are constrained by Eloquent tenant scopes and RLS;
             // composite foreign keys retain the same proof at write time.
             $member = Member::query()->findOrFail($data['member_id']);
@@ -87,5 +90,9 @@ class InvoiceService
 
             return $invoice;
         });
+
+        $this->reports->invalidateGym((string) $invoice->gym_id);
+
+        return $invoice;
     }
 }

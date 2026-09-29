@@ -5,11 +5,11 @@ namespace App\Services;
 use App\Enums\InvitationStatus;
 use App\Enums\StaffStatus;
 use App\Enums\UserRole;
+use App\Jobs\SendAccountInvitation;
 use App\Models\Gym;
 use App\Models\StaffInvitation;
 use App\Models\StaffProfile;
 use App\Models\User;
-use App\Jobs\SendAccountInvitation;
 use App\Tenancy\TenantContext;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
@@ -66,12 +66,62 @@ class StaffInvitationService
                 after: $invitation->toArray(),
                 request: $request,
             );
+
             return $invitation;
         });
 
         SendAccountInvitation::dispatch($email, $this->context->id(), $this->context->gym()->name, $plainToken, 'staff')->afterCommit();
 
         return [$invitation, $plainToken];
+    }
+
+    /** @return array{0: StaffInvitation, 1: string} */
+    public function resend(StaffInvitation $invitation, User $actor, Request $request, int $expiresInDays = 7): array
+    {
+        $this->ensureRoleCanBeGranted($actor, $invitation->role->value);
+        $plainToken = Str::random(64);
+        $resent = DB::transaction(function () use ($invitation, $actor, $request, $plainToken, $expiresInDays): StaffInvitation {
+            // The tenant scope and row lock prevent cross-gym token rotation and
+            // concurrent resend/revoke races for the same pending invitation.
+            $locked = StaffInvitation::query()->lockForUpdate()->findOrFail($invitation->getKey());
+            if ($locked->status !== InvitationStatus::Pending) {
+                throw ValidationException::withMessages(['invitation' => ['Only a pending invitation can be resent.']]);
+            }
+
+            $before = $locked->toArray();
+            $locked->update([
+                'invited_by' => $actor->getKey(),
+                'token_hash' => hash('sha256', $plainToken),
+                'expires_at' => now()->addDays($expiresInDays),
+            ]);
+            $fresh = $locked->fresh();
+            $this->audit->record('staff.invitation_resent', $fresh, $actor, $before, $fresh->toArray(), request: $request);
+
+            return $fresh;
+        });
+
+        SendAccountInvitation::dispatch($resent->email, $this->context->id(), $this->context->gym()->name, $plainToken, 'staff')->afterCommit();
+
+        return [$resent, $plainToken];
+    }
+
+    public function revoke(StaffInvitation $invitation, User $actor, Request $request): StaffInvitation
+    {
+        $this->ensureRoleCanBeGranted($actor, $invitation->role->value);
+
+        return DB::transaction(function () use ($invitation, $actor, $request): StaffInvitation {
+            $locked = StaffInvitation::query()->lockForUpdate()->findOrFail($invitation->getKey());
+            if ($locked->status !== InvitationStatus::Pending) {
+                throw ValidationException::withMessages(['invitation' => ['Only a pending invitation can be revoked.']]);
+            }
+
+            $before = $locked->toArray();
+            $locked->update(['status' => InvitationStatus::Revoked]);
+            $fresh = $locked->fresh();
+            $this->audit->record('staff.invitation_revoked', $fresh, $actor, $before, $fresh->toArray(), request: $request);
+
+            return $fresh;
+        });
     }
 
     public function ensureRoleCanBeGranted(User $actor, string $targetRole): void

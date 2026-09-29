@@ -43,6 +43,33 @@ class StaffInvitationController extends Controller
         ], 201);
     }
 
+    public function resend(
+        Request $request,
+        StaffInvitation $invitation,
+        StaffInvitationService $service,
+    ): JsonResponse {
+        $data = $request->validate(['expires_in_days' => ['sometimes', 'integer', 'between:1,30']]);
+        [$resent, $plainToken] = $service->resend(
+            $invitation,
+            $request->user(),
+            $request,
+            (int) ($data['expires_in_days'] ?? 7),
+        );
+
+        return response()->json([
+            'data' => (new StaffInvitationResource($resent))->resolve($request),
+            'meta' => ['acceptance_token' => $plainToken],
+        ]);
+    }
+
+    public function revoke(
+        Request $request,
+        StaffInvitation $invitation,
+        StaffInvitationService $service,
+    ): StaffInvitationResource {
+        return new StaffInvitationResource($service->revoke($invitation, $request->user(), $request));
+    }
+
     public function accept(
         Request $request,
         Gym $gym,

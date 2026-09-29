@@ -3,17 +3,19 @@
 namespace Tests\Feature;
 
 use App\Enums\Currency;
-use App\Enums\GymStatus;
 use App\Enums\MemberStatus;
 use App\Enums\StaffStatus;
 use App\Enums\UserRole;
+use App\Jobs\SendAccountInvitation;
 use App\Models\Gym;
 use App\Models\Member;
 use App\Models\MembershipPlan;
+use App\Models\StaffInvitation;
 use App\Models\StaffProfile;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use LogicException;
 use Tests\TestCase;
@@ -141,6 +143,62 @@ class PhaseThreeTenantIsolationTest extends TestCase
             'role' => UserRole::GymOwner->value,
             'employee_number' => 'STAFF-001',
         ], ['X-Gym-ID' => $gym->id])->assertForbidden();
+    }
+
+    public function test_staff_invitation_create_resend_and_revoke_are_delivered_and_tenant_scoped(): void
+    {
+        Queue::fake();
+        $owner = User::factory()->create();
+        $gym = Gym::factory()->create();
+        $otherGym = Gym::factory()->create();
+        $this->attachRole($gym, $owner, UserRole::GymOwner, 'active');
+        $this->attachRole($otherGym, $owner, UserRole::GymOwner, 'active');
+        Sanctum::actingAs($owner);
+
+        $created = $this->postJson("/api/v1/gyms/{$gym->id}/staff-invitations", [
+            'email' => 'invited-trainer@example.test',
+            'role' => UserRole::Trainer->value,
+            'employee_number' => 'INVITE-TRAINER-01',
+            'job_title' => 'Invited Trainer',
+        ], ['X-Gym-ID' => $gym->id])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'pending');
+        $invitationId = $created->json('data.id');
+        $firstToken = $created->json('meta.acceptance_token');
+        $firstHash = app(TenantContext::class)->run(
+            $gym,
+            fn () => StaffInvitation::query()->findOrFail($invitationId)->token_hash,
+        );
+
+        $resent = $this->postJson(
+            "/api/v1/gyms/{$gym->id}/staff-invitations/{$invitationId}/resend",
+            ['expires_in_days' => 10],
+            ['X-Gym-ID' => $gym->id],
+        )->assertOk()->assertJsonPath('data.status', 'pending');
+        $secondToken = $resent->json('meta.acceptance_token');
+        $secondHash = app(TenantContext::class)->run(
+            $gym,
+            fn () => StaffInvitation::query()->findOrFail($invitationId)->token_hash,
+        );
+        $this->assertNotSame($firstToken, $secondToken);
+        $this->assertNotSame($firstHash, $secondHash);
+        Queue::assertPushed(SendAccountInvitation::class, 2);
+
+        $this->postJson(
+            "/api/v1/gyms/{$otherGym->id}/staff-invitations/{$invitationId}/revoke",
+            [],
+            ['X-Gym-ID' => $otherGym->id],
+        )->assertNotFound();
+        $this->postJson(
+            "/api/v1/gyms/{$gym->id}/staff-invitations/{$invitationId}/revoke",
+            [],
+            ['X-Gym-ID' => $gym->id],
+        )->assertOk()->assertJsonPath('data.status', 'revoked');
+        $this->postJson(
+            "/api/v1/gyms/{$gym->id}/staff-invitations/{$invitationId}/resend",
+            [],
+            ['X-Gym-ID' => $gym->id],
+        )->assertUnprocessable()->assertJsonValidationErrors('invitation');
     }
 
     public function test_manager_cannot_suspend_an_owner_without_sending_a_role_field(): void

@@ -14,7 +14,6 @@ use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -60,6 +59,91 @@ class TrainerLifecycleTest extends TestCase
         } finally {
             $this->travelBack();
         }
+    }
+
+    public function test_future_assignment_is_scheduled_for_managers_and_hidden_from_trainer_access(): void
+    {
+        [$owner, $gym] = $this->tenant();
+        $branch = $this->branch($gym, 'FUTURE');
+        $member = $this->member($gym, $branch, 'FUTURE');
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+
+        $trainerId = $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+            'name' => 'Future Assignment Trainer',
+            'email' => 'future-assignment@example.test',
+            'phone' => '+44 7700 900327',
+            'home_branch_id' => $branch->id,
+            'status' => 'active',
+        ], $headers)->assertCreated()->json('data.id');
+
+        $assignmentId = $this->postJson("/api/v1/gyms/{$gym->id}/trainer-assignments", [
+            'trainer_staff_profile_id' => $trainerId,
+            'member_id' => $member->id,
+            'starts_on' => today($gym->timezone)->addDay()->toDateString(),
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.effective_status', 'scheduled')
+            ->assertJsonPath('data.is_current', false)
+            ->json('data.id');
+
+        $trainer = app(TenantContext::class)->run($gym, fn () => StaffProfile::query()->findOrFail($trainerId));
+        Sanctum::actingAs(User::query()->findOrFail($trainer->user_id));
+        $this->getJson("/api/v1/gyms/{$gym->id}/trainer-assignments", $headers)
+            ->assertOk()
+            ->assertJsonMissing(['id' => $assignmentId]);
+    }
+
+    public function test_owner_and_manager_can_create_permitted_operational_employees(): void
+    {
+        [$owner, $gym] = $this->tenant();
+        $branch = $this->branch($gym, 'EMPLOYEE');
+        $headers = ['X-Gym-ID' => $gym->id];
+        Sanctum::actingAs($owner);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+            'name' => 'Front Desk Employee',
+            'email' => 'front-desk@example.test',
+            'phone' => '+44 7700 900328',
+            'role' => UserRole::Receptionist->value,
+            'employee_number' => 'EMP-RECEPTION-01',
+            'job_title' => 'Front Desk Associate',
+            'home_branch_id' => $branch->id,
+            'status' => 'active',
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.role', UserRole::Receptionist->value)
+            ->assertJsonPath('data.employee_number', 'EMP-RECEPTION-01')
+            ->assertJsonPath('data.job_title', 'Front Desk Associate');
+
+        $manager = User::factory()->create();
+        app(TenantContext::class)->run($gym, fn () => $gym->users()->attach($manager, [
+            'role' => UserRole::GymManager->value,
+            'status' => 'active',
+        ]));
+        Sanctum::actingAs($manager);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+            'name' => 'Operations Peer',
+            'email' => 'operations-peer@example.test',
+            'phone' => '+44 7700 900329',
+            'role' => UserRole::GymManager->value,
+            'employee_number' => 'EMP-MANAGER-02',
+            'job_title' => 'Operations Manager',
+            'home_branch_id' => $branch->id,
+            'status' => 'active',
+        ], $headers)->assertForbidden();
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
+            'name' => 'Trainer Added By Manager',
+            'email' => 'manager-created-trainer@example.test',
+            'phone' => '+44 7700 900330',
+            'role' => UserRole::Trainer->value,
+            'employee_number' => 'EMP-TRAINER-03',
+            'job_title' => 'Floor Trainer',
+            'home_branch_id' => $branch->id,
+            'status' => 'active',
+        ], $headers)->assertCreated()->assertJsonPath('data.role', UserRole::Trainer->value);
     }
 
     public function test_owner_can_complete_the_trainer_class_coaching_plan_and_portal_journey(): void
@@ -298,6 +382,7 @@ class TrainerLifecycleTest extends TestCase
             'role' => UserRole::GymOwner->value,
             'status' => 'active',
         ]));
+
         return [$owner, $gym];
     }
 

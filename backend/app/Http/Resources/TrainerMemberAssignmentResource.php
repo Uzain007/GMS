@@ -15,6 +15,8 @@ class TrainerMemberAssignmentResource extends JsonResource
             'trainer' => $this->whenLoaded('trainer', fn () => ['id' => $this->trainer->id, 'name' => $this->trainer->professionalName()]),
             'member' => $this->whenLoaded('member', fn () => ['id' => $this->member->id, 'member_number' => $this->member->member_number, 'member_code' => $this->member->member_code, 'name' => trim($this->member->first_name.' '.$this->member->last_name)]),
             'status' => $this->status->value, 'starts_on' => $this->starts_on?->toDateString(),
+            'effective_status' => $this->effectiveStatus(),
+            'is_current' => $this->effectiveStatus() === 'active',
             'ends_on' => $this->ends_on?->toDateString(), 'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
         ];

@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Enums\TrainerAssignmentStatus;
+use App\Enums\MembershipStatus;
 use App\Enums\StaffStatus;
 use App\Enums\UserRole;
 use App\Models\Member;
@@ -11,10 +11,9 @@ use App\Models\StaffProfile;
 use App\Models\TrainerMemberAssignment;
 use App\Models\User;
 use App\Models\WorkoutPlan;
-use App\Enums\MembershipStatus;
-use Illuminate\Validation\ValidationException;
-use App\Tenancy\TenantContext;
 use App\Support\TenantClock;
+use App\Tenancy\TenantContext;
+use Illuminate\Validation\ValidationException;
 
 class TrainingAccessService
 {
@@ -39,12 +38,14 @@ class TrainingAccessService
                 abort(403, 'Members may access only their own training records.');
             }
             $this->assertMemberBenefitsAvailable($member);
+
             return $member;
         }
 
         abort_unless($requestedMemberId, 422, 'Select a member.');
         $member = $query->findOrFail($requestedMemberId);
         $this->assertMemberAccess($actor, $member);
+
         return $member;
     }
 
@@ -56,12 +57,14 @@ class TrainingAccessService
             if ($requestedTrainerId && $requestedTrainerId !== $trainer->getKey()) {
                 abort(403, 'Trainers cannot act as another trainer.');
             }
+
             return $trainer;
         }
 
         abort_unless($requestedTrainerId, 422, 'Select a trainer.');
         $trainer = StaffProfile::query()->with('user')->findOrFail($requestedTrainerId);
         $this->assertActiveTrainer($trainer);
+
         return $trainer;
     }
 
@@ -116,9 +119,7 @@ class TrainingAccessService
         return TrainerMemberAssignment::query()
             ->where('trainer_staff_profile_id', $trainerId)
             ->where('member_id', $memberId)
-            ->where('status', TrainerAssignmentStatus::Active->value)
-            ->whereDate('starts_on', '<=', TenantClock::businessDate())
-            ->where(fn ($query) => $query->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()))
+            ->current()
             ->exists();
     }
 
@@ -140,7 +141,7 @@ class TrainingAccessService
         // A legacy profile without branch rows remains gym-wide. Once a branch
         // is assigned, every class/member match is checked server-side.
         if ($assignedBranches->exists() && ! (clone $assignedBranches)->whereKey($branchId)->exists()) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'trainer_staff_profile_id' => ['The selected trainer is not assigned to this branch.'],
             ]);
         }

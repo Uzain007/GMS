@@ -66,6 +66,50 @@ class PhaseSixReportingIsolationTest extends TestCase
         )->assertUnprocessable()->assertJsonValidationErrors('to');
     }
 
+    public function test_committed_invoice_and_payment_transitions_invalidate_cached_finance_reports(): void
+    {
+        [$owner, $gym] = $this->tenant(UserRole::GymOwner);
+        $member = $this->member($gym, 'CACHE');
+        $today = today($gym->timezone)->toDateString();
+        $url = "/api/v1/gyms/{$gym->id}/reports/overview?from={$today}&to={$today}&currency=GBP";
+        $headers = ['X-Gym-ID' => $gym->id];
+        Sanctum::actingAs($owner);
+
+        $this->getJson($url, $headers)
+            ->assertOk()
+            ->assertJsonPath('data.summary.outstanding_minor', 0)
+            ->assertJsonPath('data.summary.net_revenue_minor', 0);
+
+        $invoiceId = $this->postJson("/api/v1/gyms/{$gym->id}/invoices", [
+            'member_id' => $member->id,
+            'currency' => Currency::GBP->value,
+            'items' => [[
+                'description' => 'Cached report regression invoice',
+                'quantity' => 1,
+                'unit_amount_minor' => 500,
+            ]],
+        ], $headers)->assertCreated()->json('data.id');
+
+        $this->getJson($url, $headers)
+            ->assertOk()
+            ->assertJsonPath('data.summary.outstanding_minor', 500);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/payments", [
+            'member_id' => $member->id,
+            'invoice_id' => $invoiceId,
+            'method' => 'cash',
+            'amount_minor' => 500,
+            'currency' => Currency::GBP->value,
+            'idempotency_key' => 'report-cache-settlement-001',
+            'payment_date' => $today,
+        ], $headers)->assertCreated()->assertJsonPath('data.status', PaymentStatus::Paid->value);
+
+        $this->getJson($url, $headers)
+            ->assertOk()
+            ->assertJsonPath('data.summary.outstanding_minor', 0)
+            ->assertJsonPath('data.summary.net_revenue_minor', 500);
+    }
+
     public function test_branch_filter_scopes_every_report_section_and_rejects_another_gyms_branch(): void
     {
         [$owner, $gym] = $this->tenant(UserRole::GymOwner);
@@ -81,7 +125,7 @@ class PhaseSixReportingIsolationTest extends TestCase
             'name' => 'Foreign', 'code' => 'FOREIGN', 'status' => 'active', 'is_primary' => true,
         ]));
 
-        app(TenantContext::class)->run($gym, function () use ($gym, $owner, $first, $second): void {
+        app(TenantContext::class)->run($gym, function () use ($owner, $first, $second): void {
             foreach ([$first, $second] as $index => $branch) {
                 $member = Member::query()->create([
                     'home_branch_id' => $branch->id, 'member_number' => 'MBR-REPORT-'.$index,

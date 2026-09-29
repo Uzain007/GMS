@@ -324,6 +324,7 @@ test("trainer access, append-only history and notification jobs fail closed", as
   const delivery = await read("app/Models/NotificationDelivery.php");
   const job = await read("app/Jobs/SendNotificationDelivery.php");
   const assignmentController = await read("app/Http/Controllers/Api/V1/TrainerAssignmentController.php");
+  const assignment = await read("app/Models/TrainerMemberAssignment.php");
   const planController = await read("app/Http/Controllers/Api/V1/WorkoutPlanController.php");
   const sms = await read("app/Services/Notifications/SmsNotificationAdapter.php");
   const push = await read("app/Services/Notifications/PushNotificationAdapter.php");
@@ -348,10 +349,14 @@ test("trainer access, append-only history and notification jobs fail closed", as
   assert.match(delivery, /protected \$hidden = \['destination'\]/);
   assert.match(job, /implements ShouldQueue/);
   assert.match(job, /\$context->run\(\$gym/);
-  for (const controller of [assignmentController, planController]) {
-    assert.match(controller, /whereDate\('starts_on', '<=', TenantClock::businessDate\(\)\)/);
-    assert.match(controller, /orWhereDate\('ends_on', '>=', TenantClock::businessDate\(\)\)/);
-  }
+  assert.match(assignmentController, /->current\(\)/);
+  assert.match(access, /->current\(\)/);
+  assert.match(assignment, /scopeCurrent/);
+  assert.match(assignment, /TenantClock::businessDate\(\)/);
+  assert.match(assignment, /whereDate\('starts_on', '<=', \$date\)/);
+  assert.match(assignment, /orWhereDate\('ends_on', '>=', \$date\)/);
+  assert.match(planController, /whereDate\('starts_on', '<=', TenantClock::businessDate\(\)\)/);
+  assert.match(planController, /orWhereDate\('ends_on', '>=', TenantClock::businessDate\(\)\)/);
   for (const adapter of [sms, push]) {
     assert.match(adapter, /FILTER_VALIDATE_URL/);
     assert.match(adapter, /PHP_URL_SCHEME\) !== 'https'/);

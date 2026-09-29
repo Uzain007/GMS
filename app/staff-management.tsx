@@ -20,7 +20,7 @@ export type StaffRow = {
 };
 export type InvitationRow = { id: string; email: string; role: StaffRole; branchId: string | null; employeeNumber: string; jobTitle: string | null; status: string; expiresAt: string };
 export type NewStaffInvite = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days: number };
-export type NewTrainer = { name: string; email: string; phone: string; home_branch_id: string; status: "active" | "inactive"; profile_image?: File };
+export type NewTrainer = { name: string; email: string; phone: string; role: Exclude<StaffRole, "gym_owner">; employee_number: string; job_title: string; home_branch_id: string; status: "active" | "inactive"; profile_image?: File };
 export type TrainerSetup = { setupLink: string | null; existingAccount: boolean };
 export type StaffUpdate = { display_name: string; contact_email: string; phone: string; role: StaffRole; employee_number: string; job_title?: string | null; home_branch_id?: string | null; status: StaffRow["status"]; reason: string };
 export type StaffData = {
@@ -34,6 +34,8 @@ export type StaffData = {
   onReload: () => void;
   onCreateTrainer: (input: NewTrainer) => Promise<TrainerSetup>;
   onInvite: (input: NewStaffInvite) => Promise<string>;
+  onResendInvite: (id: string) => Promise<string>;
+  onRevokeInvite: (id: string) => Promise<void>;
   onUpdate: (id: string, input: StaffUpdate) => Promise<void>;
   onUpdateImage: (id: string, image: File | null, reason: string) => Promise<void>;
   onDelete: (id: string, reason: string) => Promise<void>;
@@ -42,32 +44,52 @@ export type StaffData = {
 
 const roleLabel = (role: string) => role.split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
 const displayDate = (value: string | null) => value ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)) : "Not set";
-const operationalRoles: StaffRole[] = ["receptionist", "trainer"];
+const operationalRoles: Array<Exclude<StaffRole, "gym_owner" | "gym_manager">> = ["receptionist", "trainer"];
 const allRoles: StaffRole[] = ["gym_owner", "gym_manager", ...operationalRoles];
+const employeeRoles: Array<Exclude<StaffRole, "gym_owner">> = ["gym_manager", ...operationalRoles];
 
 export function StaffManagement({ data, query }: { data: StaffData; query: string }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editing, setEditing] = useState<StaffRow | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteActionBusy, setInviteActionBusy] = useState<string | null>(null);
+  const [inviteActionError, setInviteActionError] = useState<string | null>(null);
   const search = query.toLowerCase();
   const rows = data.rows.filter((row) => `${row.name} ${row.email} ${row.phone ?? ""} ${row.employeeNumber} ${row.jobTitle ?? ""}`.toLowerCase().includes(search));
   const invitations = data.invitations.filter((row) => `${row.email} ${row.employeeNumber}`.toLowerCase().includes(search));
   const manager = data.actorRole === "gym_manager";
-  const canEdit = (row: StaffRow) => !data.readOnly && (!manager || operationalRoles.includes(row.role));
+  const canEdit = (row: StaffRow) => !data.readOnly && (!manager || operationalRoles.includes(row.role as (typeof operationalRoles)[number]));
+
+  async function resendInvitation(row: InvitationRow) {
+    setInviteActionBusy(row.id); setInviteActionError(null);
+    try { setInviteLink(await data.onResendInvite(row.id)); }
+    catch (error) { setInviteActionError(error instanceof Error ? error.message : "Invitation could not be resent."); }
+    finally { setInviteActionBusy(null); }
+  }
+
+  async function revokeInvitation(row: InvitationRow) {
+    setInviteActionBusy(row.id); setInviteActionError(null);
+    try { await data.onRevokeInvite(row.id); }
+    catch (error) { setInviteActionError(error instanceof Error ? error.message : "Invitation could not be revoked."); }
+    finally { setInviteActionBusy(null); }
+  }
 
   return <>
     <section className="module-heading">
-      <div><p className="eyebrow">Gym team</p><h2>Staff / Trainers</h2><p>{data.readOnly ? "Representative team records for product review." : "Create trainers, control branch access and manage the wider gym team."}</p></div>
-      {!data.readOnly && <div className="staff-heading-actions"><button className="secondary-button" onClick={() => setInviteOpen(true)}><MailPlus size={17} /> Invite staff</button><button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={18} /> Create trainer</button></div>}
+      <div><p className="eyebrow">Gym team</p><h2>Staff / Employees</h2><p>{data.readOnly ? "Representative team records for product review." : "Create operational employees, control branch access and manage the wider gym team."}</p></div>
+      {!data.readOnly && <div className="staff-heading-actions"><button className="secondary-button" onClick={() => setInviteOpen(true)}><MailPlus size={17} /> Invite staff</button><button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={18} /> Create employee</button></div>}
     </section>
     {!['receptionist', 'trainer', 'member'].includes(data.actorRole) && <div className="live-scope-banner"><ShieldCheck size={17} /><span><strong>{data.actorRole === "super_admin" ? "Protected role boundary" : "Your gym team"}</strong><small>{data.actorRole === "super_admin" ? "Backend tenant, branch, role and status checks protect this staff directory." : "Manage the authorised staff and trainers who work at your gym."}</small></span></div>}
     {data.loading && <div className="table-state"><RefreshCw className="spin" size={20} /> Loading gym team…</div>}
+    {inviteActionError && <div className="form-error" role="alert">{inviteActionError}</div>}
     {data.error && <div className="table-state error" role="alert"><strong>Staff data could not be loaded</strong><span>{data.error}</span><button className="secondary-button" onClick={data.onReload}>Try again</button></div>}
     {!data.loading && !data.error && <>
       <section className="mini-metrics"><article><span>Staff profiles</span><strong>{data.rows.length}</strong><small>People linked to this gym</small></article><article><span>Active trainers</span><strong>{data.rows.filter((row) => row.role === "trainer" && row.status === "active").length}</strong><small>Available for classes and coaching</small></article><article><span>Pending invites</span><strong>{data.invitations.length}</strong><small>Secure invitations awaiting setup</small></article></section>
       <section className="panel table-scroll"><div className="panel-heading compact"><div><p className="eyebrow">Authorised users</p><h2>Staff directory</h2></div></div>{rows.length ? <table className="data-table"><thead><tr><th>Staff member</th><th>Employee no.</th><th>Role</th><th>Branch</th><th>Status</th><th /></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td><div className="person-cell"><StaffAvatar row={row} load={data.onLoadImage} /><strong>{row.name}</strong></div><small className="table-sub">{row.email}{row.phone ? ` · ${row.phone}` : ""} · {row.jobTitle ?? "No job title"}</small></td><td>{row.employeeNumber}</td><td><span className="plan-pill">{roleLabel(row.role)}</span></td><td>{data.branches.find((branch) => branch.id === row.branchId)?.name ?? "All branches"}</td><td><span className={`status ${row.status}`}><i />{row.status}</span></td><td><button className="icon-button" disabled={!canEdit(row)} onClick={() => setEditing(row)} aria-label={`Manage ${row.name}`} title={!canEdit(row) ? "Managers cannot modify owners or other managers" : "Manage staff member"}><Pencil size={17} /></button></td></tr>)}</tbody></table> : <Empty text="No staff found" />}</section>
-      <section className="panel table-scroll"><div className="panel-heading compact"><div><p className="eyebrow">Secure onboarding</p><h2>Pending invitations</h2></div></div>{invitations.length ? <table className="data-table"><thead><tr><th>Email</th><th>Employee no.</th><th>Role</th><th>Branch</th><th>Expires</th></tr></thead><tbody>{invitations.map((row) => <tr key={row.id}><td><strong>{row.email}</strong><small className="table-sub">{row.jobTitle ?? "No job title"}</small></td><td>{row.employeeNumber}</td><td>{roleLabel(row.role)}</td><td>{data.branches.find((branch) => branch.id === row.branchId)?.name ?? "All branches"}</td><td>{displayDate(row.expiresAt)}</td></tr>)}</tbody></table> : <Empty text="No pending invitations" />}</section>
+      <section className="panel table-scroll"><div className="panel-heading compact"><div><p className="eyebrow">Secure onboarding</p><h2>Pending invitations</h2></div></div>{invitations.length ? <table className="data-table"><thead><tr><th>Email</th><th>Employee no.</th><th>Role</th><th>Branch</th><th>Expires</th><th>Actions</th></tr></thead><tbody>{invitations.map((row) => <tr key={row.id}><td><strong>{row.email}</strong><small className="table-sub">{row.jobTitle ?? "No job title"}</small></td><td>{row.employeeNumber}</td><td>{roleLabel(row.role)}</td><td>{data.branches.find((branch) => branch.id === row.branchId)?.name ?? "All branches"}</td><td>{displayDate(row.expiresAt)}</td><td><div className="payment-row-actions"><button className="table-action" disabled={inviteActionBusy === row.id} onClick={() => void resendInvitation(row)}><RefreshCw size={14} /> Resend</button><button className="table-action" disabled={inviteActionBusy === row.id} onClick={() => void revokeInvitation(row)}><Trash2 size={14} /> Revoke</button></div></td></tr>)}</tbody></table> : <Empty text="No pending invitations" />}</section>
     </>}
+    {inviteLink && <Shell title="Invitation resent" close={() => setInviteLink(null)}><div className="modal-note"><ShieldCheck size={17} />A new email was queued and the previous acceptance link was revoked.</div><label>New acceptance link<textarea readOnly rows={4} value={inviteLink} /></label><div className="modal-actions"><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(inviteLink)}><Copy size={16} /> Copy link</button><button className="primary-button" onClick={() => setInviteLink(null)}>Done</button></div></Shell>}
     {createOpen && <CreateTrainerModal data={data} close={() => setCreateOpen(false)} />}
     {inviteOpen && <InviteModal data={data} close={() => setInviteOpen(false)} />}
     {editing && <EditModal data={data} row={editing} close={() => setEditing(null)} />}
@@ -94,6 +116,7 @@ function Empty({ text }: { text: string }) { return <div className="empty-state"
 function Shell({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) { return <div className="modal-layer" role="dialog" aria-modal="true"><button className="modal-scrim" onClick={close} aria-label="Close dialog" /><div className="modal-card staff-modal"><div className="modal-heading"><span><UserCog size={21} /></span><div><p className="eyebrow">Tenant access</p><h2>{title}</h2></div><button className="icon-button" onClick={close} aria-label="Close"><X size={19} /></button></div>{children}</div></div>; }
 
 function CreateTrainerModal({ data, close }: { data: StaffData; close: () => void }) {
+  const roles = data.actorRole === "gym_manager" ? operationalRoles : employeeRoles;
   const activeBranches = data.branches.filter((branch) => branch.status !== "inactive");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,11 +127,11 @@ function CreateTrainerModal({ data, close }: { data: StaffData; close: () => voi
     const image = form.get("profile_image");
     setBusy(true); setError(null);
     try {
-      setSetup(await data.onCreateTrainer({ name: String(form.get("name")), email: String(form.get("email")), phone: String(form.get("phone")), home_branch_id: String(form.get("branch")), status: String(form.get("status")) as "active" | "inactive", profile_image: image instanceof File && image.size ? image : undefined }));
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Trainer could not be created."); }
+      setSetup(await data.onCreateTrainer({ name: String(form.get("name")), email: String(form.get("email")), phone: String(form.get("phone")), role: String(form.get("role")) as Exclude<StaffRole, "gym_owner">, employee_number: String(form.get("employee_number")), job_title: String(form.get("job_title")), home_branch_id: String(form.get("branch")), status: String(form.get("status")) as "active" | "inactive", profile_image: image instanceof File && image.size ? image : undefined }));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Employee could not be created."); }
     finally { setBusy(false); }
   }
-  return <Shell title={setup ? "Trainer created" : "Create trainer"} close={close}>{setup ? <><div className="modal-note"><ShieldCheck size={17} />The trainer is saved in this gym and will appear in eligible class and coaching lists.</div>{setup.setupLink ? <><label>Secure account setup link<textarea readOnly rows={4} value={setup.setupLink} /></label><p className="staff-helper">This one-time link is shown only now. Send it securely to the trainer so they can set their password.</p><div className="modal-actions"><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(setup.setupLink!)}><Copy size={16} /> Copy link</button><button className="primary-button" onClick={close}>Done</button></div></> : <><div className="modal-note"><ShieldCheck size={17} />This email already has an IronCore account. The trainer can use their existing password.</div><div className="modal-actions"><button className="primary-button" onClick={close}>Done</button></div></>}</> : <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}<label>Name<input name="name" required maxLength={160} autoFocus /></label><div className="field-pair"><label>Email<input name="email" type="email" required maxLength={254} /></label><label>Phone<input name="phone" type="tel" required maxLength={40} /></label></div><label className="staff-file-label"><span>Profile image <small>Optional · JPG, PNG or WebP, max 5 MB</small></span><input name="profile_image" type="file" accept="image/jpeg,image/png,image/webp" /></label><div className="field-pair"><label>Branch<select name="branch" required defaultValue=""><option value="" disabled>Select active branch</option>{activeBranches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label><label>Status<select name="status" defaultValue="active"><option value="active">Active</option><option value="inactive">Inactive</option></select></label></div><div className="modal-note"><ShieldCheck size={17} />Role is fixed as Trainer. The backend validates gym, branch and access before saving.</div><div className="modal-actions"><button type="button" className="secondary-button" onClick={close}>Cancel</button><button disabled={busy || activeBranches.length === 0} className="primary-button">{busy ? "Creating…" : "Create trainer"}</button></div></form>}</Shell>;
+  return <Shell title={setup ? "Employee created" : "Create employee"} close={close}>{setup ? <><div className="modal-note"><ShieldCheck size={17} />The employee is saved in this gym with the selected operational role and branch access.</div>{setup.setupLink ? <><label>Secure account setup link<textarea readOnly rows={4} value={setup.setupLink} /></label><p className="staff-helper">This one-time link is shown only now. Send it securely to the employee so they can set their password.</p><div className="modal-actions"><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(setup.setupLink!)}><Copy size={16} /> Copy link</button><button className="primary-button" onClick={close}>Done</button></div></> : <><div className="modal-note"><ShieldCheck size={17} />This email already has an IronCore account. The employee can use their existing password.</div><div className="modal-actions"><button className="primary-button" onClick={close}>Done</button></div></>}</> : <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}<label>Name<input name="name" required maxLength={160} autoFocus /></label><div className="field-pair"><label>Role<select name="role">{roles.map((role) => <option value={role} key={role}>{roleLabel(role)}</option>)}</select></label><label>Employee no.<input name="employee_number" required pattern="[A-Za-z0-9_-]+" maxLength={64} /></label></div><label>Job title<input name="job_title" required maxLength={120} /></label><div className="field-pair"><label>Email<input name="email" type="email" required maxLength={254} /></label><label>Phone<input name="phone" type="tel" required maxLength={40} /></label></div><label className="staff-file-label"><span>Profile image <small>Optional · JPG, PNG or WebP, max 5 MB</small></span><input name="profile_image" type="file" accept="image/jpeg,image/png,image/webp" /></label><div className="field-pair"><label>Branch<select name="branch" required defaultValue=""><option value="" disabled>Select active branch</option>{activeBranches.map((branch) => <option value={branch.id} key={branch.id}>{branch.name}</option>)}</select></label><label>Status<select name="status" defaultValue="active"><option value="active">Active</option><option value="inactive">Inactive</option></select></label></div><div className="modal-note"><ShieldCheck size={17} />The backend validates the selected role, employee number, gym and branch before saving.</div><div className="modal-actions"><button type="button" className="secondary-button" onClick={close}>Cancel</button><button disabled={busy || activeBranches.length === 0} className="primary-button">{busy ? "Creating…" : "Create employee"}</button></div></form>}</Shell>;
 }
 
 function InviteModal({ data, close }: { data: StaffData; close: () => void }) {

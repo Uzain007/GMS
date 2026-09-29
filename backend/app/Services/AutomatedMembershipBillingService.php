@@ -25,6 +25,7 @@ class AutomatedMembershipBillingService
         private readonly TenantContext $tenant,
         private readonly AuditService $audit,
         private readonly NotificationService $notifications,
+        private readonly ReportService $reports,
     ) {}
 
     /** @return array{gyms:int,invoices_created:int,reminders_queued:int,restricted:int} */
@@ -38,6 +39,7 @@ class AutomatedMembershipBillingService
                 $totals[$key] += $result[$key];
             }
         });
+
         return $totals;
     }
 
@@ -126,6 +128,10 @@ class AutomatedMembershipBillingService
                 });
             });
 
+        if ($result['invoices_created'] > 0) {
+            $this->reports->invalidateGym((string) $gym->id);
+        }
+
         return $result;
     }
 
@@ -152,6 +158,7 @@ class AutomatedMembershipBillingService
     private function nextCycle(Membership $membership): ?CarbonImmutable
     {
         $from = CarbonImmutable::parse($membership->next_billing_at ?? TenantClock::businessDate(), 'UTC');
+
         return match ($membership->billing_interval) {
             BillingInterval::Weekly => $from->addWeeks($membership->interval_count),
             BillingInterval::Monthly => $from->addMonthsNoOverflow($membership->interval_count),
@@ -175,6 +182,7 @@ class AutomatedMembershipBillingService
             ['subject' => 'Your membership payment is due', 'body' => 'Please pay your open membership invoice before the grace period ends.', 'data' => ['invoice_id' => $invoice->getKey()]],
             "membership-invoice:{$invoice->getKey()}:{$today->toDateString()}:email", $preference,
         );
+
         return $delivery->wasRecentlyCreated;
     }
 }

@@ -2,13 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AttendanceMethod;
+use App\Enums\AttendanceStatus;
 use App\Enums\BillingInterval;
 use App\Enums\ClassBookingStatus;
 use App\Enums\Currency;
-use App\Enums\MemberStatus;
 use App\Enums\MembershipStatus;
+use App\Enums\MemberStatus;
 use App\Enums\PlanStatus;
 use App\Enums\UserRole;
+use App\Models\AttendanceRecord;
 use App\Models\ClassBooking;
 use App\Models\Gym;
 use App\Models\GymBranch;
@@ -252,6 +255,72 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         ], ['X-Gym-ID' => $gym->id])->assertUnprocessable()->assertJsonValidationErrors('credential');
     }
 
+    public function test_stale_open_presence_is_closed_before_a_new_check_in(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-STALE'));
+        $stale = app(TenantContext::class)->run($gym, function () use ($member, $branch, $owner): AttendanceRecord {
+            $membership = Membership::query()->where('member_id', $member->id)->firstOrFail();
+
+            return AttendanceRecord::query()->create([
+                'member_id' => $member->id,
+                'membership_id' => $membership->id,
+                'branch_id' => $branch->id,
+                'checked_in_by' => $owner->id,
+                'method' => AttendanceMethod::Manual,
+                'status' => AttendanceStatus::CheckedIn,
+                'checked_in_at' => now()->subHours(25),
+            ]);
+        });
+
+        Sanctum::actingAs($owner);
+        $createdId = $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $member->member_code,
+        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data.id');
+
+        app(TenantContext::class)->run($gym, function () use ($stale, $createdId): void {
+            $this->assertSame(AttendanceStatus::CheckedOut, $stale->fresh()->status);
+            $this->assertSame(
+                $stale->checked_in_at->addHours(24)->toIso8601String(),
+                $stale->fresh()->checked_out_at->toIso8601String(),
+            );
+            $this->assertSame(1, AttendanceRecord::query()
+                ->where('id', $createdId)
+                ->where('status', AttendanceStatus::CheckedIn->value)
+                ->count());
+        });
+    }
+
+    public function test_previous_day_open_presence_stays_visible_and_blocks_a_duplicate(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-OPEN'));
+        $open = app(TenantContext::class)->run($gym, function () use ($member, $branch, $owner): AttendanceRecord {
+            $membership = Membership::query()->where('member_id', $member->id)->firstOrFail();
+
+            return AttendanceRecord::query()->create([
+                'member_id' => $member->id,
+                'membership_id' => $membership->id,
+                'branch_id' => $branch->id,
+                'checked_in_by' => $owner->id,
+                'method' => AttendanceMethod::Manual,
+                'status' => AttendanceStatus::CheckedIn,
+                'checked_in_at' => now()->subHours(23),
+            ]);
+        });
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
+            ->assertOk()
+            ->assertJsonFragment(['id' => $open->id]);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $member->member_code,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('member');
+    }
+
     public function test_full_class_waitlists_and_cancellation_promotes_fifo_member(): void
     {
         [$owner, $gym, $branch] = $this->tenant();
@@ -279,6 +348,12 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             'member_id' => $second->id,
         ], ['X-Gym-ID' => $gym->id])->assertJsonPath('data.status', 'waitlisted')->json('data');
 
+        $this->getJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings?per_page=100", [
+            'X-Gym-ID' => $gym->id,
+        ])->assertOk()
+            ->assertJsonFragment(['id' => $waitlisted['id'], 'status' => 'waitlisted'])
+            ->assertJsonFragment(['id' => $second->id, 'member_number' => 'MBR-SECOND']);
+
         $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$confirmed['id']}/cancel", [
             'reason' => 'Member cannot attend',
         ], ['X-Gym-ID' => $gym->id])->assertSuccessful();
@@ -299,6 +374,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         $branch = app(TenantContext::class)->run($gym, fn () => GymBranch::query()->create([
             'name' => 'Central', 'code' => 'CENTRAL', 'status' => 'active', 'is_primary' => true,
         ]));
+
         return [$owner, $gym, $branch];
     }
 
@@ -319,6 +395,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             'starts_at' => today()->subDay(), 'price_amount_minor' => 5000,
             'currency' => Currency::GBP, 'billing_interval' => BillingInterval::Monthly,
         ]);
+
         return $member;
     }
 }

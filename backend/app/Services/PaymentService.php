@@ -32,6 +32,7 @@ class PaymentService
         private readonly StripeGatewayService $stripe,
         private readonly AutomatedMembershipBillingService $membershipBilling,
         private readonly ReceiptFileProcessor $receiptFiles,
+        private readonly ReportService $reports,
     ) {}
 
     /** @return array{payment: Payment, checkout_url: ?string, reused: bool} */
@@ -118,6 +119,7 @@ class PaymentService
                     $this->applyPaymentToInvoice($invoice, $payment->amount_minor);
                 }
                 $this->audit->record('payment.created', $payment, $actor, after: $payment->toArray(), request: $request);
+
                 return $payment;
             });
         } catch (Throwable $exception) {
@@ -127,6 +129,8 @@ class PaymentService
             throw $exception;
         }
 
+        $this->reports->invalidateGym((string) $payment->gym_id);
+
         if (! $method->isOnline()) {
             return ['payment' => $payment->load(['refunds', 'bankTransferReceipt']), 'checkout_url' => null, 'reused' => false];
         }
@@ -134,6 +138,7 @@ class PaymentService
         try {
             $checkout = $this->stripe->createCheckout($payment);
             $payment->update(['provider_checkout_id' => $checkout['checkout_id']]);
+
             return ['payment' => $payment->fresh()->load(['refunds', 'bankTransferReceipt']), 'checkout_url' => $checkout['checkout_url'], 'reused' => false];
         } catch (Throwable $exception) {
             $payment->update([
@@ -142,6 +147,7 @@ class PaymentService
                 'failure_code' => 'checkout_creation_failed',
                 'failure_message' => mb_substr($exception->getMessage(), 0, 1000),
             ]);
+            $this->reports->invalidateGym((string) $payment->gym_id);
             throw $exception;
         }
     }
@@ -189,6 +195,7 @@ class PaymentService
         }
 
         $this->finalizeRefund($refund);
+        $this->reports->invalidateGym((string) $payment->gym_id);
         $this->audit->record(
             'payment.refunded',
             $payment->fresh(),
@@ -204,7 +211,7 @@ class PaymentService
 
     public function markCheckoutSucceeded(string $paymentId, ?string $providerPaymentId): Payment
     {
-        return DB::transaction(function () use ($paymentId, $providerPaymentId): Payment {
+        $settled = DB::transaction(function () use ($paymentId, $providerPaymentId): Payment {
             $payment = Payment::query()->lockForUpdate()->findOrFail($paymentId);
             if ($payment->status === PaymentStatus::Paid) {
                 return $payment;
@@ -227,8 +234,12 @@ class PaymentService
             }
             $fresh = $payment->fresh();
             $this->audit->record('payment.paid', $fresh, null, after: $fresh->toArray());
+
             return $fresh;
         });
+        $this->reports->invalidateGym((string) $settled->gym_id);
+
+        return $settled;
     }
 
     public function markCheckoutFailed(string $paymentId, string $code, string $message): Payment
@@ -242,12 +253,14 @@ class PaymentService
                 'failure_message' => mb_substr($message, 0, 1000),
             ]);
         }
+        $this->reports->invalidateGym((string) $payment->gym_id);
+
         return $payment->fresh();
     }
 
     public function reviewBankTransfer(Payment $payment, array $data, User $actor, Request $request): Payment
     {
-        return DB::transaction(function () use ($payment, $data, $actor, $request): Payment {
+        $reviewed = DB::transaction(function () use ($payment, $data, $actor, $request): Payment {
             $locked = Payment::query()->with('bankTransferReceipt')->lockForUpdate()->findOrFail($payment->getKey());
             if ($locked->method !== PaymentMethod::BankTransfer || ! $locked->bankTransferReceipt) {
                 throw ValidationException::withMessages(['payment' => ['This payment has no bank-transfer receipt to review.']]);
@@ -315,6 +328,9 @@ class PaymentService
 
             return $fresh;
         });
+        $this->reports->invalidateGym((string) $reviewed->gym_id);
+
+        return $reviewed;
     }
 
     /** @return array{gross_minor: int, refunded_minor: int, net_minor: int, pending_minor: int, outstanding_minor: int, currency: string} */

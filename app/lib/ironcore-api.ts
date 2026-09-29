@@ -162,7 +162,7 @@ export type StaffRole = "gym_owner" | "gym_manager" | "receptionist" | "trainer"
 export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; phone: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive"; hired_at: string | null; terminated_at: string | null; has_profile_image: boolean; created_at: string | null };
 export type StaffInvitationRecord = { id: string; gym_id: string; home_branch_id: string | null; email: string; role: StaffRole; employee_number: string; job_title: string | null; status: "pending" | "accepted" | "revoked" | "expired"; expires_at: string; accepted_at: string | null; created_at: string | null };
 export type NewStaffInvitation = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days?: number };
-export type NewTrainer = { name: string; email: string; phone: string; home_branch_id: string; status: "active" | "inactive"; profile_image?: File };
+export type NewTrainer = { name: string; email: string; phone: string; role: Exclude<StaffRole, "gym_owner">; employee_number: string; job_title: string; home_branch_id: string; status: "active" | "inactive"; profile_image?: File };
 export type CreatedTrainer = { trainer: StaffRecord; account_setup_token: string | null; existing_account: boolean };
 export type UpdateStaff = { display_name?: string; contact_email?: string; phone?: string; role?: StaffRole; employee_number?: string; job_title?: string | null; home_branch_id?: string | null; status?: StaffRecord["status"]; hired_at?: string | null; terminated_at?: string | null; reason: string };
 export type UpdateOwnStaffProfile = { display_name: string; contact_email: string; phone: string; reason: string };
@@ -225,7 +225,7 @@ export type ClassBookingRecord = { id: string; gym_id: string; class_session_id:
 export type NewClassSession = { branch_id: string; trainer_staff_profile_id?: string; title: string; description?: string; starts_at: string; ends_at: string; capacity: number; waitlist_enabled?: boolean; booking_opens_at?: string; booking_closes_at?: string };
 export type UpdateClassSession = Partial<NewClassSession> & { status?: ClassSessionRecord["status"]; reason: string };
 export type AttendanceCheckIn = { branch_id?: string; credential?: string; member_code?: string; member_id?: string };
-export type TrainerAssignmentRecord = { id: string; gym_id: string; trainer_staff_profile_id: string; member_id: string; trainer?: { id: string; name: string | null }; member?: MemberSummaryRecord; status: "active" | "inactive"; starts_on: string; ends_on: string | null; notes: string | null; created_at: string | null };
+export type TrainerAssignmentRecord = { id: string; gym_id: string; trainer_staff_profile_id: string; member_id: string; trainer?: { id: string; name: string | null }; member?: MemberSummaryRecord; status: "active" | "inactive"; effective_status: "scheduled" | "active" | "expired" | "inactive"; is_current: boolean; starts_on: string; ends_on: string | null; notes: string | null; created_at: string | null };
 export type WorkoutExerciseRecord = { id: string; gym_id: string; workout_plan_id: string; name: string; instructions: string | null; day_number: number; sort_order: number; target_sets: number | null; target_reps_min: number | null; target_reps_max: number | null; target_load_grams: number | null; target_duration_seconds: number | null; rest_seconds: number | null };
 export type WorkoutPlanRecord = { id: string; gym_id: string; member_id: string; trainer_staff_profile_id: string; member?: MemberSummaryRecord; trainer?: { id: string; name: string | null }; title: string; goal: string | null; notes: string | null; starts_on: string; ends_on: string | null; status: "draft" | "active" | "completed" | "cancelled"; exercises: WorkoutExerciseRecord[]; created_at: string | null };
 export type WorkoutSetRecord = { id: string; gym_id: string; workout_plan_exercise_id: string; exercise_name?: string; set_number: number; reps: number | null; load_grams: number | null; duration_seconds: number | null; distance_metres: number | null; rpe: number | null };
@@ -725,6 +725,9 @@ export class IronCoreApi {
     form.set("name", input.name);
     form.set("email", input.email);
     form.set("phone", input.phone);
+    form.set("role", input.role);
+    form.set("employee_number", input.employee_number);
+    form.set("job_title", input.job_title);
     form.set("home_branch_id", input.home_branch_id);
     form.set("status", input.status);
     if (input.profile_image) form.set("profile_image", input.profile_image);
@@ -1061,6 +1064,10 @@ export class IronCoreApi {
     return this.tenantCollection<ClassBookingRecord>(gymId, "class-bookings");
   }
 
+  async classSessionBookings(gymId: string, sessionId: string): Promise<ClassBookingRecord[]> {
+    return (await this.request<Paginated<ClassBookingRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/class-sessions/${encodeURIComponent(sessionId)}/bookings?per_page=100`, {}, gymId)).data;
+  }
+
   createClassSession(gymId: string, input: NewClassSession): Promise<ClassSessionRecord> {
     return this.createTenantRecord<ClassSessionRecord>(gymId, "class-sessions", input);
   }
@@ -1178,6 +1185,17 @@ export class IronCoreApi {
     await this.csrf();
     const response = await this.request<{ data: StaffInvitationRecord; meta: { acceptance_token: string } }>(`/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations`, { method: "POST", body: JSON.stringify(input) }, gymId);
     return { invitation: response.data, acceptance_token: response.meta.acceptance_token };
+  }
+
+  async resendStaffInvitation(gymId: string, invitationId: string): Promise<CreatedStaffInvitation> {
+    await this.csrf();
+    const response = await this.request<{ data: StaffInvitationRecord; meta: { acceptance_token: string } }>(`/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/${encodeURIComponent(invitationId)}/resend`, { method: "POST", body: JSON.stringify({ expires_in_days: 7 }) }, gymId);
+    return { invitation: response.data, acceptance_token: response.meta.acceptance_token };
+  }
+
+  async revokeStaffInvitation(gymId: string, invitationId: string): Promise<StaffInvitationRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<StaffInvitationRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/${encodeURIComponent(invitationId)}/revoke`, { method: "POST" }, gymId)).data;
   }
 
   async acceptStaffInvitation(gymId: string, token: string): Promise<StaffRecord> {

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Enums\TrainerAssignmentStatus;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\EndTrainerAssignmentRequest;
@@ -12,7 +11,6 @@ use App\Models\Member;
 use App\Models\TrainerMemberAssignment;
 use App\Services\TrainingAccessService;
 use App\Services\TrainingService;
-use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -31,9 +29,7 @@ class TrainerAssignmentController extends Controller
             // Expired assignments must stop exposing member identity in list
             // responses as soon as the server-authoritative boundary closes.
             $query->where('trainer_staff_profile_id', $trainer->getKey())
-                ->where('status', TrainerAssignmentStatus::Active->value)
-                ->whereDate('starts_on', '<=', TenantClock::businessDate())
-                ->where(fn ($assignment) => $assignment->whereNull('ends_on')->orWhereDate('ends_on', '>=', TenantClock::businessDate()));
+                ->current();
         } else {
             foreach (['member_id', 'trainer_staff_profile_id', 'status'] as $filter) {
                 if ($request->filled($filter)) {
@@ -41,6 +37,7 @@ class TrainerAssignmentController extends Controller
                 }
             }
         }
+
         return TrainerMemberAssignmentResource::collection($query->cursorPaginate(min(max((int) $request->input('per_page', 50), 1), 100)));
     }
 

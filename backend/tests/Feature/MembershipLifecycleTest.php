@@ -2,10 +2,10 @@
 
 namespace Tests\Feature;
 
-use App\Enums\Currency;
 use App\Enums\BillingInterval;
-use App\Enums\MemberStatus;
+use App\Enums\Currency;
 use App\Enums\MembershipStatus;
+use App\Enums\MemberStatus;
 use App\Enums\PlanStatus;
 use App\Enums\UserRole;
 use App\Models\AuditLog;
@@ -21,6 +21,7 @@ use App\Models\User;
 use App\Services\AutomatedMembershipBillingService;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -254,6 +255,7 @@ class MembershipLifecycleTest extends TestCase
                 'billing_interval' => BillingInterval::Monthly, 'interval_count' => 1,
                 'auto_renew' => true, 'terms_snapshot' => ['version' => 'original'],
             ]);
+
             return [$member, $original, $replacement, $membership];
         });
         $otherPlan = app(TenantContext::class)->run($otherGym, fn () => MembershipPlan::query()->create([
@@ -320,6 +322,7 @@ class MembershipLifecycleTest extends TestCase
                 'billing_interval' => BillingInterval::Monthly, 'interval_count' => 1,
                 'auto_renew' => true, 'grace_period_days' => 7,
             ]);
+
             return [$member, $membership];
         });
 
@@ -328,14 +331,20 @@ class MembershipLifecycleTest extends TestCase
         $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], $headers)
             ->assertCreated()->json('data.credential');
 
+        $revisionKey = "ironcore:gym:{$gym->id}:reports:revision";
+        Cache::put($revisionKey, 'before-automated-invoice');
         $first = app(TenantContext::class)->run($gym, fn () => app(AutomatedMembershipBillingService::class)->processTenant($gym));
+        $afterFirst = Cache::get($revisionKey);
         $second = app(TenantContext::class)->run($gym, fn () => app(AutomatedMembershipBillingService::class)->processTenant($gym));
         $this->assertSame(['invoices_created' => 1, 'reminders_queued' => 1, 'restricted' => 1], $first);
         $this->assertSame(['invoices_created' => 0, 'reminders_queued' => 0, 'restricted' => 0], $second);
+        $this->assertNotSame('before-automated-invoice', $afterFirst);
+        $this->assertSame($afterFirst, Cache::get($revisionKey));
 
         $invoice = app(TenantContext::class)->run($gym, function () use ($membership): Invoice {
             $this->assertSame(1, Invoice::query()->where('membership_id', $membership->id)->count());
             $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_due')->count());
+
             return Invoice::query()->where('membership_id', $membership->id)->firstOrFail();
         });
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
