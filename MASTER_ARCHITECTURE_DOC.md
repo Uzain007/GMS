@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.61.1 — responsive class scheduling modal stabilization |
+| MAD version | 0.61.2 — class workspace readability and responsive management stabilization |
 | Last verified | 30 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Responsive class scheduling modal correction implemented locally; validation passing |
+| Active milestone | Class card hierarchy, roster clarity and responsive class management correction implemented locally; validation passing |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 

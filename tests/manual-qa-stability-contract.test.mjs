@@ -48,7 +48,12 @@ test("class cards tolerate incomplete API records and keep readable controls", a
   assert.match(engagement, /Capacity unavailable/);
   assert.match(engagement, /Untitled class/);
   assert.match(engagement, /Array\.isArray\(data\.sessions\)/);
-  assert.match(css, /\.class-card h3\{font-size:20px/);
+  assert.match(engagement, /className="class-card-date"/);
+  assert.match(engagement, /className="class-card-booking"/);
+  assert.match(engagement, /className="class-card-trainer"/);
+  assert.match(css, /\.class-card h3\{font-size:22px/);
+  assert.match(css, /\.class-card>p:not\(\.eyebrow\)\{[^}]*font-size:15px/);
+  assert.match(css, /\.class-card dl div\{[^}]*font-size:14px/);
   assert.match(css, /\.class-card-actions\{display:grid/);
   assert.match(css, /@media\(max-width:760px\)[\s\S]*\.class-card-actions\{grid-template-columns:1fr\}/);
 });
@@ -90,4 +95,33 @@ test("class scheduling modal contains wide controls and stacks on mobile", async
   assert.match(css, /@media\(max-width:820px\)\{\.schedule-class-grid\{grid-template-columns:minmax\(0,1fr\)\}/);
   assert.match(css, /\.schedule-class-modal \.schedule-class-actions\{position:sticky;bottom:0[^}]*flex-wrap:wrap/);
   assert.match(css, /@media\(max-width:620px\)[^\n]*\.schedule-class-actions\{[^}]*flex-direction:column-reverse/);
+});
+
+test("class management modal contains wide controls and stacks on mobile", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+  const css = await read("app/globals.css");
+
+  assert.match(engagement, /className="manage-class-modal"/);
+  assert.match(engagement, /className="manage-class-form" onSubmit=\{updateClass\}/);
+  assert.match(engagement, /className="modal-actions manage-class-actions"/);
+  assert.match(css, /\.manage-class-modal-layer\{[^}]*overflow-x:hidden/);
+  assert.match(css, /\.manage-class-modal\{[^}]*width:min\(100%,720px\)[^}]*overflow-x:hidden/);
+  assert.match(css, /\.manage-class-modal \*\{[^}]*min-width:0/);
+  assert.match(css, /\.manage-class-grid\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.manage-class-grid input\[type="datetime-local"\]\{[^}]*min-width:0[^}]*inline-size:100%/);
+  assert.match(css, /@media\(max-width:820px\)\{\.manage-class-grid\{grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(css, /\.manage-class-modal \.manage-class-actions\{position:sticky;bottom:0[^}]*flex-wrap:wrap/);
+});
+
+test("class roster presents readable member and booking status rows", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+  const css = await read("app/globals.css");
+
+  assert.match(engagement, /className="class-roster-modal"/);
+  assert.match(engagement, /className="class-roster-row"/);
+  assert.match(engagement, /booking\.status \|\| "booked"/);
+  assert.match(engagement, /No bookings yet/);
+  assert.match(css, /\.class-roster-row\{[^}]*grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(css, /\.class-roster-row strong\{[^}]*font-size:15px/);
+  assert.match(css, /\.class-roster-row small\{[^}]*font-size:12px/);
 });
