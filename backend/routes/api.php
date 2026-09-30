@@ -78,6 +78,10 @@ Route::prefix('v1')->group(function (): void {
         ->middleware('throttle:member-activation');
     Route::post('/gyms/{gym}/member-account-invitations/accept', [MemberAccountInvitationController::class, 'accept'])
         ->middleware('throttle:member-activation');
+    Route::post('/gyms/{gym}/staff-invitations/preview', [StaffInvitationController::class, 'preview'])
+        ->middleware('throttle:member-activation');
+    Route::post('/gyms/{gym}/staff-invitations/accept', [StaffInvitationController::class, 'accept'])
+        ->middleware('throttle:member-activation');
 
     Route::middleware(['auth:sanctum', 'auth.version', 'database.identity', 'auth.lifetime', 'password.changed'])->group(function (): void {
         Route::get('/gyms', [GymController::class, 'index']);
@@ -106,8 +110,6 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/platform/audit-log', [AuditLogController::class, 'platform'])
             ->middleware('role:super_admin');
 
-        // Invitation acceptance uses the signed token before tenant membership exists.
-        Route::post('/gyms/{gym}/staff-invitations/accept', [StaffInvitationController::class, 'accept']);
 
         Route::middleware(['tenant', 'billing.access'])->group(function (): void {
             Route::get('/gyms/{gym}', [GymController::class, 'show']);

@@ -49,7 +49,7 @@ test("active trainer records feed classes, coaching and workout plans", async ()
   assert.match(trainingService, /assertTrainerMemberBranchAccess/);
 });
 
-test("trainer images and destructive actions stay behind tenant API routes", async () => {
+test("trainer images and non-destructive offboarding stay behind tenant API routes", async () => {
   const [migration, model, routes, service, staff] = await Promise.all([
     read("backend/database/migrations/2026_08_21_000026_add_trainer_lifecycle_fields_to_staff_profiles.php"),
     read("backend/app/Models/StaffProfile.php"),
@@ -61,8 +61,10 @@ test("trainer images and destructive actions stay behind tenant API routes", asy
   for (const column of ["display_name", "contact_email", "phone", "profile_image_path"]) assert.match(migration, new RegExp(column));
   assert.match(model, /BelongsToGym/);
   assert.match(routes, /\/staff\/\{staff\}\/profile-image/);
-  assert.match(service, /has class or coaching history/);
+  assert.match(service, /staff\.terminated/);
+  assert.match(service, /'status' => 'inactive'/);
+  assert.match(service, /'permissions' => \[\]/);
   assert.match(service, /where\('gym_id', \$this->tenant->id\(\)\)/);
-  assert.match(staff, /Delete trainer/);
-  assert.match(staff, /Inactive trainers immediately disappear/);
+  assert.match(staff, /Remove access/);
+  assert.match(staff, /historical records remain available for audit/);
 });

@@ -1094,3 +1094,28 @@ body{font-size:14px;line-height:1.55}
   .saas-workspace .finance-actions button{width:100%}
   .saas-plan-card{padding:18px}
 }
+
+/* Manual-QA stability: class cards remain readable and operable with partial
+   API data, while action columns stay reachable on tablet-sized workspaces. */
+.class-card{min-width:0;padding:22px}
+.class-card h3{font-size:20px;line-height:1.25}
+.class-card>p:not(.eyebrow){min-height:44px;font-size:14px;line-height:1.55}
+.class-card dl{gap:10px;margin:18px 0}
+.class-card dl div{align-items:flex-start;font-size:13px;line-height:1.45}
+.class-card dl span{min-width:0;overflow-wrap:anywhere}
+.class-card-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));align-items:stretch}
+.class-card-actions>button{min-height:42px;margin-top:0;font-size:13px}
+.class-card .mini-roster>strong{font-size:13px}
+.class-card .mini-roster>div{font-size:12px;line-height:1.4}
+.invitation-delivery-failed{color:#a4443f!important;font-weight:700}
+@media(max-width:980px){
+  .action-column-table th:last-child,.action-column-table td:last-child{position:sticky;right:0;z-index:2;border-left:1px solid var(--line);background:#fff;box-shadow:-10px 0 18px #2f23330d}
+  .action-column-table th:last-child{z-index:3;background:#faf9fc}
+  .action-column-table td:last-child .table-action-group,.action-column-table td:last-child .table-actions,.action-column-table td:last-child .payment-row-actions{flex-wrap:nowrap}
+}
+@media(max-width:760px){
+  .class-card{padding:18px}
+  .class-card-actions{grid-template-columns:1fr}
+  .report-panel-heading{align-items:stretch;flex-direction:column}
+  .report-panel-heading>button{width:100%;justify-content:center}
+}

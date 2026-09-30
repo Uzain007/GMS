@@ -160,7 +160,8 @@ export type UpdateMembership = { plan_id?: string; status: MembershipRecord["sta
 export type UpdateMemberSelf = { first_name?: string; last_name?: string; email?: string; phone?: string; date_of_birth?: string | null };
 export type StaffRole = "gym_owner" | "gym_manager" | "receptionist" | "trainer";
 export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; phone: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive"; hired_at: string | null; terminated_at: string | null; has_profile_image: boolean; created_at: string | null };
-export type StaffInvitationRecord = { id: string; gym_id: string; home_branch_id: string | null; email: string; role: StaffRole; employee_number: string; job_title: string | null; status: "pending" | "accepted" | "revoked" | "expired"; expires_at: string; accepted_at: string | null; created_at: string | null };
+export type StaffInvitationRecord = { id: string; gym_id: string; home_branch_id: string | null; email: string; role: StaffRole; employee_number: string; job_title: string | null; status: "pending" | "accepted" | "revoked" | "expired"; expires_at: string; accepted_at: string | null; delivery?: { event_type: string | null; status: "queued" | "accepted" | "failed" | "unknown"; updated_at: string | null; failure_reason: string | null }; created_at: string | null };
+export type StaffAccountActivationPreview = { gym_name: string; role: StaffRole; masked_email: string; existing_account: boolean };
 export type NewStaffInvitation = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days?: number };
 export type NewTrainer = { name: string; email: string; phone: string; role: Exclude<StaffRole, "gym_owner">; employee_number: string; job_title: string; home_branch_id: string; status: "active" | "inactive"; profile_image?: File };
 export type CreatedTrainer = { trainer: StaffRecord; account_setup_token: string | null; existing_account: boolean };
@@ -1198,10 +1199,20 @@ export class IronCoreApi {
     return (await this.request<ApiEnvelope<StaffInvitationRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/${encodeURIComponent(invitationId)}/revoke`, { method: "POST" }, gymId)).data;
   }
 
-  async acceptStaffInvitation(gymId: string, token: string): Promise<StaffRecord> {
+  async previewStaffAccountActivation(gymId: string, token: string): Promise<StaffAccountActivationPreview> {
     await this.csrf();
-    // Acceptance intentionally runs before tenant membership exists. Laravel
-    // binds RLS from the route gym and validates the hashed token + user email.
-    return (await this.request<ApiEnvelope<StaffRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/accept`, { method: "POST", body: JSON.stringify({ token }) })).data;
+    return (await this.request<ApiEnvelope<StaffAccountActivationPreview>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/preview`,
+      { method: "POST", body: JSON.stringify({ token }) },
+    )).data;
+  }
+
+  async acceptStaffInvitation(gymId: string, token: string, password?: string): Promise<AuthenticationResult> {
+    await this.csrf();
+    const payload = password ? { token, password, password_confirmation: password } : { token };
+    return (await this.request<ApiEnvelope<AuthenticationResult>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/staff-invitations/accept`,
+      { method: "POST", body: JSON.stringify(payload) },
+    )).data;
   }
 }

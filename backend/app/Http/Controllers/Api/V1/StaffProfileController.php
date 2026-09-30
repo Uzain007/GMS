@@ -14,6 +14,7 @@ use App\Models\StaffProfile;
 use App\Services\AuditService;
 use App\Services\StaffInvitationService;
 use App\Services\TrainerLifecycleService;
+use App\Support\TenantClock;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\JoinClause;
 use Illuminate\Http\JsonResponse;
@@ -137,6 +138,15 @@ class StaffProfileController extends Controller
             // Reuse invitation privilege rules so managers cannot promote peers.
             $roleGuard->ensureRoleCanBeGranted($request->user(), (string) $request->string('role'));
         }
+        if ($request->filled('status')) {
+            $status = StaffStatus::from((string) $request->string('status'));
+            if ($status === StaffStatus::Inactive) {
+                $data['terminated_at'] = $data['terminated_at'] ?? TenantClock::businessDate();
+                $data['permissions'] = [];
+            } elseif ($status === StaffStatus::Active) {
+                $data['terminated_at'] = null;
+            }
+        }
 
         $fresh = DB::transaction(function () use ($request, $profile, $data, $audit, $before): StaffProfile {
             $profile->update($data);
@@ -227,8 +237,11 @@ class StaffProfileController extends Controller
     {
         $data = $request->validate(['reason' => ['required', 'string', 'max:500']]);
         $profile = $this->staffQuery()->with('user')->findOrFail($staff);
-        $service->delete($profile, $request->user(), $data['reason'], $request);
-        return response()->json(status: 204);
+        return response()->json([
+            'data' => (new StaffProfileResource(
+                $service->terminate($profile, $request->user(), $data['reason'], $request)
+            ))->resolve($request),
+        ]);
     }
 
     private function staffQuery(): Builder

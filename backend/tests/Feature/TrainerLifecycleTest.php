@@ -309,12 +309,13 @@ class TrainerLifecycleTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_deactivation_hides_training_access_and_delete_preserves_referenced_history(): void
+    public function test_deactivation_and_remove_access_preserve_staff_and_training_history(): void
     {
         [$owner, $gym] = $this->tenant();
         $branch = $this->branch($gym, 'LIFECYCLE');
         $member = $this->member($gym, $branch, 'LIFECYCLE');
         Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
 
         $trainerId = $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
             'name' => 'Lifecycle Trainer',
@@ -322,7 +323,7 @@ class TrainerLifecycleTest extends TestCase
             'phone' => '+44 7700 900324',
             'home_branch_id' => $branch->id,
             'status' => 'active',
-        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data.id');
+        ], $headers)->assertCreated()->json('data.id');
 
         $this->patchJson("/api/v1/gyms/{$gym->id}/staff/{$trainerId}", [
             'display_name' => 'Lifecycle Coach',
@@ -330,7 +331,7 @@ class TrainerLifecycleTest extends TestCase
             'phone' => '+44 7700 900325',
             'status' => 'inactive',
             'reason' => 'Trainer is temporarily unavailable',
-        ], ['X-Gym-ID' => $gym->id])
+        ], $headers)
             ->assertOk()
             ->assertJsonPath('data.user.name', 'Lifecycle Coach')
             ->assertJsonPath('data.status', 'inactive');
@@ -339,38 +340,46 @@ class TrainerLifecycleTest extends TestCase
             'trainer_staff_profile_id' => $trainerId,
             'member_id' => $member->id,
             'starts_on' => today()->toDateString(),
-        ], ['X-Gym-ID' => $gym->id])->assertUnprocessable();
+        ], $headers)->assertUnprocessable();
 
         $this->patchJson("/api/v1/gyms/{$gym->id}/staff/{$trainerId}", [
             'status' => 'active',
             'reason' => 'Trainer returned to work',
-        ], ['X-Gym-ID' => $gym->id])->assertOk();
-        $this->postJson("/api/v1/gyms/{$gym->id}/trainer-assignments", [
+        ], $headers)->assertOk();
+        $assignmentId = $this->postJson("/api/v1/gyms/{$gym->id}/trainer-assignments", [
             'trainer_staff_profile_id' => $trainerId,
             'member_id' => $member->id,
             'starts_on' => today()->toDateString(),
-        ], ['X-Gym-ID' => $gym->id])->assertCreated();
+        ], $headers)->assertCreated()->json('data.id');
+        $userId = app(TenantContext::class)->run($gym, fn () => StaffProfile::query()->findOrFail($trainerId)->user_id);
 
         $this->deleteJson("/api/v1/gyms/{$gym->id}/staff/{$trainerId}", [
-            'reason' => 'Attempting hard deletion with coaching history',
-        ], ['X-Gym-ID' => $gym->id])->assertUnprocessable()
-            ->assertJsonValidationErrors('staff');
+            'reason' => 'Employment ended and gym access must be revoked',
+        ], $headers)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'inactive');
 
-        $unreferencedId = $this->postJson("/api/v1/gyms/{$gym->id}/staff", [
-            'name' => 'Temporary Trainer',
-            'email' => 'temporary-trainer@example.test',
-            'phone' => '+44 7700 900326',
-            'home_branch_id' => $branch->id,
-            'status' => 'inactive',
-        ], ['X-Gym-ID' => $gym->id])->assertCreated()->json('data.id');
-        $userId = app(TenantContext::class)->run($gym, fn () => StaffProfile::query()->findOrFail($unreferencedId)->user_id);
-
-        $this->deleteJson("/api/v1/gyms/{$gym->id}/staff/{$unreferencedId}", [
-            'reason' => 'Duplicate profile created in error',
-        ], ['X-Gym-ID' => $gym->id])->assertNoContent();
-        $this->assertDatabaseMissing('staff_profiles', ['gym_id' => $gym->id, 'id' => $unreferencedId]);
-        $this->assertDatabaseMissing('gym_user', ['gym_id' => $gym->id, 'user_id' => $userId]);
+        app(TenantContext::class)->run($gym, function () use ($gym, $trainerId, $userId, $assignmentId): void {
+            $this->assertDatabaseHas('staff_profiles', [
+                'gym_id' => $gym->id,
+                'id' => $trainerId,
+                'user_id' => $userId,
+                'status' => 'inactive',
+            ]);
+            $this->assertDatabaseHas('gym_user', [
+                'gym_id' => $gym->id,
+                'user_id' => $userId,
+                'status' => 'inactive',
+            ]);
+            $this->assertDatabaseHas('trainer_member_assignments', [
+                'gym_id' => $gym->id,
+                'id' => $assignmentId,
+            ]);
+        });
         $this->assertDatabaseHas('users', ['id' => $userId]);
+
+        Sanctum::actingAs(User::query()->findOrFail($userId));
+        $this->getJson("/api/v1/gyms/{$gym->id}/class-sessions", $headers)->assertForbidden();
     }
 
     /** @return array{User, Gym} */

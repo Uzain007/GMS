@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const root = new URL("../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
+
+test("staff onboarding has public expiring activation, queued delivery evidence and non-destructive offboarding", async () => {
+  const routes = await read("backend/routes/api.php");
+  const service = await read("backend/app/Services/StaffInvitationService.php");
+  const job = await read("backend/app/Jobs/SendAccountInvitation.php");
+  const ui = await read("app/staff-management.tsx");
+  const activation = await read("app/staff-account-activation.tsx");
+
+  assert.match(routes, /staff-invitations\/preview/);
+  assert.match(routes, /staff-invitations\/accept/);
+  assert.match(service, /->onQueue\('notifications'\)/);
+  assert.match(service, /The invitation email could not be queued/);
+  assert.match(job, /implements ShouldBeEncrypted, ShouldQueue/);
+  assert.match(job, /delivery_status/);
+  assert.match(ui, /Remove access/);
+  assert.match(ui, /historical records remain available for audit/);
+  assert.match(activation, /Create password/);
+  assert.match(activation, /password_confirmation/);
+  assert.doesNotMatch(service, /StaffProfile::.*->delete\(/s);
+});
+
+test("manual QA action tables remain usable at tablet widths", async () => {
+  const css = await read("app/globals.css");
+  const members = await read("app/ironcore-dashboard.tsx");
+  const staff = await read("app/staff-management.tsx");
+  const finance = await read("app/financial-management.tsx");
+  const billing = await read("app/saas-billing-management.tsx");
+  const platform = await read("app/platform-insights.tsx");
+
+  assert.match(css, /@media\(max-width:980px\)/);
+  assert.match(css, /\.action-column-table th:last-child,\.action-column-table td:last-child\{position:sticky;right:0/);
+  for (const source of [members, staff, finance, billing, platform]) {
+    assert.match(source, /data-table action-column-table/);
+  }
+});
+
+test("class cards tolerate incomplete API records and keep readable controls", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+  const css = await read("app/globals.css");
+
+  assert.match(engagement, /safeSessionDateTime/);
+  assert.match(engagement, /Capacity unavailable/);
+  assert.match(engagement, /Untitled class/);
+  assert.match(engagement, /Array\.isArray\(data\.sessions\)/);
+  assert.match(css, /\.class-card h3\{font-size:20px/);
+  assert.match(css, /\.class-card-actions\{display:grid/);
+  assert.match(css, /@media\(max-width:760px\)[\s\S]*\.class-card-actions\{grid-template-columns:1fr\}/);
+});

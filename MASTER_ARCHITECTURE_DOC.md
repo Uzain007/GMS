@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.60.0 — private receipt compression and file-retention lifecycle |
-| Last verified | 25 September 2026 |
+| MAD version | 0.61.0 — staff activation, offboarding and manual-QA responsive stabilization |
+| Last verified | 29 September 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Private member/SaaS receipt image processing and 12-month object retention implemented locally; approval pending |
+| Active milestone | Manual-QA staff onboarding, non-destructive offboarding and responsive class/table stabilization implemented locally; validation passing |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -271,7 +271,7 @@ Every newly created gym receives one active Primary Branch in the same tenant tr
 | `token_hash` | char(64) | no | globally unique SHA-256; plaintext is never stored |
 | `status` | varchar(30) | no | `pending`, `accepted`, `revoked`, `expired` |
 | `expires_at`, `accepted_at` | timestamp | no/yes | index `(gym_id, status, expires_at)` |
-| `metadata` | jsonb | yes | invitation-specific metadata |
+| `metadata` | jsonb | yes | invitation-specific metadata plus latest safe queue/transport delivery status, event and failure summary |
 | `created_at`, `updated_at` | timestamp | yes | index `(gym_id, email, status)` |
 
 ### `member_account_invitations` — secure member login activation
@@ -842,7 +842,7 @@ Milestone 6A adds no durable reporting table. `ReportService` builds a read mode
 - `GymBranch belongsTo Gym` and has many home members and branch-specific membership plans.
 - `Member belongsTo Gym`, optionally belongs to an assigned branch through `home_branch_id` and to a platform user, and has many memberships and time-limited data exports. Its detail response resolves one bounded current membership summary inside the selected tenant rather than depending on a paginated membership list.
 - `StaffProfile belongsTo User` and optionally an assigned branch through `home_branch_id`; it belongs to many branches through tenant-owned `staff_profile_branch` and may reference one private profile image through tenant-owned storage metadata.
-- `StaffInvitation belongsTo invitedBy User` and optionally an assigned branch through `home_branch_id`. Acceptance creates/updates `gym_user` and `staff_profiles` atomically.
+- `StaffInvitation belongsTo invitedBy User` and optionally an assigned branch through `home_branch_id`. Public fragment-token acceptance creates/updates `gym_user` and `staff_profiles` atomically, while invitation metadata records the latest safe queue/transport outcome.
 - `MemberAccountInvitation belongsTo Member`, its inviting User and optional accepted User. Acceptance creates/updates the member-role `gym_user` row and links `members.user_id` atomically inside the invitation's tenant context.
 - `MembershipPlan optionally belongsTo GymBranch` and has many memberships.
 - `Membership belongsTo Member`, `MembershipPlan`, optional branch and creating user; every operational relationship is protected by a composite tenant FK.
@@ -922,12 +922,13 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/platform/analytics` | authenticated `super_admin` only | Return date-bounded gym, member, plan and SaaS revenue trends from authoritative records |
 | GET | `/platform/audit-log[?format=csv\|xlsx\|pdf]` | authenticated `super_admin`; request-bound database identity | Search, filter, paginate or export the existing platform-wide audit history; the default window is 365 days |
 | GET/POST | `/gyms/{gym}/staff` | tenant; owner/manager | List staff or create an immediate operational employee account using the existing secure setup-token pattern and a tenant-validated branch; managers may create only receptionists/trainers |
-| GET/PATCH/DELETE | `/gyms/{gym}/staff/{staff}` | tenant; owner/manager | Read/update staff, or delete an unreferenced trainer; reasons are required and managers cannot modify owner/manager hierarchy |
+| GET/PATCH/DELETE | `/gyms/{gym}/staff/{staff}` | tenant; owner/manager | Read/update staff, or use DELETE as a reasoned non-destructive access-removal transition; staff/history remain, the tenant pivot becomes inactive and managers cannot modify owner/manager hierarchy |
 | GET/POST/DELETE | `/gyms/{gym}/staff/{staff}/profile-image` | tenant; owner/manager | Stream, replace or remove a validated private trainer image without exposing an object-store URL |
 | GET/POST | `/gyms/{gym}/staff-invitations` | tenant; owner/manager | List pending invitations or create a one-time hashed invitation and queue delivery after commit |
 | POST | `/gyms/{gym}/staff-invitations/{invitation}/resend` | tenant; owner/manager with hierarchy guard | Rotate one pending token under a row lock, extend expiry, audit and queue a replacement email |
 | POST | `/gyms/{gym}/staff-invitations/{invitation}/revoke` | tenant; owner/manager with hierarchy guard | Revoke one pending tenant invitation under a row lock and retain audit evidence |
-| POST | `/gyms/{gym}/staff-invitations/accept` | authenticated user + matching email/token | Accept before membership; service explicitly binds token's gym context |
+| POST | `/gyms/{gym}/staff-invitations/preview` | public activation throttle; route gym + opaque fragment token in request body | Return only gym name, role, masked email and whether an existing platform account will be linked |
+| POST | `/gyms/{gym}/staff-invitations/accept` | public activation throttle; stateful browser; route gym + opaque fragment token | Create a password when needed, atomically activate the tenant staff profile/pivot, consume the token and enter a regenerated session or MFA challenge |
 | GET/POST | `/gyms/{gym}/membership-plans` | tenant; reads all tenant roles, writes owner/manager | List or create plan definitions |
 | GET/PATCH | `/gyms/{gym}/membership-plans/{plan}` | tenant; reads all tenant roles, writes owner/manager | Read/update plan; existing contracts remain unchanged |
 | GET/POST | `/gyms/{gym}/memberships` | tenant; owner/manager/receptionist | List or create snapshotted member contracts |
@@ -1102,8 +1103,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Branches, membership plans and memberships load as bounded tenant collections in parallel with independent stale-response guards.
 - Authenticated navigation exposes only live members, branches, plans and memberships. Setup writes require super admin, owner or manager; receptionists may create memberships. The Gym Admin member profile loads its current membership directly from the tenant-scoped member detail endpoint and clearly separates member-profile status from plan-contract status.
 - Plan prices are parsed into integer minor units before transmission. Laravel remains authoritative for tenant ownership and immutable membership snapshots.
-- Staff and pending invitations load only for super admins, owners and managers. Role options are filtered in the UI but the server remains authoritative; immediate employee creation reuses the secure trainer account-setup pattern, managers remain limited to operational roles, and pending invitations expose audited resend/revoke controls. Every profile update requires an audit reason.
-- Invitation secrets are returned exactly once and encoded only in the URL fragment of the acceptance link. The fragment is not sent to servers/referrers, is never stored in browser storage, and is removed immediately after acceptance. Laravel binds the route gym into RLS before validating the token hash and invited email.
+- Staff and pending invitations load only for super admins, owners and managers. Role options are filtered in the UI but the server remains authoritative; immediate employee creation reuses the secure trainer account-setup pattern, managers remain limited to operational roles, and pending invitations expose audited resend/revoke controls plus latest delivery state. Every profile update requires an audit reason, and access removal is an audited inactive transition that preserves the profile, tenant history and relationships.
+- Invitation secrets are returned exactly once and encoded only in the URL fragment of the acceptance link. The fragment is not sent to servers/referrers, is never stored in browser storage, and is removed immediately after parsing. Laravel binds the route gym into RLS before validating the tenant-bound token hash and invited email. Staff recipients without an account create a password on the public throttled activation screen; existing accounts are linked without password replacement and MFA remains enforced.
 - Navigation is derived from the selected tenant role: owners/managers receive staff administration, receptionists receive member operations, and trainer/member access is limited to currently integrated read-safe modules.
 - Finance navigation is available to owners, managers and receptionists. All tenant collections use independent stale-response guards and are cleared immediately when the active gym changes.
 - The finance workspace labels Stripe as `Not configured` without blocking plans, cash or bank transfer. Online checkout is disabled until the optional deployment adapter and gym account are both active. Cash and terminal-card recording never request card details; refunds require an explicit amount and reason.
@@ -1210,7 +1211,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Real role entry and actionable frontend portals | Local business acceptance complete; production acceptance pending | Login, logout and recovery work for Super Admin, Gym Admin, Trainer/Staff and Member accounts; permission-visible tenant/member writes use existing API methods; no demo role entry is exposed |
 | Members frontend/API integration | Implemented; local acceptance passing | Tenant route/header agreement, capped server search, loading/error/empty states, creation, portal invitation and audited profile/lifecycle editing |
 | Branch, plan and membership frontend/API integration | Implemented; local acceptance passing | Parallel bounded reads, role-aware creation and audited edits/status transitions, exact minor-unit prices and immutable accepted snapshots |
-| Staff, trainer and invitation frontend/API integration | Implemented locally; full quality and browser acceptance passing | Tenant directory, immediate trainer creation/account setup, private profile images, branch assignment, active-status dropdown propagation, dependency-safe deletion, pending invitations and hierarchy-safe audited edits |
+| Staff, trainer and invitation frontend/API integration | Implemented locally; validation passing | Tenant directory, immediate operational employee creation, public fragment-token staff activation, queued delivery evidence, private profile images, branch assignment, non-destructive offboarding, resend/revoke controls and hierarchy-safe audited edits |
 | Milestone 3 — gym, member and staff operations | Feature-complete; core runtime passing | Browser/API contracts and GitHub-hosted Laravel/PostgreSQL/Redis tests pass |
 | Tenant invoices and immutable payment/refund ledger | Implemented locally; approval pending | Server totals, Paid cash/terminal records, pending/reviewed private bank receipts, optional hosted checkout, refunds and currency summaries |
 | Stripe Connect onboarding and signed webhooks | Optional adapter implemented; provider sandbox gate pending | Plans/cash/bank work without Stripe; configured direct charges retain HMAC verification, narrow tenant lookup and idempotent settlement |

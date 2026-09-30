@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { IronCoreDashboard, type DashboardMember, type DashboardMemberProfile, type NewDashboardMember, type View } from "./ironcore-dashboard";
 import { MemberPortal, type MemberPortalData } from "./member-portal";
 import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
+import { StaffAccountActivation, type StaffActivationSecret } from "./staff-account-activation";
 import { AccountSecurityDialog, type MfaActions } from "./account-security";
 import { PlatformPortal } from "./platform-portal";
 import type { FinanceData, NewFinanceInvoice, NewFinancePayment } from "./financial-management";
@@ -62,6 +63,7 @@ import {
   type MemberSelfCredentialRecord,
   type UpdateMemberSelf,
   type MemberAccountActivationPreview,
+  type StaffAccountActivationPreview,
   type MfaChallenge,
   type NewGym,
   type CreatedGym,
@@ -610,8 +612,9 @@ export function IronCoreApp() {
     error: null,
   }));
   const [reportRefresh, setReportRefresh] = useState(0);
-  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [inviteNotice] = useState<string | null>(null);
   const [memberActivation, setMemberActivation] = useState<MemberActivationSecret | null>(null);
+  const [staffActivation, setStaffActivation] = useState<StaffActivationSecret | null>(null);
   const [passwordReset, setPasswordReset] = useState<PasswordResetSecret | null>(null);
   const [mfaChallenge, setMfaChallenge] = useState<MfaChallenge | null>(null);
   const [activationChecked, setActivationChecked] = useState(false);
@@ -629,8 +632,9 @@ export function IronCoreApp() {
     let timer: number | undefined;
     const receiveSecuritySecret = () => {
       const invitation = pendingMemberActivation();
+      const staffInvitation = pendingInvitation();
       const reset = pendingPasswordReset();
-      if (invitation || reset) {
+      if (invitation || staffInvitation || reset) {
         // Copy the one-time value into volatile component state, then remove it
         // before preview requests, navigation, analytics or referrers can use it.
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
@@ -638,6 +642,7 @@ export function IronCoreApp() {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         setMemberActivation(invitation);
+        setStaffActivation(staffInvitation);
         setPasswordReset(reset);
         setActivationChecked(true);
       }, 0);
@@ -669,7 +674,7 @@ export function IronCoreApp() {
         setPhase("setup");
         return;
       }
-      let identity = await api.me();
+      const identity = await api.me();
       if (identity.must_change_password) {
         // A temporary credential receives only the narrow password-change UI;
         // no platform or tenant collections are requested until it is replaced.
@@ -678,20 +683,6 @@ export function IronCoreApp() {
         setSelectedGym(null);
         setPhase("authenticated");
         return;
-      }
-      const invitation = pendingInvitation();
-      if (invitation) {
-        try {
-          await api.acceptStaffInvitation(invitation.gymId, invitation.token);
-          // Refresh identity because acceptance creates the tenant membership.
-          identity = await api.me();
-          setInviteNotice("Invitation accepted. Your gym access is now active.");
-        } catch (error) {
-          setInviteNotice(apiMessage(error, "The invitation is invalid or expired."));
-        } finally {
-          // Fragment tokens are never persisted or sent as referrers.
-          window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-        }
       }
       const [available, availablePlans] = await Promise.all([
         api.gyms(),
@@ -737,10 +728,10 @@ export function IronCoreApp() {
   }, []);
 
   useEffect(() => {
-    if (!activationChecked || memberActivation || passwordReset || mfaChallenge) return;
+    if (!activationChecked || memberActivation || staffActivation || passwordReset || mfaChallenge) return;
     const timer = window.setTimeout(() => void loadSession(), 0);
     return () => window.clearTimeout(timer);
-  }, [activationChecked, loadSession, memberActivation, mfaChallenge, passwordReset]);
+  }, [activationChecked, loadSession, memberActivation, mfaChallenge, passwordReset, staffActivation]);
 
   const previewMemberActivation = useCallback(async (gymId: string, token: string): Promise<MemberAccountActivationPreview> => {
     if (!api) throw new Error("Account activation is temporarily unavailable. Please contact your gym.");
@@ -754,6 +745,17 @@ export function IronCoreApp() {
     setMemberActivation(null);
   }, [api]);
 
+  const previewStaffActivation = useCallback(async (gymId: string, token: string): Promise<StaffAccountActivationPreview> => {
+    if (!api) throw new Error("Staff activation is temporarily unavailable. Please contact your gym.");
+    return api.previewStaffAccountActivation(gymId, token);
+  }, [api]);
+
+  const acceptStaffActivation = useCallback(async (gymId: string, token: string, password?: string): Promise<void> => {
+    if (!api) throw new Error("Staff activation is temporarily unavailable. Please contact your gym.");
+    const result = await api.acceptStaffInvitation(gymId, token, password);
+    if (result.authentication === "mfa_challenge") setMfaChallenge(result);
+    setStaffActivation(null);
+  }, [api]);
   useEffect(() => {
     if (!api || !selectedGym) return;
     if (!["super_admin", "gym_owner", "gym_manager", "receptionist"].includes(selectedGym.role)) return;
@@ -1478,6 +1480,7 @@ export function IronCoreApp() {
   const reportData: ReportData = { ...reports, branches: operations.branches.map((branch) => ({ id: branch.id, name: branch.name, isPrimary: branch.is_primary })), onApply: applyReportFilters, onReload: reloadReport };
 
   if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => setMemberActivation(null)} />;
+  if (staffActivation) return <StaffAccountActivation invitation={staffActivation} onPreview={previewStaffActivation} onAccept={acceptStaffActivation} onCancel={() => setStaffActivation(null)} />;
   if (passwordReset) return <LoginScreen key={passwordReset.token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} resetSecret={passwordReset} onCancelReset={() => { setPasswordReset(null); setPhase("anonymous"); }} busy={authBusy} error={authError} />;
   if (mfaChallenge) return <LoginScreen key={mfaChallenge.challenge_token} onLogin={login} onRequestReset={requestPasswordReset} onReset={resetAccountPassword} challenge={mfaChallenge} onVerifyMfa={verifyMfa} onCancelMfa={() => { setMfaChallenge(null); setAuthError(null); setPhase("anonymous"); }} busy={authBusy} error={authError} />;
   if (phase === "booting") return <main className="boot-page"><Brand /><LoaderCircle className="spin" size={24} /><span>Securing your workspace…</span></main>;
@@ -1567,7 +1570,7 @@ export function IronCoreApp() {
   };
   const liveStaff: StaffData = {
     rows: staff.rows.map((row) => ({ id: row.id, name: row.user.name, email: row.user.email, phone: row.phone, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, hiredAt: row.hired_at, hasProfileImage: row.has_profile_image })),
-    invitations: staff.invitations.map((row) => ({ id: row.id, email: row.email, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, expiresAt: row.expires_at })),
+    invitations: staff.invitations.map((row) => ({ id: row.id, email: row.email, role: row.role, branchId: row.home_branch_id, employeeNumber: row.employee_number, jobTitle: row.job_title, status: row.status, expiresAt: row.expires_at, delivery: row.delivery ? { status: row.delivery.status, failureReason: row.delivery.failure_reason } : undefined })),
     branches: operations.branches.map((branch) => ({ id: branch.id, name: branch.name, status: branch.status })), loading: staff.loading, error: staff.error, actorRole: selectedGym.role,
     onReload: () => setStaffRefresh((value) => value + 1), onCreateTrainer: createTrainer, onInvite: inviteStaff, onResendInvite: resendStaffInvitation, onRevokeInvite: revokeStaffInvitation, onUpdate: updateStaff, onUpdateImage: updateStaffImage, onDelete: deleteStaff, onLoadImage: loadStaffImage,
   };

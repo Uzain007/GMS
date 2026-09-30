@@ -261,7 +261,7 @@ test("class scheduling and member timetables use the selected gym timezone", asy
 
   assert.match(app, /timezone: selectedGym\.timezone/);
   assert.match(engagement, /zonedLocalDateTimeToIso\(String\(form\.get\("starts_at"\)\), data\.timezone\)/);
-  assert.match(engagement, /formatGymDateTime\(session\.starts_at, data\.timezone\)/);
+  assert.match(engagement, /safeSessionDateTime\(session\.starts_at, data\.timezone\)/);
   assert.match(member, /formatGymDateTime\(value, timeZone\)/);
   assert.match(member, /if \(saved\) formElement\.reset\(\)/);
   assert.doesNotMatch(member, /event\.currentTarget\.reset\(\)/);
@@ -269,7 +269,7 @@ test("class scheduling and member timetables use the selected gym timezone", asy
   assert.match(coaching, /zonedLocalDateTimeToIso\(String\(form\.get\("performed_at"\)\), data\.timezone\)/);
   assert.match(gymTime, /formatToParts/);
   assert.match(gymTime, /daylight-saving offsets settle correctly/);
-  assert.match(engagement, /canBookOthers && session\.status === "scheduled" && <button className="primary-button class-book-button"/);
+  assert.match(engagement, /canBookOthers && status === "scheduled" && capacity > 0 && <button className="primary-button class-book-button"/);
   assert.doesNotMatch(engagement, /new Date\(String\(form\.get\("starts_at"\)\)\)\.toISOString\(\)/);
   assert.doesNotMatch(coaching, /new Date\(String\(form\.get\("performed_at"\)\)\)\.toISOString\(\)/);
 });

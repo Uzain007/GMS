@@ -6,6 +6,7 @@ use App\Enums\StaffStatus;
 use App\Enums\UserRole;
 use App\Models\StaffProfile;
 use App\Models\User;
+use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
@@ -184,33 +185,53 @@ class TrainerLifecycleService
         return $fresh;
     }
 
-    public function delete(StaffProfile $profile, User $actor, string $reason, Request $request): void
+    public function terminate(StaffProfile $profile, User $actor, string $reason, Request $request): StaffProfile
     {
         $this->roleGuard->ensureProfileCanBeManaged($actor, (string) $profile->tenant_role);
-        if ($profile->tenant_role !== UserRole::Trainer->value) {
-            throw new AuthorizationException('Only trainer profiles can be deleted from this workflow.');
-        }
-
-        if ($profile->classSessions()->exists() || $profile->memberAssignments()->exists() || $profile->workoutPlans()->exists()) {
+        if ((string) $profile->user_id === (string) $actor->getKey()) {
             throw ValidationException::withMessages([
-                'staff' => ['This trainer has class or coaching history. Deactivate the trainer to preserve those records.'],
+                'staff' => ['You cannot remove your own gym access.'],
             ]);
         }
 
-        $previous = $this->imageLocator($profile);
-        DB::transaction(function () use ($profile, $actor, $reason, $request): void {
-            $this->audit->record('staff.trainer_deleted', $profile, $actor, $this->auditSnapshot($profile), reason: $reason, request: $request);
-            $profile->delete();
-            // Both keys are mandatory so deleting one gym role can never revoke
-            // the same user's access to a different tenant.
+        return DB::transaction(function () use ($profile, $actor, $reason, $request): StaffProfile {
+            $locked = StaffProfile::query()->with('user')->lockForUpdate()->findOrFail($profile->getKey());
+            if ($locked->status === StaffStatus::Inactive) {
+                throw ValidationException::withMessages([
+                    'staff' => ['This employee is already inactive.'],
+                ]);
+            }
+
+            $before = $this->auditSnapshot($profile);
+            $locked->update([
+                'status' => StaffStatus::Inactive,
+                'terminated_at' => TenantClock::businessDate(),
+                'permissions' => [],
+            ]);
+
+            // Revoke only this tenant assignment. Platform-wide tokens and
+            // sessions may still be valid for a separate gym membership, while
+            // tenant middleware immediately rejects this inactive pivot.
             DB::table('gym_user')
                 ->where('gym_id', $this->tenant->id())
-                ->where('user_id', $profile->user_id)
-                ->delete();
-        });
-        $this->deleteImageObject($previous);
-    }
+                ->where('user_id', $locked->user_id)
+                ->update(['status' => 'inactive', 'updated_at' => now()]);
 
+            $fresh = $locked->fresh('user');
+            $fresh->setAttribute('tenant_role', $profile->tenant_role);
+            $this->audit->record(
+                'staff.terminated',
+                $fresh,
+                $actor,
+                $before,
+                $this->auditSnapshot($fresh),
+                $reason,
+                $request,
+            );
+
+            return $fresh;
+        });
+    }
     /** @return array{profile_image_disk: string, profile_image_path: string, profile_image_mime: string, profile_image_size: int} */
     private function storeImageObject(StaffProfile $profile, UploadedFile $image): array
     {
