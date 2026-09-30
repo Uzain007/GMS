@@ -52,3 +52,42 @@ test("class cards tolerate incomplete API records and keep readable controls", a
   assert.match(css, /\.class-card-actions\{display:grid/);
   assert.match(css, /@media\(max-width:760px\)[\s\S]*\.class-card-actions\{grid-template-columns:1fr\}/);
 });
+
+test("class scheduling modal opens from the class workspace", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+
+  assert.match(engagement, /onClick=\{\(\) => setClassModal\(true\)\}/);
+  assert.match(engagement, /classModal && <Modal title="Schedule a class"/);
+  assert.match(engagement, /className="schedule-class-modal"/);
+});
+
+test("class scheduling submits valid normalized session data", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+
+  assert.match(engagement, /className="schedule-class-form" onSubmit=\{createClass\}/);
+  assert.match(engagement, /await data\.onCreateSession\(\{/);
+  assert.match(engagement, /zonedLocalDateTimeToIso\(String\(form\.get\("starts_at"\)\), data\.timezone\)/);
+  assert.match(engagement, /zonedLocalDateTimeToIso\(String\(form\.get\("ends_at"\)\), data\.timezone\)/);
+});
+
+test("class scheduling keeps required browser validation", async () => {
+  const engagement = await read("app/engagement-management.tsx");
+
+  for (const field of ["title", "branch_id", "starts_at", "ends_at", "capacity"]) {
+    assert.match(engagement, new RegExp(`name="${field}"[^>]*required`));
+  }
+  assert.match(engagement, /<option value="" disabled>Select a branch<\/option>/);
+});
+
+test("class scheduling modal contains wide controls and stacks on mobile", async () => {
+  const css = await read("app/globals.css");
+
+  assert.match(css, /\.schedule-class-modal-layer\{[^}]*overflow-x:hidden/);
+  assert.match(css, /\.schedule-class-modal\{[^}]*width:min\(100%,720px\)[^}]*overflow-x:hidden/);
+  assert.match(css, /\.schedule-class-modal \*\{[^}]*min-width:0/);
+  assert.match(css, /\.schedule-class-grid\{[^}]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(css, /input\[type="datetime-local"\]\{[^}]*min-width:0[^}]*inline-size:100%/);
+  assert.match(css, /@media\(max-width:820px\)\{\.schedule-class-grid\{grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(css, /\.schedule-class-modal \.schedule-class-actions\{position:sticky;bottom:0[^}]*flex-wrap:wrap/);
+  assert.match(css, /@media\(max-width:620px\)[^\n]*\.schedule-class-actions\{[^}]*flex-direction:column-reverse/);
+});
