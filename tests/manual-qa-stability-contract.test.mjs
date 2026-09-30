@@ -115,12 +115,16 @@ test("class management modal contains wide controls and stacks on mobile", async
 
 test("class roster presents readable member and booking status rows", async () => {
   const engagement = await read("app/engagement-management.tsx");
+  const memberPortal = await read("app/member-portal.tsx");
   const css = await read("app/globals.css");
 
   assert.match(engagement, /className="class-roster-modal"/);
   assert.match(engagement, /className="class-roster-row"/);
   assert.match(engagement, /booking\.status \|\| "booked"/);
   assert.match(engagement, /No bookings yet/);
+  assert.match(engagement, /Waitlist positions are released only when a confirmed booking is cancelled\./);
+  assert.match(memberPortal, /booking\?\.status === "waitlisted"/);
+  assert.match(memberPortal, /Waitlist positions are released only when a confirmed booking is cancelled\./);
   assert.match(css, /\.class-roster-row\{[^}]*grid-template-columns:minmax\(0,1fr\) auto/);
   assert.match(css, /\.class-roster-row strong\{[^}]*font-size:15px/);
   assert.match(css, /\.class-roster-row small\{[^}]*font-size:12px/);

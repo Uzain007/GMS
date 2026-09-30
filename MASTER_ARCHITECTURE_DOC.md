@@ -731,7 +731,7 @@ A PostgreSQL partial unique index permits one open `checked_in` row per `(gym_id
 | `cancellation_reason` | text | yes | mandatory for staff cancellation; bounded for member cancellation |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading session/status/FIFO, member/status/time indexes |
 
-A PostgreSQL partial unique index allows only one active booking or waitlist entry for a member/session while retaining cancelled history. Booking, cancellation, counter updates and promotion of the earliest waitlisted record occur in one transaction while the session row is locked. The management waitlist drill-down consumes the existing tenant-protected session roster endpoint and renders member identity plus FIFO position without widening access.
+A PostgreSQL partial unique index allows only one active booking or waitlist entry for a member/session while retaining cancelled history. Booking, cancellation, counter updates and promotion of the earliest waitlisted record occur in one transaction while the session row is locked. A confirmed place remains consumed when its member is marked attended or absent; FIFO promotion occurs only when a confirmed booking is cancelled. The management waitlist drill-down consumes the existing tenant-protected session roster endpoint and renders member identity plus FIFO position without widening access.
 
 ### `trainer_member_assignments` — explicit coaching access boundary
 

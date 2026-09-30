@@ -363,6 +363,49 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         });
     }
 
+    public function test_marking_attendance_does_not_release_a_confirmed_place_or_promote_waitlist(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        [$confirmedMember, $waitingMember] = app(TenantContext::class)->run($gym, function () use ($branch): array {
+            return [
+                $this->memberWithMembership($branch, 'MBR-ATTENDED'),
+                $this->memberWithMembership($branch, 'MBR-WAITING'),
+            ];
+        });
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Attendance keeps capacity',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+
+        $confirmed = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $confirmedMember->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $waitlisted = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $waitingMember->id,
+        ], $headers)->assertJsonPath('data.status', 'waitlisted')->json('data');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$confirmed['id']}/attend", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'attended');
+
+        app(TenantContext::class)->run($gym, function () use ($session, $waitlisted): void {
+            $storedSession = \App\Models\ClassSession::query()->findOrFail($session['id']);
+            $storedWaitlist = ClassBooking::query()->findOrFail($waitlisted['id']);
+
+            $this->assertSame(1, $storedSession->booked_count);
+            $this->assertSame(1, $storedSession->waitlist_count);
+            $this->assertSame(1, $storedSession->attended_count);
+            $this->assertSame(ClassBookingStatus::Waitlisted, $storedWaitlist->status);
+            $this->assertNull($storedWaitlist->promoted_at);
+        });
+    }
+
     /** @return array{User, Gym, GymBranch} */
     private function tenant(): array
     {
