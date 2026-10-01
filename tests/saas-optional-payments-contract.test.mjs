@@ -73,7 +73,7 @@ test("automated SaaS lifecycle and platform intelligence remain tenant-safe", as
   assert.match(migration, /Schema::create\('saas_billing_notifications'/);
   assert.match(migration, /FORCE ROW LEVEL SECURITY/);
   assert.match(migration, /\['gym_id', 'status', 'created_at'\]/);
-  assert.match(scheduler, /Schedule::command\('ironcore:saas-billing'\)->dailyAt\('\d{2}:\d{2}'\)->withoutOverlapping/);
+  assert.match(scheduler, /Schedule::command\('ironcore:saas-billing'\)->hourlyAt\(5\)->withoutOverlapping/);
   assert.match(lifecycle, /grace_period_days/);
   assert.match(lifecycle, /billing_restricted_at/);
   assert.match(lifecycle, /idempotency_key/);

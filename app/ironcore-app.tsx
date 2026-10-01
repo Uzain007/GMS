@@ -2,7 +2,7 @@
 
 import { ArrowRight, Building2, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IronCoreDashboard, type DashboardMember, type DashboardMemberProfile, type NewDashboardMember, type View } from "./ironcore-dashboard";
+import { IronCoreDashboard, type BillingAccessState, type DashboardMember, type DashboardMemberProfile, type NewDashboardMember, type View } from "./ironcore-dashboard";
 import { MemberPortal, type MemberPortalData } from "./member-portal";
 import { MemberAccountActivation, type MemberActivationSecret } from "./member-account-activation";
 import { StaffAccountActivation, type StaffActivationSecret } from "./staff-account-activation";
@@ -73,6 +73,7 @@ import {
   type GymBankTransferSetting,
   type UpdateGymBankTransferSetting,
 } from "./lib/ironcore-api";
+import { dateInputValueInTimeZone } from "./lib/gym-time";
 
 type GymAccess = GymSummary & { role: IronCoreRole };
 type MemberState = { rows: DashboardMember[]; total: number; loading: boolean; error: string | null };
@@ -102,6 +103,11 @@ const emptyPaymentOptions: MemberPaymentOptions = { stripe_configured: false, st
 const emptySaasPaymentOptions: SaasPaymentOptions = { stripe_configured: false, bank_transfer_available: false, cash_available: true, platform_bank_details: null };
 const branchDisplayName = (branch: BranchRecord): string =>
   branch.is_primary && branch.name.trim().toLowerCase() === "primary location" ? "Primary Branch" : branch.name;
+const addCalendarDays = (dateKey: string, days: number): string => {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+};
 const demoOperations: OperationData = {
   // Representative preview records stay inside demo mode. Authenticated mode
   // always replaces them with collections fetched for the explicitly selected
@@ -580,6 +586,8 @@ export function IronCoreApp() {
   const [platformLoading, setPlatformLoading] = useState(false);
   const [platformError, setPlatformError] = useState<string | null>(null);
   const [selectedGym, setSelectedGym] = useState<GymAccess | null>(null);
+  const [billingRestrictedGymId, setBillingRestrictedGymId] = useState<string | null>(null);
+  const [billingClock] = useState(() => Date.now());
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
@@ -725,6 +733,15 @@ export function IronCoreApp() {
     };
     window.addEventListener("ironcore:session-expired", expired);
     return () => window.removeEventListener("ironcore:session-expired", expired);
+  }, []);
+
+  useEffect(() => {
+    const restricted = (event: Event) => {
+      if (!(event instanceof CustomEvent) || typeof event.detail?.gymId !== "string") return;
+      setBillingRestrictedGymId(event.detail.gymId);
+    };
+    window.addEventListener("ironcore:billing-restricted", restricted);
+    return () => window.removeEventListener("ironcore:billing-restricted", restricted);
   }, []);
 
   useEffect(() => {
@@ -890,9 +907,10 @@ export function IronCoreApp() {
         // Never combine a fresh subscription with stale financial rows after a
         // partial request failure; empty failed slices make the unavailable
         // state explicit instead of displaying contradictory balances.
+        const resolvedSubscription = subscription.status === "fulfilled" ? subscription.value : null;
         setSaas({
           plans: plans.status === "fulfilled" ? plans.value : [],
-          subscription: subscription.status === "fulfilled" ? subscription.value : null,
+          subscription: resolvedSubscription,
           invoices: invoices.status === "fulfilled" ? invoices.value.data : [],
           payments: payments.status === "fulfilled" ? payments.value.data : [],
           paymentOptions: paymentOptions.status === "fulfilled" ? paymentOptions.value : emptySaasPaymentOptions,
@@ -901,6 +919,9 @@ export function IronCoreApp() {
             ? apiMessage(failures[0].reason, plans.status === "rejected" ? "Available plans could not be loaded." : "Some billing history is temporarily unavailable. Available plans remain selectable.")
             : null,
         });
+        if (resolvedSubscription?.status === "active" && !resolvedSubscription.billing_restricted_at) {
+          setBillingRestrictedGymId((current) => current === selectedGym.id ? null : current);
+        }
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -1066,7 +1087,7 @@ export function IronCoreApp() {
     reportSequence.current += 1;
     memberSelfSequence.current += 1;
     setMfaChallenge(null);
-    setUser(null); setGyms([]); setPlatformPlans([]); setPlatformError(null); setSelectedGym(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setTrainerProfile({ profile: null, loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, stripeConfigured: false, stripeAvailable: false, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], payments: [], paymentOptions: emptySaasPaymentOptions, loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], paymentOptions: emptyPaymentOptions, attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", branchId: "", loading: false, error: null }); setPhase("anonymous");
+    setUser(null); setGyms([]); setPlatformPlans([]); setPlatformError(null); setSelectedGym(null); setBillingRestrictedGymId(null); setMembers({ rows: [], total: 0, loading: false, error: null }); setOperations({ branches: [], plans: [], memberships: [], loading: false, error: null }); setStaff({ rows: [], invitations: [], loading: false, error: null }); setTrainerProfile({ profile: null, loading: false, error: null }); setFinance({ payments: [], invoices: [], summary: null, gateway: null, stripeConfigured: false, stripeAvailable: false, loading: false, error: null }); setSaas({ plans: [], subscription: null, invoices: [], payments: [], paymentOptions: emptySaasPaymentOptions, loading: false, error: null }); setEngagement({ attendance: [], sessions: [], bookings: [], loading: false, error: null }); setCoaching({ assignments: [], plans: [], sessions: [], measurements: [], preference: null, deliveries: [], loading: false, error: null }); setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], paymentOptions: emptyPaymentOptions, attendance: [], credential: null, loading: false, error: null }); setReports({ report: null, ...defaultReportRange, currency: "GBP", branchId: "", loading: false, error: null }); setPhase("anonymous");
   }
 
   function selectGym(gym: GymAccess | null) {
@@ -1084,6 +1105,7 @@ export function IronCoreApp() {
     setMemberSelf({ profile: null, membership: null, invoices: [], payments: [], paymentOptions: emptyPaymentOptions, attendance: [], credential: null, loading: false, error: null });
     reportSequence.current += 1;
     setReports((current) => ({ ...current, report: null, currency: gym?.base_currency ?? "GBP", branchId: "", loading: false, error: null }));
+    setBillingRestrictedGymId(null);
     setSelectedGym(gym);
   }
 
@@ -1478,6 +1500,19 @@ export function IronCoreApp() {
   }
 
   const reportData: ReportData = { ...reports, branches: operations.branches.map((branch) => ({ id: branch.id, name: branch.name, isPrimary: branch.is_primary })), onApply: applyReportFilters, onReload: reloadReport };
+  const trialEndsAt = saas.subscription?.trial_ends_at ?? selectedGym?.trial_ends_at ?? null;
+  const paidSubscriptionActive = saas.subscription?.status === "active" && !saas.subscription.billing_restricted_at;
+  const trialExpired = Boolean(trialEndsAt && !paidSubscriptionActive && new Date(trialEndsAt).getTime() <= billingClock);
+  const billingRestricted = Boolean(selectedGym && !paidSubscriptionActive && (
+    billingRestrictedGymId === selectedGym.id
+    || saas.subscription?.billing_restricted_at
+    || saas.subscription?.status === "paused"
+    || trialExpired
+  ));
+  const trialEnding = Boolean(selectedGym && trialEndsAt && !paidSubscriptionActive && !billingRestricted
+    && dateInputValueInTimeZone(selectedGym.timezone, new Date(trialEndsAt))
+      === addCalendarDays(dateInputValueInTimeZone(selectedGym.timezone), 1));
+  const billingAccess: BillingAccessState = { restricted: billingRestricted, trialEnding, trialEndsAt };
 
   if (memberActivation) return <MemberAccountActivation invitation={memberActivation} onPreview={previewMemberActivation} onAccept={acceptMemberActivation} onCancel={() => setMemberActivation(null)} />;
   if (staffActivation) return <StaffAccountActivation invitation={staffActivation} onPreview={previewStaffActivation} onAccept={acceptStaffActivation} onCancel={() => setStaffActivation(null)} />;
@@ -1525,6 +1560,9 @@ export function IronCoreApp() {
     mfa: mfaActions,
   }} />;
   if (!selectedGym) return <TenantPicker user={user} gyms={gyms} notice={inviteNotice} onSelect={selectGym} onLogout={logout} onChangePassword={changePassword} mfa={mfaActions} />;
+  if (billingRestricted && !["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role)) {
+    return <main className="billing-restricted-workspace"><Brand /><section className="panel payment-required-panel" role="alert"><LockKeyhole size={30} /><p className="eyebrow">Payment required</p><h1>Gym operations are temporarily restricted</h1><p>The IronCore trial has ended and this workspace is available only to the Gym Owner or Gym Manager for billing and payment. Your gym data remains safe.</p><button className="secondary-button" onClick={logout}>Sign out</button></section></main>;
+  }
   if (selectedGym.role === "member") {
     const memberPortalData: MemberPortalData = {
       gym: selectedGym,
@@ -1598,6 +1636,8 @@ export function IronCoreApp() {
     baseCurrency: selectedGym.base_currency,
     timezone: selectedGym.timezone,
     actorRole: selectedGym.role,
+    accessRestricted: billingRestricted,
+    trialEndsAt,
     loading: saas.loading,
     error: saas.error,
     onReload: () => setSaasRefresh((value) => value + 1),
@@ -1690,13 +1730,15 @@ export function IronCoreApp() {
   const canReadSaasBilling = ["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role);
   const canReadReports = ["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role);
   const canUseCoaching = selectedGym.role !== "receptionist";
-  const tenantViews: View[] = selectedGym.role === "trainer"
+  const tenantViews: View[] = billingRestricted && canReadSaasBilling
+    ? ["billing"]
+    : selectedGym.role === "trainer"
     ? ["gym-dashboard", "trainer-profile", "attendance", "coaching", "settings"]
     : canManageMembers
       ? ["gym-dashboard", "members", "branches", "plans", "memberships", "attendance", ...(canUseCoaching ? ["coaching" as View] : []), "payments", ...(canReadSaasBilling ? ["billing" as View] : []), ...(canReadReports ? ["reports" as View] : []), ...(canManageStaff ? ["staff" as View] : []), "settings"]
       : ["attendance", "coaching", "branches", "plans"];
 
-  return <IronCoreDashboard key={selectedGym.id}
+  return <IronCoreDashboard key={`${selectedGym.id}:${billingRestricted ? "restricted" : "operational"}`}
     portalMode="gym"
     operator={{ name: user.name, role: roleLabel(selectedGym.role) }}
     activeGym={{ id: selectedGym.id, name: selectedGym.name }}
@@ -1717,6 +1759,7 @@ export function IronCoreApp() {
     liveReports={canReadReports ? reportData : undefined}
     gymSettings={["super_admin", "gym_owner", "gym_manager"].includes(selectedGym.role) ? { gym: selectedGym, canManage: true, bankTransferSetting: bankTransferSettingState?.gymId === selectedGym.id ? bankTransferSettingState.setting : null, onUpdate: updateCurrentGymSettings, onUpdateBankTransferSetting: updateCurrentGymBankTransferSetting } : undefined}
     trainerProfile={selectedGym.role === "trainer" ? { ...trainerProfile, branchName: operations.branches.find((branch) => branch.id === trainerProfile.profile?.home_branch_id)?.name ?? null, onUpdate: updateTrainerProfile } : undefined}
+    billingAccess={billingAccess}
     tenantViews={tenantViews}
     onCreateMember={createMember}
   />;

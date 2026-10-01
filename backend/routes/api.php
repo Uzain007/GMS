@@ -288,7 +288,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/saas-billing-invoices', [SaasSubscriptionController::class, 'storeInvoice'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/manual-invoice', [SaasSubscriptionController::class, 'prepareInvoice'])
-                    ->middleware('role:super_admin,gym_owner');
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-subscription/payment-options', [SaasSubscriptionController::class, 'paymentOptions'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'manualPayments'])
@@ -296,7 +296,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/saas-subscription/payment-report', [SaasSubscriptionController::class, 'exportPayments'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/manual-payments', [SaasSubscriptionController::class, 'storeManualPayment'])
-                    ->middleware('role:super_admin,gym_owner');
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-subscription/manual-payments/{payment}/receipt', [SaasSubscriptionController::class, 'manualPaymentReceipt'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/saas-subscription/manual-payments/{payment}/ironcore-receipt', [SaasSubscriptionController::class, 'ironCoreReceipt'])
@@ -316,9 +316,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/saas-subscription/billing-override', [SaasSubscriptionController::class, 'overrideBillingRestriction'])
                     ->middleware('role:super_admin');
                 Route::post('/saas-subscription/checkout', [SaasSubscriptionController::class, 'checkout'])
-                    ->middleware('role:super_admin,gym_owner');
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::post('/saas-subscription/portal', [SaasSubscriptionController::class, 'portal'])
-                    ->middleware('role:super_admin,gym_owner');
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
 
                 Route::get('/attendance', [AttendanceController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer');

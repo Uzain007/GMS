@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.61.2 — class workspace readability and responsive management stabilization |
-| Last verified | 30 September 2026 |
+| MAD version | 0.62.0 — universal SaaS trial expiry and billing-only recovery |
+| Last verified | 1 October 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Class card hierarchy, roster clarity and responsive class management correction implemented locally; validation passing |
+| Active milestone | Universal SaaS trial expiry, idempotent owner notices and fail-closed billing-only recovery implemented locally; validation in progress |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -621,17 +621,19 @@ Partial and full refunds append a refund row and audit event, update only the pa
 
 Approval reversal is distinct from a refund and is permitted only when a cash/bank payment was approved but no money was received. The original approval actor, time and reason remain on the payment; a single append-only reversal records the before state, changes the payment projection to Voided, reopens the linked invoice and safely recalculates subscription/tenant access under row locks. A settled refund or later billing period blocks this workflow.
 
-### `saas_billing_notifications` — tenant renewal/dunning delivery ledger
+### `saas_billing_notifications` — tenant renewal, trial and dunning delivery ledger
 
 | Column | Type | Null | Constraints / index |
 | --- | --- | --- | --- |
 | `id`, `gym_id` | uuid | no | tenant identity, gym FK, unique `(gym_id, id)`, FORCE RLS |
-| `saas_billing_invoice_id`, `recipient_user_id` | uuid | no | tenant-composite invoice FK and Gym Owner recipient FK |
+| `gym_subscription_id` | uuid | yes | tenant-composite subscription FK; required for subscription-scoped trial notices when available |
+| `saas_billing_invoice_id` | uuid | yes | tenant-composite invoice FK; null only for a subscription/legacy-trial notice |
+| `recipient_user_id` | uuid | no | Gym Owner recipient FK |
 | `destination` | encrypted text | no | encrypted owner email, hidden from serialization |
 | `template_key`, `notification_date`, `idempotency_key` | mixed | no | unique tenant/date/template delivery identity |
 | `status`, `attempts`, `failure_code`, `sent_at` | mixed | mixed | queue delivery lifecycle without secret-bearing errors |
 
-The daily scheduler creates manual-provider renewal invoices seven days before their renewal boundary, advances Due/Past Due states, queues one owner reminder per invoice/day and applies billing restriction only after the configured 15-day grace window. Stripe remains webhook-authoritative. Queue workers and authenticated production SMTP are required for actual delivery.
+The single hourly SaaS lifecycle scheduler processes local calendar boundaries without a second scheduler: it queues one owner email/ledger warning one day before trial expiry, one expiry notice at the exact trial boundary, creates manual-provider renewal invoices seven days before renewal, advances Due/Past Due states, queues one owner reminder per invoice/day and applies invoice restriction only after the configured grace window. Subscription `trial_ends_at` is authoritative and `gyms.trial_ends_at` is a legacy fallback. Durable tenant idempotency keys make repeated runs harmless, and an Active paid subscription suppresses stale trial notices. Queue workers and authenticated production SMTP are required for actual email delivery.
 
 ### `subscription_checkout_sessions` — tenant checkout idempotency
 
@@ -1158,7 +1160,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 
 - Production uses separate frontend, Laravel API, PostgreSQL 17, Redis and S3-compatible storage services; free frontend hosting is not a safe substitute for the stateful API/database/queue stack.
 - HTTPS, exact CORS/Sanctum origins, secure cookies, trusted proxy configuration and environment-only secrets are mandatory before launch.
-- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs SaaS billing at 01:00, `ironcore:membership-billing` at 01:15 and tenant-scoped `ironcore:receipt-retention` at 02:00, all with overlap locks and the same PostgreSQL/Redis/storage configuration as the web process.
+- Laravel web, queue worker and scheduler processes deploy from the same immutable backend release. Database migrations run once before traffic shifts; queue workers restart after a successful release. The single scheduler replica runs `ironcore:saas-billing` hourly at minute 5, `ironcore:membership-billing` at 01:15 and tenant-scoped `ironcore:receipt-retention` at 02:00, all with overlap locks and the same PostgreSQL/Redis/storage configuration as the web process.
 - Platform bank transfer is enabled only when `SAAS_BANK_ACCOUNT_NAME`, `SAAS_BANK_NAME` and `SAAS_BANK_ACCOUNT_NUMBER_OR_IBAN` are all configured; routing details and instructions are optional. These platform values are commercially and technically separate from every gym's encrypted member-payment bank settings.
 - The production backend image runs Caddy and PHP-FPM under Supervisor. Caddy binds to Railway's injected `PORT` (with `8000` only as an image-local fallback), serves Laravel exclusively from `public/` and forwards PHP requests to the private PHP-FPM listener. Local Docker Compose retains its explicit `php artisan serve` override.
 - `/up` is the process-only liveness check. `/api/v1/health/readiness` verifies PostgreSQL and Redis connectivity, returns only `ready` or `unavailable`, logs no credentials/tenant data and is rate-limited to 60 requests per source IP per minute.
@@ -1220,7 +1222,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Tenant-isolated gym subscriptions and SaaS invoices | Implemented locally; approval pending | Separate platform Stripe/manual identities, reviewed cash/bank evidence, one current subscription, immutable snapshots, audited unpaid invoice replacement and retained invoice history |
 | SaaS payment-to-tenant status automation | Implemented locally; approval pending | Paid cash/bank approvals and signed paid Stripe invoices end trials and activate tenants with exact billing periods; failed/unpaid states become Past due, while manual suspension/cancellation remains authoritative and every effective change is audited. |
 | Stripe Billing signed webhook synchronization | Implemented; core runtime passing; provider gate pending | Separate endpoint secret, verified customer lookup, tenant RLS binding, event deduplication and payload hashing |
-| Platform SaaS subscription frontend/API integration | Implemented; core runtime passing; provider gate pending | Super-admin catalogue management plus owner checkout/portal and manager read-only status |
+| Platform SaaS subscription frontend/API integration | Implemented locally; validation in progress | Super-admin catalogue management plus owner/manager checkout, manual payment and billing-only recovery |
 | Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |
 | Member QR credentials, Member Codes and branch attendance | Persistent secure-pass display correction implemented locally; approval pending | Separate tenant-unique six-digit lookup, server-reconstructable opaque/hash-only QR security, deterministic image rendering with retry/error states, explicit rotation that revokes old scanner values, camera scanning, active-membership/branch validation and one open presence row |
 | Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; core runtime passing | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |

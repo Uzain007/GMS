@@ -19,7 +19,7 @@ class PhaseFourSaasBillingIsolationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_subscription_reads_fail_closed_across_gyms_and_manager_cannot_checkout(): void
+    public function test_subscription_reads_fail_closed_across_gyms_and_manager_can_reach_checkout(): void
     {
         [$owner, $allowedGym] = $this->tenant(UserRole::GymOwner);
         [, $blockedGym] = $this->tenant(UserRole::GymOwner);
@@ -57,8 +57,10 @@ class PhaseFourSaasBillingIsolationTest extends TestCase
         Sanctum::actingAs($manager);
         $this->postJson("/api/v1/gyms/{$allowedGym->id}/saas-subscription/checkout", [
             'saas_plan_price_id' => $price->id,
-            'idempotency_key' => 'manager-must-not-checkout-001',
-        ], ['X-Gym-ID' => $allowedGym->id])->assertForbidden();
+            'idempotency_key' => 'manager-can-checkout-001',
+        ], ['X-Gym-ID' => $allowedGym->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('payment_method');
     }
 
     /** @return array{User, Gym} */

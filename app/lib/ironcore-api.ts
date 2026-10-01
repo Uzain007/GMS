@@ -265,13 +265,15 @@ export type Paginated<T> = {
 export type CursorPage<T> = { data: T[]; meta?: { per_page?: number; next_cursor?: string | null; prev_cursor?: string | null } };
 
 type ApiEnvelope<T> = { data: T };
-type ValidationPayload = { message?: string; code?: string; errors?: Record<string, string[]> };
+type ValidationPayload = { message?: string; code?: string; reason?: string; errors?: Record<string, string[]> };
 
 export class IronCoreApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly errors: Record<string, string[]> = {},
+    public readonly code?: string,
+    public readonly reason?: string,
   ) {
     super(message);
     this.name = "IronCoreApiError";
@@ -340,10 +342,17 @@ export class IronCoreApi {
       if (response.status === 401 && payload.code === "session_expired" && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("ironcore:session-expired", { detail: payload.message }));
       }
+      if (response.status === 402 && payload.code === "saas_billing_restricted" && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("ironcore:billing-restricted", {
+          detail: { gymId, message: payload.message, reason: payload.reason },
+        }));
+      }
       throw new IronCoreApiError(
         firstError ?? payload.message ?? "IronCore could not complete that request.",
         response.status,
         payload.errors,
+        payload.code,
+        payload.reason,
       );
     }
 

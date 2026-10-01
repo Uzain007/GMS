@@ -56,8 +56,7 @@ class SaasSubscriptionController extends Controller
 
     public function show(): JsonResponse|GymSubscriptionResource
     {
-        $subscription = GymSubscription::query()
-            ->whereNotIn('status', [SaasSubscriptionStatus::Cancelled->value, SaasSubscriptionStatus::IncompleteExpired->value])
+        $subscription = GymSubscription::query()->current()
             ->with('customer')->latest()->first();
 
         return $subscription

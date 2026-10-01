@@ -6,6 +6,7 @@ use App\Enums\Currency;
 use App\Enums\PaymentProvider;
 use App\Enums\SaasSubscriptionStatus;
 use App\Models\Concerns\BelongsToGym;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,6 +15,17 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class GymSubscription extends Model
 {
     use BelongsToGym, HasUuids;
+
+    public const ONBOARDING_PROVIDER_PREFIX = 'ironcore_onboarding_';
+
+    public const CURRENT_STATUSES = [
+        SaasSubscriptionStatus::Incomplete->value,
+        SaasSubscriptionStatus::Trialing->value,
+        SaasSubscriptionStatus::Active->value,
+        SaasSubscriptionStatus::PastDue->value,
+        SaasSubscriptionStatus::Unpaid->value,
+        SaasSubscriptionStatus::Paused->value,
+    ];
 
     protected $fillable = [
         'gym_id', 'billing_customer_id', 'saas_plan_id', 'saas_plan_price_id',
@@ -72,5 +84,26 @@ class GymSubscription extends Model
     public function billingOverrideBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'billing_override_by');
+    }
+
+    public function scopeCurrent(Builder $query): Builder
+    {
+        return $query->whereIn('status', self::CURRENT_STATUSES);
+    }
+
+    public static function onboardingProviderId(string $gymId): string
+    {
+        return self::ONBOARDING_PROVIDER_PREFIX.$gymId;
+    }
+
+    public function isOnboardingContract(): bool
+    {
+        return $this->provider === PaymentProvider::Manual
+            && $this->provider_subscription_id === self::onboardingProviderId((string) $this->gym_id)
+            && in_array($this->status, [
+                SaasSubscriptionStatus::Incomplete,
+                SaasSubscriptionStatus::Trialing,
+                SaasSubscriptionStatus::PastDue,
+            ], true);
     }
 }

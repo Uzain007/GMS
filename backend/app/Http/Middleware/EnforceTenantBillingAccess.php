@@ -2,7 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\GymStatus;
 use App\Enums\UserRole;
+use App\Enums\SaasSubscriptionStatus;
 use App\Models\GymSubscription;
 use App\Tenancy\TenantContext;
 use Closure;
@@ -20,9 +22,19 @@ class EnforceTenantBillingAccess
             return $next($request);
         }
 
-        $subscription = GymSubscription::query()->latest()->first();
-        $restricted = $subscription?->billing_restricted_at !== null
-            && ! ($subscription->billing_override_until?->isFuture() ?? false);
+        // Terminal history may be newer than the accepted contract. Selecting
+        // only a current subscription keeps access decisions on one ledger row.
+        $gym = $this->tenant->gym();
+        $subscription = GymSubscription::query()
+            ->where('status', SaasSubscriptionStatus::Active->value)->latest()->first()
+            ?? GymSubscription::query()->current()->latest()->first();
+        $overrideActive = $subscription?->billing_override_until?->isFuture() ?? false;
+        $trialEndsAt = $subscription?->trial_ends_at ?? $gym->trial_ends_at;
+        $trialExpired = $subscription?->status !== SaasSubscriptionStatus::Active
+            && $trialEndsAt?->isPast() === true;
+        $legacyPastDue = $subscription === null && $gym->status === GymStatus::PastDue;
+        $restricted = $trialExpired || $legacyPastDue || ($subscription !== null
+            && $subscription->billing_restricted_at !== null && ! $overrideActive);
         if (! $restricted) {
             return $next($request);
         }
@@ -41,8 +53,11 @@ class EnforceTenantBillingAccess
         }
 
         return new JsonResponse([
-            'message' => 'This gym is in billing-restricted mode. A Gym Owner can open SaaS billing to resolve the overdue invoice.',
+            'message' => $trialExpired
+                ? 'This gym trial has ended. A Gym Owner can open SaaS billing, select a plan and complete payment.'
+                : 'This gym is in billing-restricted mode. A Gym Owner can open SaaS billing to resolve the overdue invoice.',
             'code' => 'saas_billing_restricted',
+            'reason' => $trialExpired ? 'trial_expired' : 'payment_required',
         ], 402);
     }
 }

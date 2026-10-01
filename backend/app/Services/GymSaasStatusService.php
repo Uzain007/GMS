@@ -32,9 +32,13 @@ class GymSaasStatusService
             return $locked;
         }
 
+        // A supplied Past Due trial boundary is retained only for legacy gyms
+        // that have no subscription row, so fail-closed middleware can keep
+        // identifying trial expiry until a paid contract clears the fallback.
         $targetTrialEndsAt = $subscriptionStatus === SaasSubscriptionStatus::Trialing
-            ? $trialEndsAt
-            : null;
+            || ($subscriptionStatus === SaasSubscriptionStatus::PastDue && $trialEndsAt !== null)
+                ? $trialEndsAt
+                : null;
         $trialChanged = $locked->trial_ends_at?->getTimestamp() !== $targetTrialEndsAt?->getTimestamp();
         if ($locked->status === $targetStatus && ! $trialChanged) {
             return $locked;

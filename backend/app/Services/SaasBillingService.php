@@ -160,15 +160,8 @@ class SaasBillingService
         // selects card checkout; catalogue publication never reaches Stripe.
         $this->stripe->assertCheckoutAvailable();
 
-        $current = GymSubscription::query()->whereIn('status', [
-            SaasSubscriptionStatus::Incomplete->value,
-            SaasSubscriptionStatus::Trialing->value,
-            SaasSubscriptionStatus::Active->value,
-            SaasSubscriptionStatus::PastDue->value,
-            SaasSubscriptionStatus::Unpaid->value,
-            SaasSubscriptionStatus::Paused->value,
-        ])->latest()->first();
-        if ($current) {
+        $current = GymSubscription::query()->current()->latest()->first();
+        if ($current && ! $current->isOnboardingContract()) {
             throw ValidationException::withMessages(['subscription' => ['Use the billing portal to manage the existing subscription.']]);
         }
         if (SaasSubscriptionPayment::query()->where('status', PaymentStatus::Pending->value)->exists()) {
@@ -197,6 +190,9 @@ class SaasBillingService
         $price = $this->ensureStripePrice($price);
         $customer = $this->customer($gym, $actor);
         $checkout = $this->stripe->createCheckout($gym, $customer, $price, $idempotencyKey);
+        if ($current && $current->saas_plan_price_id !== $price->id) {
+            $this->selectOnboardingPrice($current, $price, $actor);
+        }
         $session = SubscriptionCheckoutSession::query()->create([
             'created_by' => $actor->getKey(),
             'saas_plan_price_id' => $price->getKey(),
@@ -385,7 +381,11 @@ class SaasBillingService
                     throw ValidationException::withMessages(['subscription' => ['Stripe-managed subscriptions must use Stripe invoices.']]);
                 }
                 if ($subscription->saas_plan_price_id !== $price->id) {
-                    throw ValidationException::withMessages(['saas_plan_price_id' => ['The selected price must match the gym’s current subscription.']]);
+                    if (! $subscription->isOnboardingContract()) {
+                        throw ValidationException::withMessages(['saas_plan_price_id' => ['The selected price must match the gym’s current subscription.']]);
+                    }
+                    $this->selectOnboardingPrice($subscription, $price, $actor, $request);
+                    $subscription->refresh();
                 }
                 $openInvoice = SaasBillingInvoice::query()->where('gym_subscription_id', $subscription->id)
                     ->whereIn('status', [SaasInvoiceStatus::Draft->value, SaasInvoiceStatus::Upcoming->value, SaasInvoiceStatus::Due->value, SaasInvoiceStatus::PastDue->value, SaasInvoiceStatus::Open->value])
@@ -1010,14 +1010,44 @@ class SaasBillingService
 
     private function currentSubscription(): ?GymSubscription
     {
-        return GymSubscription::query()->whereIn('status', [
-            SaasSubscriptionStatus::Incomplete->value,
-            SaasSubscriptionStatus::Trialing->value,
-            SaasSubscriptionStatus::Active->value,
-            SaasSubscriptionStatus::PastDue->value,
-            SaasSubscriptionStatus::Unpaid->value,
-            SaasSubscriptionStatus::Paused->value,
-        ])->latest()->first();
+        return GymSubscription::query()->current()->latest()->first();
+    }
+
+    private function selectOnboardingPrice(
+        GymSubscription $subscription,
+        SaasPlanPrice $price,
+        User $actor,
+        ?Request $request = null,
+    ): void {
+        if (! $subscription->isOnboardingContract()) {
+            throw ValidationException::withMessages(['subscription' => ['Only an unpaid onboarding contract can change plan before payment.']]);
+        }
+        $before = [
+            'saas_plan_id' => $subscription->saas_plan_id,
+            'saas_plan_price_id' => $subscription->saas_plan_price_id,
+        ];
+        $subscription->update([
+            'saas_plan_id' => $price->saas_plan_id,
+            'saas_plan_price_id' => $price->id,
+            'plan_code_snapshot' => $price->plan->code,
+            'plan_name_snapshot' => $price->plan->name,
+            'feature_limits_snapshot' => $price->plan->feature_limits,
+            'currency' => $price->currency,
+            'amount_minor' => $price->amount_minor,
+            'billing_interval' => $price->billing_interval,
+        ]);
+        $this->audit->record(
+            'saas.subscription.plan_selected',
+            $subscription->fresh(),
+            $actor,
+            before: $before,
+            after: [
+                'saas_plan_id' => $price->saas_plan_id,
+                'saas_plan_price_id' => $price->id,
+            ],
+            reason: 'A plan was selected before activating the onboarding subscription.',
+            request: $request,
+        );
     }
 
     private function manualCustomer(Gym $gym, User $billingContact): PlatformBillingCustomer

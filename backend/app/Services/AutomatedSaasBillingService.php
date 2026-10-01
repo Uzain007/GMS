@@ -49,14 +49,15 @@ class AutomatedSaasBillingService
         $localNow = now($gym->timezone);
 
         DB::transaction(function () use ($gym, $localNow, &$result): void {
-            $subscription = GymSubscription::query()->whereIn('status', [
-                SaasSubscriptionStatus::Incomplete->value,
-                SaasSubscriptionStatus::Trialing->value,
-                SaasSubscriptionStatus::Active->value,
-                SaasSubscriptionStatus::PastDue->value,
-                SaasSubscriptionStatus::Unpaid->value,
-                SaasSubscriptionStatus::Paused->value,
-            ])->latest()->lockForUpdate()->first();
+            // A paid active contract always wins over stale legacy trial rows.
+            $subscription = GymSubscription::query()
+                ->where('status', SaasSubscriptionStatus::Active->value)
+                ->latest()->lockForUpdate()->first()
+                ?? GymSubscription::query()->current()->latest()->lockForUpdate()->first();
+            $trialExpired = $this->processTrialLifecycle($gym, $subscription, $localNow, $result);
+            if ($trialExpired) {
+                return;
+            }
             if (! $subscription) {
                 return;
             }
@@ -190,6 +191,122 @@ class AutomatedSaasBillingService
         );
     }
 
+    /**
+     * @param  array{invoices_created:int,reminders_queued:int,restricted:int}  $result
+     */
+    private function processTrialLifecycle(
+        Gym $gym,
+        ?GymSubscription $subscription,
+        Carbon $localNow,
+        array &$result,
+    ): bool {
+        // Any settled active contract wins over stale trial metadata. This also
+        // suppresses legacy gym dates after successful manual or Stripe payment.
+        if (GymSubscription::query()->where('status', SaasSubscriptionStatus::Active->value)->exists()) {
+            return false;
+        }
+
+        // The subscription is authoritative. The gym registry date is retained
+        // only for legacy tenants created before subscription onboarding.
+        $trialEndsAt = $subscription?->trial_ends_at ?? $gym->trial_ends_at;
+        if (! $trialEndsAt) {
+            return false;
+        }
+
+        $localTrialEnd = $trialEndsAt->copy()->setTimezone($gym->timezone);
+        if ($localNow->copy()->startOfDay()->equalTo($localTrialEnd->copy()->startOfDay()->subDay())
+            && $this->queueTrialNotification($gym, $subscription, $trialEndsAt, 'saas_trial_ending', $localNow)) {
+            $result['reminders_queued']++;
+        }
+        if ($localNow->lt($localTrialEnd)) {
+            return false;
+        }
+
+        if ($this->queueTrialNotification($gym, $subscription, $trialEndsAt, 'saas_trial_expired', $localNow)) {
+            $result['reminders_queued']++;
+        }
+
+        if ($subscription) {
+            $before = [
+                'status' => $subscription->status->value,
+                'billing_restricted_at' => $subscription->billing_restricted_at?->toIso8601String(),
+            ];
+            $newRestriction = $subscription->billing_restricted_at === null;
+            if ($subscription->status !== SaasSubscriptionStatus::PastDue || $newRestriction) {
+                $subscription->update([
+                    'status' => SaasSubscriptionStatus::PastDue,
+                    'billing_restricted_at' => $subscription->billing_restricted_at ?? now(),
+                ]);
+                $this->gymStatus->synchronize(
+                    $gym,
+                    SaasSubscriptionStatus::PastDue,
+                    reason: 'The unpaid SaaS trial expired.',
+                );
+                $this->audit->record(
+                    'saas.subscription.trial_expired',
+                    $subscription->fresh(),
+                    null,
+                    before: $before,
+                    after: [
+                        'status' => SaasSubscriptionStatus::PastDue->value,
+                        'billing_restricted_at' => $subscription->fresh()->billing_restricted_at?->toIso8601String(),
+                        'trial_ends_at' => $trialEndsAt->toIso8601String(),
+                    ],
+                    reason: 'The trial ended without an active paid subscription.',
+                );
+                if ($newRestriction) {
+                    $result['restricted']++;
+                }
+            }
+        } elseif ($gym->status !== GymStatus::PastDue) {
+            // Legacy trials without a subscription remain recoverable: Past Due
+            // permits login and billing while middleware blocks operations.
+            $this->gymStatus->synchronize(
+                $gym,
+                SaasSubscriptionStatus::PastDue,
+                trialEndsAt: $trialEndsAt,
+                reason: 'The legacy trial ended without an active paid subscription.',
+            );
+            $result['restricted']++;
+        }
+
+        return true;
+    }
+
+    private function queueTrialNotification(
+        Gym $gym,
+        ?GymSubscription $subscription,
+        Carbon $trialEndsAt,
+        string $template,
+        Carbon $localNow,
+    ): bool {
+        $owner = $gym->users()->wherePivot('role', UserRole::GymOwner->value)
+            ->wherePivot('status', 'active')->orderBy('users.id')->first();
+        if (! $owner) {
+            return false;
+        }
+
+        $trialKey = $trialEndsAt->copy()->utc()->format('YmdHis');
+        $key = implode(':', [$template, $subscription?->id ?? 'legacy', $trialKey, $owner->id]);
+        $notification = SaasBillingNotification::query()->firstOrCreate(
+            ['idempotency_key' => $key],
+            [
+                'gym_subscription_id' => $subscription?->id,
+                'saas_billing_invoice_id' => null,
+                'recipient_user_id' => $owner->id,
+                'destination' => $owner->email,
+                'template_key' => $template,
+                'notification_date' => $localNow->toDateString(),
+                'status' => 'queued',
+            ],
+        );
+        if ($notification->wasRecentlyCreated) {
+            SendSaasBillingReminder::dispatch($gym->id, $notification->id)->onQueue('notifications');
+        }
+
+        return $notification->wasRecentlyCreated;
+    }
+
     private function queueOwnerReminder(Gym $gym, SaasBillingInvoice $invoice, string $template, Carbon $localNow): bool
     {
         $owner = $gym->users()->wherePivot('role', UserRole::GymOwner->value)
@@ -203,6 +320,7 @@ class AutomatedSaasBillingService
         $notification = SaasBillingNotification::query()->firstOrCreate(
             ['idempotency_key' => $key],
             [
+                'gym_subscription_id' => $invoice->gym_subscription_id,
                 'saas_billing_invoice_id' => $invoice->id,
                 'recipient_user_id' => $owner->id,
                 'destination' => $owner->email,

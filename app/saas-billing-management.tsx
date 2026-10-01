@@ -25,6 +25,8 @@ export type SaasBillingData = {
   baseCurrency: Currency;
   timezone: string;
   actorRole: IronCoreRole;
+  accessRestricted?: boolean;
+  trialEndsAt?: string | null;
   readOnly?: boolean;
   loading: boolean;
   error: string | null;
@@ -50,6 +52,11 @@ function money(minor: number, currency: Currency): string {
   return new Intl.NumberFormat("en-GB", {
     style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 2,
   }).format(minor / 100);
+}
+
+function addCalendarDays(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
 function PaymentCorrectionModal({ payment, onClose, onSubmit }: { payment: SaasSubscriptionPaymentRecord; onClose: () => void; onSubmit: NonNullable<SaasBillingData["onCorrectManualPayment"]> }) {
@@ -311,8 +318,14 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   const [replacing, setReplacing] = useState<SaasBillingInvoiceRecord | null>(null);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [renderedAt] = useState(() => new Date().getTime());
-  const canManage = !data.readOnly && ["super_admin", "gym_owner"].includes(data.actorRole);
+  const canManage = !data.readOnly && ["super_admin", "gym_owner", "gym_manager"].includes(data.actorRole);
   const current = data.subscription;
+  const trialEndsAt = current?.trial_ends_at ?? data.trialEndsAt ?? null;
+  const todayKey = dateInputValueInTimeZone(data.timezone, new Date(renderedAt));
+  const trialDateKey = trialEndsAt ? dateInputValueInTimeZone(data.timezone, new Date(trialEndsAt)) : null;
+  const trialExpired = Boolean(trialEndsAt && current?.status !== "active" && new Date(trialEndsAt).getTime() <= renderedAt);
+  const paymentRequired = Boolean(data.accessRestricted || current?.billing_restricted_at || trialExpired);
+  const trialEnding = Boolean(!paymentRequired && current?.status !== "active" && trialDateKey === addCalendarDays(todayKey, 1));
   const nextRenewal = current?.status === "trialing"
     ? current.trial_ends_at
     : current?.status === "active"
@@ -402,8 +415,9 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym’s connected account. This subscription is collected only by IronCore’s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
-    {current?.billing_restricted_at && <div className="form-error billing-warning" role="alert"><strong>Billing-restricted mode</strong><span>Normal operations were restricted on {date(current.billing_restricted_at)} after the grace period ended. Owners can still review billing and settle the overdue invoice.</span>{data.actorRole === "super_admin" && data.onOverrideBilling && <button className="secondary-button" onClick={() => setOverrideOpen(true)}>Add temporary override</button>}</div>}
-    {!current?.billing_restricted_at && payableInvoice && <div className="form-notice billing-warning" role="status"><strong>{pendingPayment ? "Payment under review" : payableInvoice.status === "past_due" ? "Payment overdue" : "Renewal payment available"}</strong><span>{pendingPayment ? "IronCore is reviewing the submitted payment evidence." : `Due ${date(payableInvoice.due_at)} · Grace ends ${date(payableInvoice.grace_ends_at ?? null)}${payableInvoice.status === "past_due" && graceDaysRemaining !== null ? ` · ${graceDaysRemaining} day${graceDaysRemaining === 1 ? "" : "s"} remaining` : ""}`}</span>{canManage && !pendingPayment && <div className="finance-actions">{data.paymentOptions.bank_transfer_available && <button className="secondary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><FileUp size={15} /> Pay by bank transfer</button>}<button className="primary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><Banknote size={15} /> Pay by cash</button></div>}</div>}
+    {trialEnding && <div className="form-notice billing-warning trial-ending-warning" role="status"><strong>Your IronCore trial ends tomorrow</strong><span>Select a plan and complete payment before {date(trialEndsAt)} to keep normal gym operations available.</span></div>}
+    {paymentRequired && <div className="form-error billing-warning payment-required-panel" role="alert"><strong>Payment required</strong><span>Your trial has ended. Normal gym operations are restricted, but billing details, plan selection and payment remain available. Your gym data is safe and access restores automatically after a valid payment.</span>{data.actorRole === "super_admin" && data.onOverrideBilling && <button className="secondary-button" onClick={() => setOverrideOpen(true)}>Add temporary override</button>}</div>}
+    {!paymentRequired && payableInvoice && <div className="form-notice billing-warning" role="status"><strong>{pendingPayment ? "Payment under review" : payableInvoice.status === "past_due" ? "Payment overdue" : "Renewal payment available"}</strong><span>{pendingPayment ? "IronCore is reviewing the submitted payment evidence." : `Due ${date(payableInvoice.due_at)} · Grace ends ${date(payableInvoice.grace_ends_at ?? null)}${payableInvoice.status === "past_due" && graceDaysRemaining !== null ? ` · ${graceDaysRemaining} day${graceDaysRemaining === 1 ? "" : "s"} remaining` : ""}`}</span>{canManage && !pendingPayment && <div className="finance-actions">{data.paymentOptions.bank_transfer_available && <button className="secondary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><FileUp size={15} /> Pay by bank transfer</button>}<button className="primary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><Banknote size={15} /> Pay by cash</button></div>}</div>}
     {data.loading && <div className="table-state"><LoaderCircle className="spin" size={21} /><span>Loading protected billing records…</span></div>}
 
     <section className="saas-metrics">
@@ -429,7 +443,7 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
         <p>{plan.description}</p>
         <ul>{featureList(plan).map((feature) => <li key={feature}><Check size={15} />{feature}</li>)}</ul>
         <div className="saas-plan-methods"><small>Payment options</small><span>{methods.map(readable).join(" · ")}</span></div>
-        {canManage && !current && <div className="saas-plan-actions">
+        {canManage && (!current || paymentRequired) && <div className="saas-plan-actions">
           {!price && <button className="secondary-button" disabled>No {data.baseCurrency} price</button>}
           {price && methods.includes("bank_transfer") && <button className="secondary-button" disabled={!data.paymentOptions.bank_transfer_available || busy === `prepare-bank_transfer-${price.id}`} onClick={() => void prepareManualPayment(price.id, plan.name, "bank_transfer")}><FileUp size={15} /> {busy === `prepare-bank_transfer-${price.id}` ? "Preparing…" : data.paymentOptions.bank_transfer_available ? "Pay by bank transfer" : "Bank transfer · Not configured"}</button>}
           {price && methods.includes("cash") && <button className="secondary-button" disabled={busy === `prepare-cash-${price.id}`} onClick={() => void prepareManualPayment(price.id, plan.name, "cash")}><Banknote size={15} /> {busy === `prepare-cash-${price.id}` ? "Preparing…" : "Pay by cash"}</button>}

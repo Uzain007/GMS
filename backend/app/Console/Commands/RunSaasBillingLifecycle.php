@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 class RunSaasBillingLifecycle extends Command
 {
     protected $signature = 'ironcore:saas-billing';
-    protected $description = 'Generate due SaaS invoices and apply reminder/grace-period lifecycle rules';
+    protected $description = 'Process SaaS trials, invoices, reminders and billing restrictions';
 
     public function handle(AutomatedSaasBillingService $billing): int
     {

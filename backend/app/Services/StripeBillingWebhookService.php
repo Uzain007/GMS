@@ -214,10 +214,30 @@ class StripeBillingWebhookService
             $values['failure_message'] = null;
         }
 
-        $subscription = GymSubscription::query()->updateOrCreate(
-            ['provider_subscription_id' => $providerSubscriptionId],
-            $values,
-        );
+        $subscription = GymSubscription::query()
+            ->where('provider_subscription_id', $providerSubscriptionId)
+            ->lockForUpdate()
+            ->first();
+        if (! $subscription) {
+            // Card checkout adopts the initial tenant contract instead of
+            // creating a competing current row. The accepted price must match.
+            $subscription = GymSubscription::query()->current()
+                ->where('provider_subscription_id', GymSubscription::onboardingProviderId($gymId))
+                ->lockForUpdate()->first();
+            if ($subscription && $subscription->saas_plan_price_id !== $price->id) {
+                throw new RuntimeException('The Stripe subscription does not match the onboarding plan.');
+            }
+        }
+        if ($subscription) {
+            $subscription->fill($values);
+            $subscription->provider_subscription_id = $providerSubscriptionId;
+            $subscription->save();
+        } else {
+            $subscription = GymSubscription::query()->create([
+                'provider_subscription_id' => $providerSubscriptionId,
+                ...$values,
+            ]);
+        }
         $this->gymStatus->synchronize(
             $this->context->gym(),
             $status,
