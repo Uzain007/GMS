@@ -343,6 +343,8 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,member');
                 Route::post('/class-bookings/{booking}/attend', [ClassBookingController::class, 'attend'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer');
+                Route::post('/class-bookings/{booking}/no-show', [ClassBookingController::class, 'noShow'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer');
 
                 Route::get('/trainer-assignments', [TrainerAssignmentController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,trainer,member');

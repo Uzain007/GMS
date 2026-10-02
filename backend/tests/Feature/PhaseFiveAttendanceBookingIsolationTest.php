@@ -13,6 +13,7 @@ use App\Enums\PlanStatus;
 use App\Enums\UserRole;
 use App\Models\AttendanceRecord;
 use App\Models\ClassBooking;
+use App\Models\ClassSession;
 use App\Models\Gym;
 use App\Models\GymBranch;
 use App\Models\Member;
@@ -194,8 +195,221 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         $payload = ['branch_id' => $branch->id, 'credential' => $credential];
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", $payload, ['X-Gym-ID' => $gym->id])
             ->assertCreated()->assertJsonPath('data.method', 'qr');
+        app(TenantContext::class)->run($gym, function (): void {
+            $this->assertSame(1, AttendanceRecord::query()->where('method', AttendanceMethod::Qr->value)->count());
+        });
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", $payload, ['X-Gym-ID' => $gym->id])
             ->assertUnprocessable()->assertJsonValidationErrors('member');
+    }
+
+    public function test_authorized_front_desk_manual_check_in_creates_gym_attendance(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        [$member, $receptionist] = app(TenantContext::class)->run($gym, function () use ($gym, $branch): array {
+            $member = $this->memberWithMembership($branch, 'MBR-FRONT-DESK');
+            $receptionist = User::factory()->create();
+            $gym->users()->attach($receptionist, ['role' => UserRole::Receptionist->value, 'status' => 'active']);
+
+            return [$member, $receptionist];
+        });
+        $headers = ['X-Gym-ID' => $gym->id];
+
+        Sanctum::actingAs($owner);
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Front desk remains gym-only',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => false,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+
+        Sanctum::actingAs($receptionist);
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_id' => $member->id,
+        ], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.method', 'manual');
+
+        app(TenantContext::class)->run($gym, function () use ($receptionist, $booking, $session): void {
+            $attendance = AttendanceRecord::query()->sole();
+            $this->assertSame(AttendanceMethod::Manual, $attendance->method);
+            $this->assertSame($receptionist->id, $attendance->checked_in_by);
+            $this->assertSame(ClassBookingStatus::Booked, ClassBooking::query()->findOrFail($booking['id'])->status);
+            $this->assertSame(0, ClassSession::query()->findOrFail($session['id'])->attended_count);
+        });
+    }
+
+    public function test_class_present_and_absent_statuses_do_not_create_gym_attendance(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        [$present, $absent] = app(TenantContext::class)->run($gym, fn (): array => [
+            $this->memberWithMembership($branch, 'MBR-CLASS-PRESENT'),
+            $this->memberWithMembership($branch, 'MBR-CLASS-ABSENT'),
+        ]);
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Roster-only attendance',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 2,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+
+        $presentBooking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $present->id,
+        ], $headers)->assertSuccessful()->json('data');
+        $absentBooking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $absent->id,
+        ], $headers)->assertSuccessful()->json('data');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$presentBooking['id']}/attend", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'attended');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$presentBooking['id']}/attend", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'attended');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$absentBooking['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$absentBooking['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$presentBooking['id']}/no-show", [], $headers)
+            ->assertUnprocessable()->assertJsonValidationErrors('booking');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$absentBooking['id']}/attend", [], $headers)
+            ->assertUnprocessable()->assertJsonValidationErrors('booking');
+
+        app(TenantContext::class)->run($gym, function () use ($session): void {
+            $this->assertSame(0, AttendanceRecord::query()->count());
+            $this->assertSame(2, ClassBooking::query()->count());
+            $this->assertSame(1, ClassSession::query()->findOrFail($session['id'])->attended_count);
+        });
+        $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+
+        $classDay = now($gym->timezone)->addDay()->toDateString();
+        $this->getJson(
+            "/api/v1/gyms/{$gym->id}/reports/overview?from={$classDay}&to={$classDay}&currency=GBP",
+            $headers,
+        )->assertOk()
+            ->assertJsonPath('data.summary.attendance_visits', 0)
+            ->assertJsonPath('data.class_performance.attended', 1);
+    }
+
+    public function test_qr_gym_check_in_does_not_mark_class_booking_attended(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-QR-CLASS-SEPARATE'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'QR remains gym-only',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => false,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $credential = $this->postJson("/api/v1/gyms/{$gym->id}/members/{$member->id}/access-credential", [], $headers)
+            ->assertCreated()->json('data.credential');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'credential' => $credential,
+        ], $headers)->assertCreated()->assertJsonPath('data.method', 'qr');
+
+        app(TenantContext::class)->run($gym, function () use ($booking, $session): void {
+            $this->assertSame(1, AttendanceRecord::query()->where('method', AttendanceMethod::Qr->value)->count());
+            $this->assertSame(ClassBookingStatus::Booked, ClassBooking::query()->findOrFail($booking['id'])->status);
+            $this->assertSame(0, ClassSession::query()->findOrFail($session['id'])->attended_count);
+        });
+    }
+
+    public function test_member_code_gym_check_in_does_not_mark_class_booking_attended(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-CODE-CLASS-SEPARATE'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Member code remains gym-only',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => false,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $member->member_code,
+        ], $headers)->assertCreated()->assertJsonPath('data.method', 'member_code');
+
+        app(TenantContext::class)->run($gym, function () use ($booking, $session): void {
+            $this->assertSame(1, AttendanceRecord::query()->where('method', AttendanceMethod::MemberCode->value)->count());
+            $this->assertSame(ClassBookingStatus::Booked, ClassBooking::query()->findOrFail($booking['id'])->status);
+            $this->assertSame(0, ClassSession::query()->findOrFail($session['id'])->attended_count);
+        });
+    }
+
+    public function test_class_attendance_and_gym_check_in_remain_independent(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-CLASS-AND-GYM'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Independent class and gym attendance',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => false,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$booking['id']}/attend", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'attended');
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(0, AttendanceRecord::query()->count()));
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
+            'branch_id' => $branch->id,
+            'member_code' => $member->member_code,
+        ], $headers)->assertCreated()->assertJsonPath('data.method', 'member_code');
+
+        app(TenantContext::class)->run($gym, function () use ($booking, $session): void {
+            $this->assertSame(1, AttendanceRecord::query()->count());
+            $this->assertSame(ClassBookingStatus::Attended, ClassBooking::query()->findOrFail($booking['id'])->status);
+            $this->assertSame(1, ClassSession::query()->findOrFail($session['id'])->attended_count);
+        });
+        $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+
+        $from = now($gym->timezone)->toDateString();
+        $to = now($gym->timezone)->addDay()->toDateString();
+        $this->getJson(
+            "/api/v1/gyms/{$gym->id}/reports/overview?from={$from}&to={$to}&currency=GBP",
+            $headers,
+        )->assertOk()
+            ->assertJsonPath('data.summary.attendance_visits', 1)
+            ->assertJsonPath('data.class_performance.attended', 1);
     }
 
     public function test_replacing_a_secure_qr_invalidates_the_old_scanner_value_and_keeps_the_new_one_valid(): void

@@ -1101,6 +1101,11 @@ export class IronCoreApi {
     return (await this.request<ApiEnvelope<ClassBookingRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/class-bookings/${encodeURIComponent(bookingId)}/attend`, { method: "POST" }, gymId)).data;
   }
 
+  async noShowClassBooking(gymId: string, bookingId: string): Promise<ClassBookingRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<ClassBookingRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/class-bookings/${encodeURIComponent(bookingId)}/no-show`, { method: "POST" }, gymId)).data;
+  }
+
   async trainerAssignments(gymId: string): Promise<TrainerAssignmentRecord[]> {
     return (await this.request<CursorPage<TrainerAssignmentRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/trainer-assignments?per_page=100`, {}, gymId)).data;
   }

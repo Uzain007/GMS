@@ -3,7 +3,7 @@
 import QRCode from "qrcode";
 import {
   CalendarPlus, Camera, CheckCircle2, Clock3, DoorOpen, Dumbbell, Eye, ListOrdered,
-  LogOut, QrCode, RefreshCw, ShieldCheck, TicketCheck, UserCheck, UsersRound, X,
+  LogOut, QrCode, RefreshCw, ShieldCheck, TicketCheck, UserCheck, UserX, UsersRound, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { AttendanceRecord, ClassBookingRecord, ClassSessionRecord, IronCoreRole, NewClassSession, UpdateClassSession } from "./lib/ironcore-api";
@@ -33,6 +33,7 @@ export type EngagementData = {
   onBook: (sessionId: string, memberId?: string) => Promise<ClassBookingRecord>;
   onCancel: (bookingId: string, reason: string) => Promise<void>;
   onAttend: (bookingId: string) => Promise<void>;
+  onAbsent: (bookingId: string) => Promise<void>;
   onLoadRoster: (sessionId: string) => Promise<ClassBookingRecord[]>;
   onEnsureCredential: (memberId: string) => Promise<{ credential: string; memberCode: string }>;
   onRotateCredential: (memberId: string) => Promise<{ credential: string; memberCode: string }>;
@@ -292,7 +293,7 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
           <dl><div className="class-card-date"><Clock3 size={16} /><span>{safeSessionDateTime(session.starts_at, data.timezone)}</span></div><div className="class-card-booking"><UsersRound size={16} /><span>{capacity > 0 ? booked + "/" + capacity + " booked · " + waiting + " waiting" : "Capacity unavailable"}</span></div>{trainerName && <div className="class-card-trainer"><UserCheck size={16} /><span>{trainerName}</span></div>}</dl>
           <div className="capacity-track" aria-label={capacity > 0 ? booked + " of " + capacity + " places booked" : "Class capacity unavailable"}><i style={{ width: percent + "%" }} /></div>
           <div className="class-card-actions">{canBookOthers && status === "scheduled" && capacity > 0 && <button className="primary-button class-book-button" onClick={() => setBookingSession(session)}>Book a place</button>}{canViewRoster && <button className="secondary-button" onClick={() => void openRoster(session)}><UsersRound size={15} /> View roster</button>}{canManageClasses && <button className="secondary-button" onClick={() => setManagedSession(session)}><Eye size={15} /> Manage</button>}</div>
-          {roster.length > 0 && <div className="mini-roster"><strong>Recent roster records</strong>{roster.map((booking) => <div key={booking.id}><span>{booking.member?.name ?? "Member"}</span><span className={"status " + booking.status}>{booking.status}</span>{booking.status === "booked" && canMarkAttendance && <button aria-label="Mark attended" onClick={() => void act(() => data.onAttend(booking.id), "Class attendance recorded.")}><CheckCircle2 size={13} /></button>}{!data.readOnly && ["booked", "waitlisted"].includes(booking.status) && <button aria-label="Cancel booking" onClick={() => void act(() => data.onCancel(booking.id, "Cancelled by authorised workspace user"), "Booking cancelled; the next waitlisted member was promoted when applicable.")}><X size={13} /></button>}</div>)}</div>}
+          {roster.length > 0 && <div className="mini-roster"><strong>Recent roster records</strong>{roster.map((booking) => <div key={booking.id}><span>{booking.member?.name ?? "Member"}</span><span className={"status " + booking.status}>{booking.status.replaceAll("_", " ")}</span>{booking.status === "booked" && canMarkAttendance && <><button aria-label="Mark present" onClick={() => void act(() => data.onAttend(booking.id), "Class attendance recorded.")}><CheckCircle2 size={13} /></button><button aria-label="Mark absent" onClick={() => void act(() => data.onAbsent(booking.id), "Class absence recorded.")}><UserX size={13} /></button></>}{!data.readOnly && ["booked", "waitlisted"].includes(booking.status) && <button aria-label="Cancel booking" onClick={() => void act(() => data.onCancel(booking.id, "Cancelled by authorised workspace user"), "Booking cancelled; the next waitlisted member was promoted when applicable.")}><X size={13} /></button>}</div>)}</div>}
         </article>;
       })}</div>
       {(!Array.isArray(data.sessions) || data.sessions.length === 0) && <div className="panel table-state">No classes in this schedule window.</div>}
@@ -338,8 +339,8 @@ export function EngagementManagement({ data }: { data: EngagementData }) {
       <div className="class-roster-list">{rosterRows.map((booking) => {
         const bookingStatus = booking.status || "booked";
         const bookingStatusLabel = bookingStatus === "waitlisted" ? `Waitlist #${booking.waitlist_sequence ?? "—"}` : bookingStatus.replaceAll("_", " ");
-        const bookingHelp = bookingStatus === "waitlisted" ? "Waiting for a place" : bookingStatus === "attended" ? "Attendance recorded" : "Confirmed class booking";
-        return <article className="class-roster-row" key={booking.id}><div><strong>{booking.member?.name?.trim() || "Member"}</strong><small>{bookingHelp}</small></div><span className={`status ${bookingStatus}`}>{bookingStatusLabel}</span></article>;
+        const bookingHelp = bookingStatus === "waitlisted" ? "Waiting for a place" : bookingStatus === "attended" ? "Marked present for this class" : bookingStatus === "no_show" ? "Marked absent from this class" : "Confirmed class booking";
+        return <article className="class-roster-row" key={booking.id}><div><strong>{booking.member?.name?.trim() || "Member"}</strong><small>{bookingHelp}</small></div><div className="class-roster-side"><span className={`status ${bookingStatus}`}>{bookingStatusLabel}</span>{bookingStatus === "booked" && canMarkAttendance && <div className="class-roster-attendance-actions"><button className="secondary-button" disabled={busy} type="button" onClick={() => void act(async () => { await data.onAttend(booking.id); if (rosterSession) setRosterRows(await data.onLoadRoster(rosterSession.id)); }, "Class attendance recorded.")}><CheckCircle2 size={14} /> Present</button><button className="secondary-button" disabled={busy} type="button" onClick={() => void act(async () => { await data.onAbsent(booking.id); if (rosterSession) setRosterRows(await data.onLoadRoster(rosterSession.id)); }, "Class absence recorded.")}><UserX size={14} /> Absent</button></div>}</div></article>;
       })}</div>
       {!rosterRows.length && <div className="class-roster-empty"><UsersRound size={22} /><strong>No bookings yet</strong><span>Members will appear here after they book this class.</span></div>}
     </section>}</Modal>}

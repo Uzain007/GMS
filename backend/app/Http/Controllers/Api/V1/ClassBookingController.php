@@ -54,7 +54,7 @@ class ClassBookingController extends Controller
         return ClassBookingResource::collection(
             ClassBooking::query()->with(['member', 'session'])
                 ->where('class_session_id', $model->getKey())
-                ->orderByRaw("CASE status WHEN 'booked' THEN 0 WHEN 'attended' THEN 1 WHEN 'waitlisted' THEN 2 ELSE 3 END")
+                ->orderByRaw("CASE status WHEN 'booked' THEN 0 WHEN 'attended' THEN 1 WHEN 'no_show' THEN 2 WHEN 'waitlisted' THEN 3 ELSE 4 END")
                 ->orderBy('waitlist_sequence')->orderBy('booked_at')
                 ->paginate(min(max((int) $request->input('per_page', 100), 1), 100))
         );
@@ -89,5 +89,10 @@ class ClassBookingController extends Controller
     public function attend(Request $request, string $booking, ClassBookingService $service): ClassBookingResource
     {
         return new ClassBookingResource($service->attend($booking, $request->user(), $request));
+    }
+
+    public function noShow(Request $request, string $booking, ClassBookingService $service): ClassBookingResource
+    {
+        return new ClassBookingResource($service->noShow($booking, $request->user(), $request));
     }
 }

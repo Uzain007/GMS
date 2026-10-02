@@ -296,24 +296,6 @@ class AttendanceService
         }
     }
 
-    public function ensureClassPresence(Member $member, Membership $membership, string $branchId, User $actor): AttendanceRecord
-    {
-        $this->closeStaleOpenRecords($actor);
-        $existing = AttendanceRecord::query()
-            ->where('member_id', $member->getKey())
-            ->where('status', AttendanceStatus::CheckedIn->value)
-            ->lockForUpdate()->first();
-        if ($existing) {
-            if ($existing->branch_id !== $branchId) {
-                throw ValidationException::withMessages(['attendance' => ['The member is currently checked in at another branch.']]);
-            }
-
-            return $existing;
-        }
-
-        return $this->createPresence($member, $membership, $branchId, $actor, AttendanceMethod::Manual);
-    }
-
     public function closeStaleOpenRecords(?User $actor = null, ?Request $request = null): int
     {
         return DB::transaction(function () use ($actor, $request): int {

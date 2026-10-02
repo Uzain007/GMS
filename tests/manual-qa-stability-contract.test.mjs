@@ -129,3 +129,17 @@ test("class roster presents readable member and booking status rows", async () =
   assert.match(css, /\.class-roster-row strong\{[^}]*font-size:15px/);
   assert.match(css, /\.class-roster-row small\{[^}]*font-size:12px/);
 });
+
+test("class attendance remains separate from verified gym admission", async () => {
+  const routes = await read("backend/routes/api.php");
+  const bookings = await read("backend/app/Services/ClassBookingService.php");
+  const attendance = await read("backend/app/Services/AttendanceService.php");
+  const engagement = await read("app/engagement-management.tsx");
+
+  assert.match(routes, /class-bookings\/\{booking\}\/no-show/);
+  assert.doesNotMatch(bookings, /ensureClassPresence/);
+  assert.doesNotMatch(attendance, /function ensureClassPresence/);
+  assert.match(engagement, /aria-label="Mark present"/);
+  assert.match(engagement, /aria-label="Mark absent"/);
+  assert.match(engagement, /Marked absent from this class/);
+});

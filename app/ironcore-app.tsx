@@ -230,7 +230,7 @@ const demoEngagement: EngagementData = {
   onCheckIn: async () => undefined, onCheckOut: async () => undefined, onCreateSession: async () => undefined, onUpdateSession: async () => undefined,
   onBook: async (sessionId, memberId) => ({ id: "demo-booking-new", gym_id: "demo-gym", class_session_id: sessionId, member_id: memberId ?? "demo-1", membership_id: "demo-membership-1", status: sessionId === "class-1" ? "waitlisted" : "booked", waitlist_sequence: sessionId === "class-1" ? 9 : null, booked_at: new Date().toISOString(), promoted_at: null, cancelled_at: null, checked_in_at: null, cancellation_reason: null }),
   onLoadRoster: async (sessionId) => demoEngagement.bookings.filter((booking) => booking.class_session_id === sessionId),
-  onCancel: async () => undefined, onAttend: async () => undefined,
+  onCancel: async () => undefined, onAttend: async () => undefined, onAbsent: async () => undefined,
   onEnsureCredential: async (memberId) => ({ credential: "icqr_demo_7e11966a00e524d7921fe9c4a6572cd02d1ddf6ae72344967a0a522c4a72a103", memberCode: demoMembers.find((member) => member.id === memberId)?.memberCode ?? "104287" }),
   onRotateCredential: async (memberId) => ({ credential: "icqr_demo_replaced_7e11966a00e524d7921fe9c4a6572cd02d1ddf6ae72344967a0a522c4a72a103", memberCode: demoMembers.find((member) => member.id === memberId)?.memberCode ?? "104287" }),
 };
@@ -1380,6 +1380,7 @@ export function IronCoreApp() {
   async function loadClassRoster(sessionId: string): Promise<ClassBookingRecord[]> { if (!api || !selectedGym) throw new Error("Select a gym first."); return api.classSessionBookings(selectedGym.id, sessionId); }
   async function cancelBooking(bookingId: string, reason: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.cancelClassBooking(selectedGym.id, bookingId, reason); setEngagementRefresh((value) => value + 1); }
   async function attendBooking(bookingId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.attendClassBooking(selectedGym.id, bookingId); setEngagementRefresh((value) => value + 1); }
+  async function markBookingAbsent(bookingId: string): Promise<void> { if (!api || !selectedGym) throw new Error("Select a gym first."); await api.noShowClassBooking(selectedGym.id, bookingId); setEngagementRefresh((value) => value + 1); }
   async function ensureCredential(memberId: string): Promise<{ credential: string; memberCode: string }> {
     if (!api || !selectedGym) throw new Error("Select a gym first.");
     // Opening a normal member card reads the existing revocable credential.
@@ -1680,6 +1681,7 @@ export function IronCoreApp() {
     onLoadRoster: loadClassRoster,
     onCancel: cancelBooking,
     onAttend: attendBooking,
+    onAbsent: markBookingAbsent,
     onEnsureCredential: ensureCredential,
     onRotateCredential: rotateCredential,
   };

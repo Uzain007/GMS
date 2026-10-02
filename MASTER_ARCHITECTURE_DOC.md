@@ -735,6 +735,8 @@ A PostgreSQL partial unique index permits one open `checked_in` row per `(gym_id
 
 A PostgreSQL partial unique index allows only one active booking or waitlist entry for a member/session while retaining cancelled history. Booking, cancellation, counter updates and promotion of the earliest waitlisted record occur in one transaction while the session row is locked. A confirmed place remains consumed when its member is marked attended or absent; FIFO promotion occurs only when a confirmed booking is cancelled. The management waitlist drill-down consumes the existing tenant-protected session roster endpoint and renders member identity plus FIFO position without widening access.
 
+Class attendance is independent roster evidence: authorised staff may transition a confirmed booking to `attended` or `no_show`, but neither transition creates, reuses or changes an `attendance_records` gym-presence row. Gym admission remains fail-closed behind the dedicated check-in endpoint and its QR, member-code or authorised manual front-desk verification. Operational reports therefore count gym visits only from `attendance_records`, while class performance uses the separate class-session `attended_count`.
+
 ### `trainer_member_assignments` — explicit coaching access boundary
 
 | Column | Type | Null | Constraints / index |
@@ -995,7 +997,8 @@ All successful JSON payloads are versioned under `/api/v1`.
 | GET | `/gyms/{gym}/class-sessions/{session}/bookings` | tenant; owner/manager/receptionist/assigned trainer/super admin | List a bounded roster and FIFO waitlist for one tenant-resolved session |
 | POST | `/gyms/{gym}/class-sessions/{session}/bookings` | tenant; owner/manager/receptionist or linked member self | Book an eligible active member or place them on the FIFO waitlist under a row lock |
 | POST | `/gyms/{gym}/class-bookings/{booking}/cancel` | tenant; owner/manager/receptionist or linked member self | Cancel one booking and atomically promote the earliest waitlisted member |
-| POST | `/gyms/{gym}/class-bookings/{booking}/attend` | tenant; owner/manager/receptionist/assigned trainer/super admin | Mark a booked member attended and create/reuse their branch presence record |
+| POST | `/gyms/{gym}/class-bookings/{booking}/attend` | tenant; owner/manager/receptionist/assigned trainer/super admin | Mark a confirmed booking present for the class only; never create gym admission |
+| POST | `/gyms/{gym}/class-bookings/{booking}/no-show` | tenant; owner/manager/receptionist/assigned trainer/super admin | Mark a confirmed booking absent for the class only; never create gym admission |
 | GET/POST | `/gyms/{gym}/trainer-assignments` | tenant; owners/managers/super admin manage; trainer/member reads server-filtered | List or create the explicit trainer/member coaching boundary |
 | PATCH | `/gyms/{gym}/trainer-assignments/{assignment}/end` | tenant; owner/manager/super admin; mandatory reason | End access immediately while retaining immutable assignment history and audit evidence |
 | GET/POST | `/gyms/{gym}/workout-plans` | tenant; owner/manager or assigned trainer writes; member linked-self read | List bounded plans or create a member plan with ordered exercises transactionally |
@@ -1225,8 +1228,8 @@ member      = [self.read, self.update_limited, membership.self.read,
 | Platform SaaS subscription frontend/API integration | Implemented locally; validation in progress | Super-admin catalogue management plus owner/manager checkout, manual payment and billing-only recovery |
 | Milestone 4 — payments and platform SaaS billing | Feature-complete; provider sandbox gate pending | Core runtime, static contracts, production build and responsive browser QA pass; live Stripe execution remains gated |
 | Member QR credentials, Member Codes and branch attendance | Persistent secure-pass display correction implemented locally; approval pending | Separate tenant-unique six-digit lookup, server-reconstructable opaque/hash-only QR security, deterministic image rendering with retry/error states, explicit rotation that revokes old scanner values, camera scanning, active-membership/branch validation and one open presence row |
-| Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; core runtime passing | Row-locked counters, retained cancellation history, member self restrictions and assigned-trainer attendance |
-| Attendance and class-booking frontend/API integration | Implemented; core runtime passing | Check-in console, persistent authorised QR rendering, live presence, schedule, rosters, booking and waitlist actions; attendance columns use the responsive shared table contract |
+| Class sessions, capacity-safe bookings and FIFO waitlists | Implemented; local separation validation in progress | Row-locked counters, retained cancellation history, member self restrictions, assigned-trainer present/absent decisions and no implicit gym admission |
+| Attendance and class-booking frontend/API integration | Implemented; local separation validation in progress | Check-in console, persistent authorised QR rendering, live presence, schedule, rosters, booking and waitlist actions; class present/absent actions remain distinct from verified gym entry |
 | Milestone 5A — attendance, classes and bookings | Feature-complete; core runtime passing | Static contracts, production build, type-check, browser QA and GitHub-hosted runtime pass |
 | Trainer assignments and member workout plans | Implemented; core runtime passing | Explicit active-assignment boundary, ordered prescriptions, partial uniqueness and controlled plan lifecycle |
 | Append-only workout sessions and revision-preserving progress measurements | Implemented; core runtime passing | Exact integer load/measurement storage, active timelines, retained corrections/voids and member/trainer scope |
@@ -1278,6 +1281,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | IronCore Beta — automated billing and platform intelligence | Implemented locally; approval pending | Guarantees one Primary Branch for branch-limited gyms, automates manual SaaS renewal invoices and 15-day dunning/restriction, adds owner billing visibility, append-only payment corrections/refunds/voids, Super Admin billing/global-member/analytics workspaces, required bank-transfer dates and shared responsive typography/modal/table fixes. |
 | IronCore Beta — complete SaaS billing workflow | Implemented locally; approval pending | Keeps the existing ledger and lifecycle, isolates catalogue loading failures, adds platform bank configuration, invoice-before-evidence manual plan selection, idempotent review, individual invoice publication, central payment review filters/actions and login-session overdue warnings without making Stripe mandatory. |
 | IronCore Beta — SaaS financial control completion | Implemented locally; approval pending | Adds Super Admin-only mistaken-approval reversal distinct from refunds, audited unpaid invoice void-and-replace, safe Draft deletion/archive/reactivation, independent monthly/yearly pricing and consistent owner invoice payment/status UX. |
+| IronCore Beta — class attendance/gym admission separation | Implemented locally; validation in progress | Removes the implicit manual gym check-in from class attendance, adds an audited class-only no-show transition and keeps gym visit reporting sourced only from QR/member-code/authorised front-desk admission records. No schema migration or production data change is included. |
 
 ## Change control
 

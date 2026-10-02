@@ -210,20 +210,47 @@ class ClassBookingService
             $session = ClassSession::query()->lockForUpdate()->findOrFail($bookingKey->class_session_id);
             $booking = ClassBooking::query()->lockForUpdate()->findOrFail($bookingId);
             $this->assertAttendanceActor($session, $actor);
+            if ($booking->status === ClassBookingStatus::Attended) {
+                return $booking->fresh(['member', 'session']);
+            }
             if ($booking->status !== ClassBookingStatus::Booked) {
                 throw ValidationException::withMessages(['booking' => ['Only a confirmed booking can be marked attended.']]);
             }
 
-            $member = Member::query()->lockForUpdate()->findOrFail($booking->member_id);
-            $membership = $this->attendance->activeMembershipFor($member, $session->branch_id);
-            $this->attendance->ensureClassPresence($member, $membership, $session->branch_id, $actor);
+            // Class attendance is roster evidence, not proof of gym admission.
+            // QR/member-code/front-desk verification remains the only entry path.
             $booking->update(['status' => ClassBookingStatus::Attended, 'checked_in_at' => now()]);
             $session->attended_count++;
             $session->save();
 
             $this->audit->record('class_booking.attended', $booking, $actor, after: [
-                'class_session_id' => $session->getKey(), 'member_id' => $member->getKey(),
+                'class_session_id' => $session->getKey(), 'member_id' => $booking->member_id,
             ], request: $request);
+            return $booking->fresh(['member', 'session']);
+        });
+    }
+
+    public function noShow(string $bookingId, User $actor, Request $request): ClassBooking
+    {
+        return DB::transaction(function () use ($bookingId, $actor, $request): ClassBooking {
+            $bookingKey = ClassBooking::query()->findOrFail($bookingId);
+            $session = ClassSession::query()->lockForUpdate()->findOrFail($bookingKey->class_session_id);
+            $booking = ClassBooking::query()->lockForUpdate()->findOrFail($bookingId);
+            $this->assertAttendanceActor($session, $actor);
+            if ($booking->status === ClassBookingStatus::NoShow) {
+                return $booking->fresh(['member', 'session']);
+            }
+            if ($booking->status !== ClassBookingStatus::Booked) {
+                throw ValidationException::withMessages(['booking' => ['Only a confirmed booking can be marked absent.']]);
+            }
+
+            // A no-show is retained on the class roster and never creates or
+            // mutates a gym-access attendance record.
+            $booking->update(['status' => ClassBookingStatus::NoShow, 'checked_in_at' => null]);
+            $this->audit->record('class_booking.no_show', $booking, $actor, after: [
+                'class_session_id' => $session->getKey(), 'member_id' => $booking->member_id,
+            ], request: $request);
+
             return $booking->fresh(['member', 'session']);
         });
     }
