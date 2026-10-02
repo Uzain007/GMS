@@ -140,6 +140,9 @@ test("class attendance remains separate from verified gym admission", async () =
   assert.doesNotMatch(bookings, /ensureClassPresence/);
   assert.doesNotMatch(attendance, /function ensureClassPresence/);
   assert.match(engagement, /aria-label="Mark present"/);
-  assert.match(engagement, /aria-label="Mark absent"/);
+  assert.match(engagement, /Mark absent/);
+  assert.match(engagement, /hasClassStarted/);
+  assert.match(engagement, /disabled=\{busy \|\| !hasClassStarted\(rosterSession\.starts_at\)\}/);
+  assert.match(engagement, /Absent is available when the class starts\./);
   assert.match(engagement, /Marked absent from this class/);
 });

@@ -22,6 +22,7 @@ use App\Models\MembershipPlan;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -269,6 +270,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         $absentBooking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
             'member_id' => $absent->id,
         ], $headers)->assertSuccessful()->json('data');
+        $this->moveClassToStarted($gym, $session['id']);
 
         $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$presentBooking['id']}/attend", [], $headers)
             ->assertOk()->assertJsonPath('data.status', 'attended');
@@ -292,7 +294,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data');
 
-        $classDay = now($gym->timezone)->addDay()->toDateString();
+        $classDay = now($gym->timezone)->toDateString();
         $this->getJson(
             "/api/v1/gyms/{$gym->id}/reports/overview?from={$classDay}&to={$classDay}&currency=GBP",
             $headers,
@@ -620,6 +622,217 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         });
     }
 
+    public function test_no_show_is_rejected_before_the_class_starts(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-FUTURE-NO-SHOW'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'Future no-show guard',
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addDay()->addHour()->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$booking['id']}/no-show", [], $headers)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('booking');
+
+        app(TenantContext::class)->run($gym, function () use ($booking, $session): void {
+            $storedSession = ClassSession::query()->findOrFail($session['id']);
+            $this->assertSame(ClassBookingStatus::Booked, ClassBooking::query()->findOrFail($booking['id'])->status);
+            $this->assertSame(1, $storedSession->booked_count);
+            $this->assertSame(0, $storedSession->attended_count);
+            $this->assertSame(0, $storedSession->waitlist_count);
+        });
+    }
+
+    public function test_no_show_cannot_start_a_second_booked_lifecycle(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-NO-SHOW-REBOOK'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'No-show booked lifecycle guard',
+            'starts_at' => now()->addHour()->toIso8601String(),
+            'ends_at' => now()->addHours(2)->toIso8601String(),
+            'capacity' => 2,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $this->moveClassToStarted($gym, $session['id']);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$booking['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('member_id');
+
+        app(TenantContext::class)->run($gym, function () use ($session): void {
+            $storedSession = ClassSession::query()->findOrFail($session['id']);
+            $this->assertSame(1, ClassBooking::query()->count());
+            $this->assertSame(1, $storedSession->booked_count);
+            $this->assertSame(0, $storedSession->attended_count);
+            $this->assertSame(0, $storedSession->waitlist_count);
+        });
+    }
+
+    public function test_no_show_cannot_join_the_same_class_waitlist_again(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-NO-SHOW-REWAIT'));
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'No-show waitlist lifecycle guard',
+            'starts_at' => now()->addHour()->toIso8601String(),
+            'ends_at' => now()->addHours(2)->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $this->moveClassToStarted($gym, $session['id']);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$booking['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('member_id');
+
+        app(TenantContext::class)->run($gym, function () use ($session): void {
+            $storedSession = ClassSession::query()->findOrFail($session['id']);
+            $this->assertSame(1, ClassBooking::query()->count());
+            $this->assertSame(1, $storedSession->booked_count);
+            $this->assertSame(0, $storedSession->attended_count);
+            $this->assertSame(0, $storedSession->waitlist_count);
+        });
+    }
+
+    public function test_no_show_does_not_promote_the_fifo_waitlist(): void
+    {
+        [$owner, $gym, $branch] = $this->tenant();
+        [$confirmedMember, $waitingMember] = app(TenantContext::class)->run($gym, fn (): array => [
+            $this->memberWithMembership($branch, 'MBR-NO-SHOW-CONFIRMED'),
+            $this->memberWithMembership($branch, 'MBR-NO-SHOW-WAITING'),
+        ]);
+
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'No-show keeps FIFO position',
+            'starts_at' => now()->addHour()->toIso8601String(),
+            'ends_at' => now()->addHours(2)->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+        $confirmed = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $confirmedMember->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $waitlisted = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $waitingMember->id,
+        ], $headers)->assertJsonPath('data.status', 'waitlisted')->json('data');
+        $this->moveClassToStarted($gym, $session['id']);
+
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$confirmed['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+
+        app(TenantContext::class)->run($gym, function () use ($session, $waitlisted): void {
+            $storedSession = ClassSession::query()->findOrFail($session['id']);
+            $storedWaitlist = ClassBooking::query()->findOrFail($waitlisted['id']);
+            $this->assertSame(1, $storedSession->booked_count);
+            $this->assertSame(0, $storedSession->attended_count);
+            $this->assertSame(1, $storedSession->waitlist_count);
+            $this->assertSame(ClassBookingStatus::Waitlisted, $storedWaitlist->status);
+            $this->assertNull($storedWaitlist->promoted_at);
+        });
+    }
+
+    public function test_no_show_transition_remains_tenant_isolated(): void
+    {
+        [$firstOwner, $firstGym] = $this->tenant();
+        [$secondOwner, $secondGym, $secondBranch] = $this->tenant();
+        $member = app(TenantContext::class)->run($secondGym, fn () => $this->memberWithMembership($secondBranch, 'MBR-OTHER-NO-SHOW'));
+
+        Sanctum::actingAs($secondOwner);
+        $secondHeaders = ['X-Gym-ID' => $secondGym->id];
+        $session = $this->postJson("/api/v1/gyms/{$secondGym->id}/class-sessions", [
+            'branch_id' => $secondBranch->id,
+            'title' => 'Tenant-owned no-show',
+            'starts_at' => now()->addHour()->toIso8601String(),
+            'ends_at' => now()->addHours(2)->toIso8601String(),
+            'capacity' => 1,
+            'waitlist_enabled' => false,
+        ], $secondHeaders)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$secondGym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $secondHeaders)->assertJsonPath('data.status', 'booked')->json('data');
+        $this->moveClassToStarted($secondGym, $session['id']);
+
+        Sanctum::actingAs($firstOwner);
+        $this->postJson("/api/v1/gyms/{$firstGym->id}/class-bookings/{$booking['id']}/no-show", [], [
+            'X-Gym-ID' => $firstGym->id,
+        ])->assertNotFound();
+
+        app(TenantContext::class)->run($secondGym, fn () => $this->assertSame(
+            ClassBookingStatus::Booked,
+            ClassBooking::query()->findOrFail($booking['id'])->status,
+        ));
+    }
+
+    public function test_postgresql_unique_index_protects_no_show_booking_lifecycles(): void
+    {
+        if ($this->app['db']->connection()->getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('PostgreSQL partial-index enforcement is exercised on the PostgreSQL test gate.');
+        }
+
+        [$owner, $gym, $branch] = $this->tenant();
+        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-PG-NO-SHOW'));
+        Sanctum::actingAs($owner);
+        $headers = ['X-Gym-ID' => $gym->id];
+        $session = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions", [
+            'branch_id' => $branch->id,
+            'title' => 'PostgreSQL lifecycle guard',
+            'starts_at' => now()->addHour()->toIso8601String(),
+            'ends_at' => now()->addHours(2)->toIso8601String(),
+            'capacity' => 2,
+            'waitlist_enabled' => true,
+        ], $headers)->assertSuccessful()->json('data');
+        $booking = $this->postJson("/api/v1/gyms/{$gym->id}/class-sessions/{$session['id']}/bookings", [
+            'member_id' => $member->id,
+        ], $headers)->assertJsonPath('data.status', 'booked')->json('data');
+        $this->moveClassToStarted($gym, $session['id']);
+        $this->postJson("/api/v1/gyms/{$gym->id}/class-bookings/{$booking['id']}/no-show", [], $headers)
+            ->assertOk()->assertJsonPath('data.status', 'no_show');
+
+        $stored = app(TenantContext::class)->run($gym, fn () => ClassBooking::query()->findOrFail($booking['id']));
+        $this->expectException(QueryException::class);
+        app(TenantContext::class)->run($gym, fn () => ClassBooking::query()->create([
+            'class_session_id' => $stored->class_session_id,
+            'member_id' => $stored->member_id,
+            'membership_id' => $stored->membership_id,
+            'booked_by' => $owner->id,
+            'status' => ClassBookingStatus::Booked,
+            'booked_at' => now(),
+        ]));
+    }
+
     /** @return array{User, Gym, GymBranch} */
     private function tenant(): array
     {
@@ -633,6 +846,16 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         ]));
 
         return [$owner, $gym, $branch];
+    }
+
+    private function moveClassToStarted(Gym $gym, string $sessionId): void
+    {
+        app(TenantContext::class)->run($gym, fn () => ClassSession::query()
+            ->whereKey($sessionId)
+            ->update([
+                'starts_at' => now()->subMinute(),
+                'ends_at' => now()->addHour(),
+            ]));
     }
 
     private function memberWithMembership(GymBranch $branch, string $number): Member

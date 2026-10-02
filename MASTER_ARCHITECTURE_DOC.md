@@ -6,12 +6,12 @@
 
 | Field | Value |
 | --- | --- |
-| MAD version | 0.62.0 — universal SaaS trial expiry and billing-only recovery |
-| Last verified | 1 October 2026 |
+| MAD version | 0.62.1 — class no-show booking-lifecycle integrity |
+| Last verified | 2 October 2026 |
 | Product | IronCore |
 | Architecture | Laravel modular-monolith API + React/Next.js TypeScript web/PWA |
 | Active branch | `main` |
-| Active milestone | Universal SaaS trial expiry, idempotent owner notices and fail-closed billing-only recovery implemented locally; validation in progress |
+| Active milestone | Class no-show timing, capacity and one-lifecycle enforcement implemented locally; validation in progress |
 | Scale target | At least 1,000,000 member records and thousands of gym branches |
 | Supported currencies | GBP, USD, PKR, AED and SAR |
 
@@ -733,7 +733,7 @@ A PostgreSQL partial unique index permits one open `checked_in` row per `(gym_id
 | `cancellation_reason` | text | yes | mandatory for staff cancellation; bounded for member cancellation |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading session/status/FIFO, member/status/time indexes |
 
-A PostgreSQL partial unique index allows only one active booking or waitlist entry for a member/session while retaining cancelled history. Booking, cancellation, counter updates and promotion of the earliest waitlisted record occur in one transaction while the session row is locked. A confirmed place remains consumed when its member is marked attended or absent; FIFO promotion occurs only when a confirmed booking is cancelled. The management waitlist drill-down consumes the existing tenant-protected session roster endpoint and renders member identity plus FIFO position without widening access.
+A tenant-leading PostgreSQL partial unique index allows only one `booked`, `waitlisted`, `attended` or `no_show` lifecycle for a member/session while retaining cancelled history. Booking, cancellation, counter updates and promotion of the earliest waitlisted record occur in one transaction while the session row is locked. A no-show is valid only at or after the class start and repeated no-show requests are idempotent. The original confirmed place remains consumed when its member is marked attended or absent; FIFO promotion occurs only when a confirmed booking is cancelled. The management waitlist drill-down consumes the existing tenant-protected session roster endpoint and renders member identity plus FIFO position without widening access.
 
 Class attendance is independent roster evidence: authorised staff may transition a confirmed booking to `attended` or `no_show`, but neither transition creates, reuses or changes an `attendance_records` gym-presence row. Gym admission remains fail-closed behind the dedicated check-in endpoint and its QR, member-code or authorised manual front-desk verification. Operational reports therefore count gym visits only from `attendance_records`, while class performance uses the separate class-session `attended_count`.
 
@@ -998,7 +998,7 @@ All successful JSON payloads are versioned under `/api/v1`.
 | POST | `/gyms/{gym}/class-sessions/{session}/bookings` | tenant; owner/manager/receptionist or linked member self | Book an eligible active member or place them on the FIFO waitlist under a row lock |
 | POST | `/gyms/{gym}/class-bookings/{booking}/cancel` | tenant; owner/manager/receptionist or linked member self | Cancel one booking and atomically promote the earliest waitlisted member |
 | POST | `/gyms/{gym}/class-bookings/{booking}/attend` | tenant; owner/manager/receptionist/assigned trainer/super admin | Mark a confirmed booking present for the class only; never create gym admission |
-| POST | `/gyms/{gym}/class-bookings/{booking}/no-show` | tenant; owner/manager/receptionist/assigned trainer/super admin | Mark a confirmed booking absent for the class only; never create gym admission |
+| POST | `/gyms/{gym}/class-bookings/{booking}/no-show` | tenant; owner/manager/receptionist/assigned trainer/super admin | At/after class start, idempotently mark a confirmed booking absent without releasing capacity, promoting FIFO or creating gym admission |
 | GET/POST | `/gyms/{gym}/trainer-assignments` | tenant; owners/managers/super admin manage; trainer/member reads server-filtered | List or create the explicit trainer/member coaching boundary |
 | PATCH | `/gyms/{gym}/trainer-assignments/{assignment}/end` | tenant; owner/manager/super admin; mandatory reason | End access immediately while retaining immutable assignment history and audit evidence |
 | GET/POST | `/gyms/{gym}/workout-plans` | tenant; owner/manager or assigned trainer writes; member linked-self read | List bounded plans or create a member plan with ordered exercises transactionally |

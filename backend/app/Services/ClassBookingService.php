@@ -125,9 +125,14 @@ class ClassBookingService
 
             if (ClassBooking::query()->where('class_session_id', $session->getKey())
                 ->where('member_id', $member->getKey())
-                ->whereIn('status', [ClassBookingStatus::Booked->value, ClassBookingStatus::Waitlisted->value, ClassBookingStatus::Attended->value])
+                ->whereIn('status', [
+                    ClassBookingStatus::Booked->value,
+                    ClassBookingStatus::Waitlisted->value,
+                    ClassBookingStatus::Attended->value,
+                    ClassBookingStatus::NoShow->value,
+                ])
                 ->lockForUpdate()->exists()) {
-                throw ValidationException::withMessages(['member_id' => ['This member already has an active booking for the class.']]);
+                throw ValidationException::withMessages(['member_id' => ['This member already has a booking for the class.']]);
             }
 
             $waitlistSequence = null;
@@ -239,6 +244,9 @@ class ClassBookingService
             $this->assertAttendanceActor($session, $actor);
             if ($booking->status === ClassBookingStatus::NoShow) {
                 return $booking->fresh(['member', 'session']);
+            }
+            if ($session->starts_at->isFuture()) {
+                throw ValidationException::withMessages(['booking' => ['A class booking cannot be marked absent before the class starts.']]);
             }
             if ($booking->status !== ClassBookingStatus::Booked) {
                 throw ValidationException::withMessages(['booking' => ['Only a confirmed booking can be marked absent.']]);

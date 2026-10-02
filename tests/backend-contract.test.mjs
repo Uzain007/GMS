@@ -249,6 +249,7 @@ test("SaaS Billing webhooks verify, resolve one customer, hash payloads and snap
 
 test("attendance and class tables preserve tenant integrity, scale indexes and forced RLS", async () => {
   const schema = await read("database/migrations/2026_08_07_000013_create_attendance_and_class_tables.php");
+  const noShowLifecycle = await read("database/migrations/2026_10_02_000044_protect_no_show_class_booking_lifecycle.php");
   const rls = await read("database/migrations/2026_08_07_000014_enable_attendance_and_class_rls.php");
 
   for (const table of ["member_access_credentials", "attendance_records", "class_sessions", "class_bookings"]) {
@@ -260,6 +261,10 @@ test("attendance and class tables preserve tenant integrity, scale indexes and f
   assert.match(schema, /foreign\(\['gym_id', 'class_session_id'\]\)/);
   assert.match(schema, /attendance_records_one_open_unique/);
   assert.match(schema, /class_bookings_one_active_unique/);
+  assert.match(noShowLifecycle, /class_bookings_one_active_unique/);
+  assert.match(noShowLifecycle, /WHERE status IN \('booked', 'waitlisted', 'attended', 'no_show'\)/);
+  assert.match(noShowLifecycle, /GROUP BY gym_id, class_session_id, member_id/);
+  assert.match(noShowLifecycle, /HAVING COUNT\(\*\) > 1/);
   assert.match(schema, /member_access_credentials_one_active_unique/);
   assert.match(rls, /FORCE ROW LEVEL SECURITY/);
   assert.match(rls, /WITH CHECK/);
@@ -280,6 +285,9 @@ test("check-ins hash QR secrets and class bookings lock capacity with FIFO promo
   assert.match(bookings, /ClassSession::query\(\)->lockForUpdate\(\)/);
   assert.match(bookings, /next_waitlist_sequence\+\+/);
   assert.match(bookings, /orderBy\('waitlist_sequence'\)->lockForUpdate\(\)/);
+  assert.match(bookings, /ClassBookingStatus::NoShow->value/);
+  assert.match(bookings, /\$session->starts_at->isFuture\(\)/);
+  assert.match(bookings, /cannot be marked absent before the class starts/);
   assert.match(bookings, /Members may book only for themselves/);
   assert.match(bookings, /Trainers may access only their assigned class roster/);
   assert.match(routes, /attendance\/check-ins/);
