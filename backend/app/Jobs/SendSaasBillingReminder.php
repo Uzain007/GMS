@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\SaasSubscriptionStatus;
+use App\Exceptions\SaasBillingReminderDeliveryException;
 use App\Models\Gym;
 use App\Models\GymSubscription;
 use App\Models\SaasBillingNotification;
@@ -11,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
@@ -60,9 +62,16 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
                 Mail::raw($body, fn ($message) => $message->to($notification->destination)
                     ->subject($subject));
                 $notification->update(['status' => 'sent', 'sent_at' => now()]);
-            } catch (Throwable $exception) {
+            } catch (Throwable) {
                 $notification->update(['status' => 'failed', 'failure_code' => 'mail_delivery_failed']);
-                throw $exception;
+                // Provider exceptions may contain recipients, response bodies or
+                // transport details. Log and persist stable categories only.
+                Log::warning('SaaS billing reminder delivery failed.', [
+                    'gym_id' => $gym->getKey(),
+                    'notification_id' => $notification->getKey(),
+                    'failure_code' => 'mail_delivery_failed',
+                ]);
+                throw SaasBillingReminderDeliveryException::rejected();
             }
         });
     }

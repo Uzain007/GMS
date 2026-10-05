@@ -14,9 +14,12 @@ class RunSaasBillingLifecycle extends Command
     {
         $result = $billing->runAll();
         $this->info(sprintf(
-            'Processed %d gyms; created %d invoices; queued %d reminders; restricted %d subscriptions.',
-            $result['gyms'], $result['invoices_created'], $result['reminders_queued'], $result['restricted'],
+            'Processed %d gyms; created %d invoices; queued %d reminders; restricted %d subscriptions; %d tenants failed.',
+            $result['gyms'], $result['invoices_created'], $result['reminders_queued'], $result['restricted'], $result['failed'],
         ));
-        return self::SUCCESS;
+
+        // Every remaining tenant has already been processed. A non-zero exit
+        // keeps partial failures visible to scheduler monitoring and alerting.
+        return $result['failed'] === 0 ? self::SUCCESS : self::FAILURE;
     }
 }

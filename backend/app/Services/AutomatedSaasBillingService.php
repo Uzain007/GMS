@@ -15,7 +15,9 @@ use App\Models\SaasBillingNotification;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class AutomatedSaasBillingService
 {
@@ -27,16 +29,27 @@ class AutomatedSaasBillingService
         private readonly GymSaasStatusService $gymStatus,
     ) {}
 
-    /** @return array{gyms:int,invoices_created:int,reminders_queued:int,restricted:int} */
+    /** @return array{gyms:int,invoices_created:int,reminders_queued:int,restricted:int,failed:int} */
     public function runAll(): array
     {
-        $totals = ['gyms' => 0, 'invoices_created' => 0, 'reminders_queued' => 0, 'restricted' => 0];
+        $totals = ['gyms' => 0, 'invoices_created' => 0, 'reminders_queued' => 0, 'restricted' => 0, 'failed' => 0];
         Gym::query()->where('status', '!=', GymStatus::Cancelled->value)->orderBy('id')
             ->each(function (Gym $gym) use (&$totals): void {
-                $result = $this->tenant->run($gym, fn (): array => $this->processTenant($gym));
                 $totals['gyms']++;
-                foreach (['invoices_created', 'reminders_queued', 'restricted'] as $key) {
-                    $totals[$key] += $result[$key];
+
+                try {
+                    // One tenant failure must not block later billing boundaries;
+                    // TenantContext still clears the database RLS state in finally.
+                    $result = $this->tenant->run($gym, fn (): array => $this->processTenant($gym));
+                    foreach (['invoices_created', 'reminders_queued', 'restricted'] as $key) {
+                        $totals[$key] += $result[$key];
+                    }
+                } catch (Throwable) {
+                    $totals['failed']++;
+                    Log::error('SaaS billing tenant processing failed.', [
+                        'gym_id' => $gym->getKey(),
+                        'failure_code' => 'tenant_processing_failed',
+                    ]);
                 }
             });
         return $totals;
