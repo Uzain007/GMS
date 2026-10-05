@@ -61,6 +61,11 @@ class AutomatedSaasBillingService
             if (! $subscription) {
                 return;
             }
+            // Paused contracts do not accrue IronCore-generated invoices,
+            // reminders or grace penalties until the provider resumes them.
+            if ($subscription->status === SaasSubscriptionStatus::Paused) {
+                return;
+            }
 
             $nextBilling = $subscription->next_billing_at
                 ?? $subscription->current_period_end

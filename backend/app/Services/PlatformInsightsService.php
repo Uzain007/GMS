@@ -28,7 +28,7 @@ class PlatformInsightsService
 
         foreach ($gyms as $gym) {
             $this->tenant->run($gym, function () use ($gym, $filters, $subscriptions, $invoices, $payments): void {
-                $subscription = GymSubscription::query()->latest()->first();
+                $subscription = GymSubscription::query()->current()->latest()->first();
                 $search = mb_strtolower(trim((string) ($filters['search'] ?? '')));
                 $gymMatches = $search === '' || str_contains(mb_strtolower($gym->name), $search);
                 $subscriptionMatches = $subscription
@@ -280,7 +280,7 @@ class PlatformInsightsService
                     $planRow[$invoice->currency->value] = ($planRow[$invoice->currency->value] ?? 0) + $invoice->amount_paid_minor;
                     $revenueByPlan->put($plan, $planRow);
                 });
-                $subscription = GymSubscription::query()->latest()->first();
+                $subscription = GymSubscription::query()->current()->latest()->first();
                 if ($subscription) {
                     $planDistribution[$subscription->plan_name_snapshot] = ($planDistribution[$subscription->plan_name_snapshot] ?? 0) + 1;
                 }

@@ -20,6 +20,11 @@ class StoreGymRequest extends FormRequest
                 'email' => mb_strtolower(trim((string) $this->input('owner.email'))),
             ])]);
         }
+        if (is_string($this->input('subscription.billing_email'))) {
+            $this->merge(['subscription' => array_merge((array) $this->input('subscription', []), [
+                'billing_email' => mb_strtolower(trim((string) $this->input('subscription.billing_email'))),
+            ])]);
+        }
     }
 
     public function authorize(): bool
@@ -33,12 +38,16 @@ class StoreGymRequest extends FormRequest
         $temporary = fn (): bool => $createsOwner() && $this->input('owner.setup_method') === 'temporary_password';
 
         return [
+            'idempotency_key' => ['required', 'string', 'min:16', 'max:120'],
             'name' => ['required', 'string', 'max:160'],
             'legal_name' => ['nullable', 'string', 'max:200'],
             'slug' => ['nullable', 'alpha_dash:ascii', 'max:100', 'unique:gyms,slug'],
             'base_currency' => ['required', Rule::enum(Currency::class)],
             'country_code' => ['required', 'string', Rule::in(IsoCountryCodes::ALL)],
             'timezone' => ['required', 'timezone'],
+            'subscription.saas_plan_price_id' => ['required', 'uuid', 'exists:saas_plan_prices,id'],
+            'subscription.billing_email' => ['required', 'email:rfc', 'max:254'],
+            'subscription.grace_period_days' => ['required', 'integer', 'min:0', 'max:90'],
             'owner.create_login_account' => ['required', 'boolean'],
             'owner.name' => [Rule::requiredIf($createsOwner), 'nullable', 'string', 'max:160'],
             'owner.email' => [Rule::requiredIf($createsOwner), 'nullable', 'email:rfc', 'max:254'],

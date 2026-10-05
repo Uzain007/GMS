@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Enums\Currency;
 use App\Models\Gym;
+use App\Models\SaasPlan;
+use App\Models\SaasPlanPrice;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -18,13 +21,16 @@ class GymLocationValidationTest extends TestCase
     {
         $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
         Sanctum::actingAs($admin);
+        $price = $this->onboardingPrice(Currency::PKR);
 
         $created = $this->postJson('/api/v1/gyms', [
+            'idempotency_key' => 'location-create-pkr-0001',
             'name' => 'Karachi Strength Club',
             'legal_name' => 'Karachi Strength Club Limited',
             'base_currency' => 'PKR',
             'country_code' => 'pk',
             'timezone' => 'Asia/Karachi',
+            'subscription' => ['saas_plan_price_id' => $price->id, 'billing_email' => 'billing@example.test', 'grace_period_days' => 15],
             'owner' => [
                 'create_login_account' => false,
             ],
@@ -54,12 +60,15 @@ class GymLocationValidationTest extends TestCase
     {
         $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
         Sanctum::actingAs($admin);
+        $price = $this->onboardingPrice(Currency::GBP);
 
         $this->postJson('/api/v1/gyms', [
+            'idempotency_key' => 'location-invalid-country-0001',
             'name' => 'Invalid Location Gym',
             'base_currency' => 'GBP',
             'country_code' => 'XX',
             'timezone' => 'GMT +5',
+            'subscription' => ['saas_plan_price_id' => $price->id, 'billing_email' => 'billing@example.test', 'grace_period_days' => 15],
             'owner' => [
                 'create_login_account' => false,
             ],
@@ -67,10 +76,12 @@ class GymLocationValidationTest extends TestCase
             ->assertJsonValidationErrors(['country_code', 'timezone']);
 
         $created = $this->postJson('/api/v1/gyms', [
+            'idempotency_key' => 'location-create-gb-0001',
             'name' => 'Valid Location Gym',
             'base_currency' => 'GBP',
             'country_code' => 'GB',
             'timezone' => 'Europe/London',
+            'subscription' => ['saas_plan_price_id' => $price->id, 'billing_email' => 'billing@example.test', 'grace_period_days' => 15],
             'owner' => [
                 'create_login_account' => false,
             ],
@@ -131,5 +142,25 @@ class GymLocationValidationTest extends TestCase
                 'timezone' => 'Asia/Dubai',
             ]);
         });
+    }
+
+    private function onboardingPrice(Currency $currency): SaasPlanPrice
+    {
+        $plan = SaasPlan::query()->create([
+            'code' => 'location-onboarding-'.str()->lower(str()->random(8)),
+            'name' => 'Location Onboarding',
+            'status' => 'active',
+            'feature_limits' => ['members' => 500, 'branches' => 1, 'staff' => 8],
+            'payment_methods' => ['cash'],
+        ]);
+
+        return SaasPlanPrice::query()->create([
+            'saas_plan_id' => $plan->id,
+            'currency' => $currency,
+            'billing_interval' => 'monthly',
+            'amount_minor' => 3900,
+            'trial_days' => 14,
+            'active' => true,
+        ]);
     }
 }

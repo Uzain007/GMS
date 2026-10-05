@@ -20,6 +20,13 @@ import { PlatformAnalytics, PlatformBillingDashboard, PlatformMemberDirectory, t
 
 type PlatformView = "overview" | "gyms" | "members" | "plans" | "billing" | "analytics" | "audit" | "settings";
 
+function onboardingRequestKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 export type PlatformPortalData = {
   user: AuthenticatedUser;
   gyms: GymSummary[];
@@ -87,7 +94,7 @@ function ModalShell({ title, eyebrow, onClose, children }: {
   </div>;
 }
 
-function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; onCreate: PlatformPortalData["onCreateGym"]; onOpen: (gym: GymSummary) => void }) {
+function CreateGymModal({ plans, onClose, onCreate, onOpen }: { plans: SaasPlanRecord[]; onClose: () => void; onCreate: PlatformPortalData["onCreateGym"]; onOpen: (gym: GymSummary) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [countryCode, setCountryCode] = useState("GB");
@@ -98,6 +105,18 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
   const [createdTemporaryPassword, setCreatedTemporaryPassword] = useState<string | null>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [baseCurrency, setBaseCurrency] = useState<GymSummary["base_currency"]>("GBP");
+  const [selectedPriceId, setSelectedPriceId] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [billingEmail, setBillingEmail] = useState("");
+  const [billingEmailEdited, setBillingEmailEdited] = useState(false);
+  const [idempotencyKey] = useState(onboardingRequestKey);
+  const availablePrices = useMemo(() => plans.flatMap((plan) => plan.prices
+    .filter((price) => plan.status === "active" && price.active && price.currency === baseCurrency)
+    .map((price) => ({ ...price, planName: plan.name }))), [baseCurrency, plans]);
+  const effectivePriceId = availablePrices.some((price) => price.id === selectedPriceId)
+    ? selectedPriceId
+    : availablePrices[0]?.id ?? "";
 
   function changeCountry(nextCountryCode: string) {
     setCountryCode(nextCountryCode);
@@ -111,11 +130,17 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
     try {
       const temporaryPassword = createOwner && setupMethod === "temporary_password" ? String(form.get("temporary_password")) : undefined;
       const result = await onCreate({
+        idempotency_key: idempotencyKey,
         name: String(form.get("name")),
         legal_name: String(form.get("legal_name")) || undefined,
         base_currency: String(form.get("base_currency")) as GymSummary["base_currency"],
         country_code: String(form.get("country_code")).toUpperCase(),
         timezone: String(form.get("timezone")),
+        subscription: {
+          saas_plan_price_id: String(form.get("saas_plan_price_id")),
+          billing_email: String(form.get("billing_email")),
+          grace_period_days: Number(form.get("grace_period_days")),
+        },
         owner: {
           create_login_account: createOwner,
           name: createOwner ? String(form.get("owner_name")) : undefined,
@@ -159,11 +184,15 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
     </div> :
     <form onSubmit={submit}>{error && <div className="form-error" role="alert">{error}</div>}
       <div className="field-pair"><label>Gym name<input name="name" maxLength={160} required autoFocus /></label><label>Legal name<input name="legal_name" maxLength={200} /></label></div>
-      <div className="field-trio"><label>Currency<select name="base_currency" defaultValue="GBP">{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
+      <div className="field-trio"><label>Currency<select name="base_currency" value={baseCurrency} onChange={(event) => setBaseCurrency(event.target.value as GymSummary["base_currency"])}>{currencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label><SearchableSelect label="Country & calling code" name="country_code" options={countryOptions} value={countryCode} onChange={changeCountry} placeholder="Search country or calling code" /><SearchableSelect label="Timezone" name="timezone" options={timezoneOptions} value={timezone} onChange={setTimezone} placeholder="Search IANA timezone" /></div>
+      <fieldset className="owner-account-fields"><legend>Initial SaaS subscription</legend>
+        <label>Plan and billing cycle<select name="saas_plan_price_id" value={effectivePriceId} onChange={(event) => setSelectedPriceId(event.target.value)} required><option value="" disabled>{availablePrices.length > 0 ? "Select a plan" : `No active ${baseCurrency} prices`}</option>{availablePrices.map((price) => <option key={price.id} value={price.id}>{price.planName} · {readable(price.billing_interval)} · {money(price.amount_minor, price.currency)}{price.trial_days > 0 ? ` · ${price.trial_days}-day trial` : ""}</option>)}</select></label>
+        <div className="field-pair"><label>Billing contact email<input name="billing_email" type="email" maxLength={254} value={billingEmail} onChange={(event) => { setBillingEmailEdited(true); setBillingEmail(event.target.value); }} required /></label><label>Grace period days<input name="grace_period_days" type="number" min="0" max="90" defaultValue="15" required /></label></div>
+      </fieldset>
       <fieldset className="owner-account-fields"><legend>Gym Owner Account</legend>
         <label className="owner-toggle"><input type="checkbox" checked={createOwner} onChange={(event) => setCreateOwner(event.target.checked)} /> Create login account</label>
         {createOwner && <>
-          <div className="field-pair"><label>Owner full name<input name="owner_name" maxLength={160} required /></label><label>Owner email<input name="owner_email" type="email" maxLength={254} autoComplete="off" required /></label></div>
+          <div className="field-pair"><label>Owner full name<input name="owner_name" maxLength={160} required /></label><label>Owner email<input name="owner_email" type="email" maxLength={254} autoComplete="off" value={ownerEmail} onChange={(event) => { const next = event.target.value; setOwnerEmail(next); if (!billingEmailEdited) setBillingEmail(next); }} required /></label></div>
           <label>Owner phone<input name="owner_phone" type="tel" maxLength={40} required placeholder="+44 7700 900000" /></label>
           <div className="owner-setup-options" role="radiogroup" aria-label="Owner account setup method">
             <label><input type="radio" name="setup_method" value="invite" checked={setupMethod === "invite"} onChange={() => setSetupMethod("invite")} /><span><Mail size={17} /><strong>Send secure invite</strong><small>Email a one-time password setup link.</small></span></label>
@@ -174,7 +203,7 @@ function CreateGymModal({ onClose, onCreate, onOpen }: { onClose: () => void; on
         </>}
       </fieldset>
       <div className="modal-note"><ShieldCheck size={17} />Passwords are hashed by Laravel. Super Admin can manage access but can never view or impersonate the owner&apos;s saved password.</div>
-      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={16} /> Creating…</> : <>Create gym <ArrowRight size={16} /></>}</button></div>
+      <div className="modal-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={busy || availablePrices.length === 0}>{busy ? <><LoaderCircle className="spin" size={16} /> Creating…</> : <>Create gym <ArrowRight size={16} /></>}</button></div>
     </form>}
   </ModalShell>;
 }
@@ -534,7 +563,7 @@ export function PlatformPortal({ data }: { data: PlatformPortalData }) {
         {view === "settings" && <><section className="module-heading"><div><p className="eyebrow">Platform settings</p><h2>Settings</h2><p>Tenant currencies and timezones are managed per gym; account security stays platform-wide.</p></div></section><section className="platform-settings-grid"><article className="panel"><CircleDollarSign size={21} /><h3>Tenant currency settings</h3><p>Each gym keeps its own current base currency. Changing Gym A never changes Gym B or any historical transaction snapshot.</p><div className="platform-settings-list">{data.gyms.map((gym) => <button key={gym.id} onClick={() => setSelectedGym(gym)}><span><strong>{gym.name}</strong><small>{gym.timezone}</small></span><b>{gym.base_currency}</b><Pencil size={14} /></button>)}</div></article><article className="panel"><ShieldCheck size={21} /><h3>Account security</h3><p>Manage your password, authenticator and recovery codes separately from tenant business settings.</p><button className="secondary-button" onClick={() => setSecurityOpen(true)}>Open account security</button></article><article className="panel"><Power size={21} /><h3>Provider status</h3><p>Stripe remains optional. Cash and bank transfer continue independently; credentials stay in deployment configuration, never this browser.</p></article></section></>}
       </main>
     </section>
-    {gymModal && <CreateGymModal onClose={() => setGymModal(false)} onCreate={data.onCreateGym} onOpen={data.onOpenGym} />}
+    {gymModal && <CreateGymModal plans={data.plans} onClose={() => setGymModal(false)} onCreate={data.onCreateGym} onOpen={data.onOpenGym} />}
     {planModal && <CreatePlanModal onClose={() => setPlanModal(false)} onCreate={data.onCreatePlan} />}
     {selectedGym && <GymManagementModal gym={selectedGym} onClose={() => setSelectedGym(null)} onOpen={() => data.onOpenGym(selectedGym)} onUpdate={data.onUpdateGym} onDelete={data.onDeleteGym} onLoadOwner={data.onLoadGymOwner} onCreateOwner={data.onCreateGymOwner} onUpdateOwner={data.onUpdateGymOwner} onSendReset={data.onSendGymOwnerReset} onGenerateTemporary={data.onGenerateGymOwnerTemporaryPassword} />}
     {selectedPlan && <PlanManagementModal plan={selectedPlan} onClose={() => setSelectedPlan(null)} onUpdate={data.onUpdatePlan} onDelete={data.onDeletePlan} />}

@@ -34,7 +34,8 @@ class EnforceTenantBillingAccess
             && $trialEndsAt?->isPast() === true;
         $legacyPastDue = $subscription === null && $gym->status === GymStatus::PastDue;
         $restricted = $trialExpired || $legacyPastDue || ($subscription !== null
-            && $subscription->billing_restricted_at !== null && ! $overrideActive);
+            && ($subscription->status === SaasSubscriptionStatus::Paused
+                || ($subscription->billing_restricted_at !== null && ! $overrideActive)));
         if (! $restricted) {
             return $next($request);
         }

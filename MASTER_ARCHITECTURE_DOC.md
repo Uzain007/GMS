@@ -123,6 +123,8 @@ All identifiers are UUIDs unless explicitly stated. Timestamps are timezone-awar
 | `timezone` | varchar(80) | no | default `Europe/London` |
 | `status` | varchar(30) | no | index; `trial`, `active`, `past_due`, `suspended`, `cancelled` |
 | `trial_ends_at` | timestamp | yes | index |
+| `onboarding_idempotency_key` | varchar(120) | yes | unique platform retry identity; hidden from API serialization |
+| `onboarding_request_hash` | char(64) | yes | keyed request fingerprint; hidden from API serialization |
 | `settings` | jsonb | yes | non-relational tenant preferences only |
 | `created_at`, `updated_at` | timestamp | yes | composite index `(status, created_at)` |
 
@@ -560,7 +562,9 @@ Only Stripe customer identifiers support the signature-verified global SELECT po
 | `latest_invoice_id`, failure fields | varchar/text | yes | bounded dunning state; no card data |
 | `created_at`, `updated_at` | timestamp | yes | tenant-leading status/period indexes and one non-terminal subscription per gym |
 
-Stripe subscriptions are activated only by signed provider events. Cash and bank-transfer subscriptions are activated only after a `super_admin` approves a pending tenant payment; the accepted plan, price, features, period and method remain snapshotted in the platform billing ledger.
+Gym onboarding requires an explicit active price in the gym base currency, billing contact and grace period. One client-generated retry key plus a keyed request fingerprint makes repeated `POST /gyms` calls replay the original result while rejecting key reuse with different details. The same tenant transaction creates the gym, primary branch, optional owner, manual billing customer and one Trialing/Incomplete subscription with immutable plan, price, feature, currency and interval snapshots; any downstream failure rolls the entire onboarding attempt back. A later card checkout may adopt that exact onboarding row only for the same accepted price; signed Stripe events remain the authority for Stripe activation. Cash and bank-transfer subscriptions are activated only after a `super_admin` approves a pending tenant payment.
+
+All operational reads select only the newest non-terminal subscription. Newer Cancelled or Incomplete Expired history can never hide a current contract. Paused contracts generate no IronCore renewal invoices, reminders or new grace penalties; they place the gym in recoverable Past Due access, block ordinary operations and preserve owner/manager billing access so provider resumption can reactivate the same tenant. Suspended remains an explicit platform intervention.
 
 ### `saas_subscription_payments` — tenant platform cash/bank evidence
 
@@ -1141,7 +1145,9 @@ member      = [self.read, self.update_limited, membership.self.read,
 - Stripe Connect uses direct charges on each gym's connected account; IronCore SaaS subscription billing remains commercially separate from member funds.
 - IronCore SaaS subscriptions use Customers, recurring Prices, Checkout and the customer portal on the platform Stripe account; connected-account headers are never used for this money flow.
 - Each accepted SaaS contract snapshots tier, features, amount, currency and interval. Provider webhooks, not checkout redirects, authorize active/trial access and dunning transitions.
+- Super Admin gym onboarding selects an active matching-currency SaaS price, billing contact and grace period in the same transaction as tenant creation. A unique retry key prevents duplicate gyms, customers and subscriptions; the resulting onboarding contract is tenant-scoped, audited and safely adoptable by manual or Stripe payment after plan selection without creating a competing current subscription.
 - Paid manual approvals and signed paid Stripe invoices synchronize eligible tenants to Active, clear trial state and retain the authoritative subscription period end as the next renewal boundary. Signed payment failures and unpaid subscription states synchronize eligible tenants to Past due. Billing automation never overrides a Super Admin suspension or cancellation, and every effective tenant-status change appends tenant audit evidence.
+- Paused subscriptions are recoverable billing holds: the scheduler skips invoice/reminder/restriction accrual, ordinary tenant operations remain blocked and owner/manager billing resolution remains reachable. Resumption restores the normal provider-authoritative lifecycle.
 - A daily idempotent scheduler generates manual renewal invoices seven days before `next_billing_at`, marks them Due/Past Due at the authoritative boundary and queues one owner reminder per invoice/day. A Past Due gym remains operational during its 15-day grace period; after `grace_ends_at`, tenant operations fail with a billing-specific response while owner/manager billing and account resolution remain available. Paid approval or a bounded audited Super Admin override clears the active restriction projection without deleting invoice, notification or audit history.
 - Signed Stripe events resolve an opaque connected account through a SELECT-only RLS policy, bind its gym, verify server-authored metadata and use `(gym_id, provider, event_id)` idempotency before updating a ledger record.
 
@@ -1281,6 +1287,7 @@ member      = [self.read, self.update_limited, membership.self.read,
 | IronCore Beta — automated billing and platform intelligence | Implemented locally; approval pending | Guarantees one Primary Branch for branch-limited gyms, automates manual SaaS renewal invoices and 15-day dunning/restriction, adds owner billing visibility, append-only payment corrections/refunds/voids, Super Admin billing/global-member/analytics workspaces, required bank-transfer dates and shared responsive typography/modal/table fixes. |
 | IronCore Beta — complete SaaS billing workflow | Implemented locally; approval pending | Keeps the existing ledger and lifecycle, isolates catalogue loading failures, adds platform bank configuration, invoice-before-evidence manual plan selection, idempotent review, individual invoice publication, central payment review filters/actions and login-session overdue warnings without making Stripe mandatory. |
 | IronCore Beta — SaaS financial control completion | Implemented locally; approval pending | Adds Super Admin-only mistaken-approval reversal distinct from refunds, audited unpaid invoice void-and-replace, safe Draft deletion/archive/reactivation, independent monthly/yearly pricing and consistent owner invoice payment/status UX. |
+| IronCore Beta — SaaS billing automation Phase 1 | Implemented locally; validation passing | Transactionally creates an explicit snapshotted subscription during idempotent gym onboarding, centralizes non-terminal subscription selection, adopts onboarding contracts during same-price Stripe checkout and defines paused subscriptions as recoverable billing-only access with scheduler accrual stopped. One nullable, non-backfilling gym-registry migration stores the hidden retry key/fingerprint; it has not been run in production. |
 | IronCore Beta — class attendance/gym admission separation | Implemented locally; validation in progress | Removes the implicit manual gym check-in from class attendance, adds an audited class-only no-show transition and keeps gym visit reporting sourced only from QR/member-code/authorised front-desk admission records. No schema migration or production data change is included. |
 
 ## Change control

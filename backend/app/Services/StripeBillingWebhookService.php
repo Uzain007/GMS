@@ -212,6 +212,12 @@ class StripeBillingWebhookService
         if (in_array($status, [SaasSubscriptionStatus::Active, SaasSubscriptionStatus::Trialing], true)) {
             $values['failure_code'] = null;
             $values['failure_message'] = null;
+            // A signed provider transition back to an operational state is the
+            // authority to remove any prior billing-only access restriction.
+            $values['billing_restricted_at'] = null;
+            $values['billing_override_until'] = null;
+            $values['billing_override_by'] = null;
+            $values['billing_override_reason'] = null;
         }
 
         $subscription = GymSubscription::query()

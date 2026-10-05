@@ -79,7 +79,10 @@ class GymSaasStatusService
             SaasSubscriptionStatus::Incomplete,
             SaasSubscriptionStatus::PastDue,
             SaasSubscriptionStatus::Unpaid => GymStatus::PastDue,
-            SaasSubscriptionStatus::Paused,
+            // A provider pause is a recoverable billing restriction. Keeping
+            // the gym Past Due lets owners reach billing and reactivate it;
+            // Suspended remains reserved for explicit platform intervention.
+            SaasSubscriptionStatus::Paused => GymStatus::PastDue,
             SaasSubscriptionStatus::Cancelled,
             SaasSubscriptionStatus::IncompleteExpired => GymStatus::Suspended,
         };

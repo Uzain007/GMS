@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Enums\UserRole;
+use App\Enums\Currency;
+use App\Models\SaasPlan;
+use App\Models\SaasPlanPrice;
 use App\Jobs\SendPasswordResetLink;
 use App\Models\AuditLog;
 use App\Models\Gym;
@@ -166,12 +169,20 @@ class GymOwnerAccountManagementTest extends TestCase
     /** @param array<string, mixed> $ownerOverrides */
     private function gymPayload(array $ownerOverrides = []): array
     {
+        $price = $this->onboardingPrice();
+
         return [
+            'idempotency_key' => (string) str()->uuid(),
             'name' => 'Owner Lifecycle Gym',
             'legal_name' => 'Owner Lifecycle Gym Limited',
             'base_currency' => 'GBP',
             'country_code' => 'GB',
             'timezone' => 'Europe/London',
+            'subscription' => [
+                'saas_plan_price_id' => $price->id,
+                'billing_email' => 'billing@example.test',
+                'grace_period_days' => 15,
+            ],
             'owner' => array_merge([
                 'create_login_account' => true,
                 'name' => 'Gym Owner',
@@ -179,6 +190,26 @@ class GymOwnerAccountManagementTest extends TestCase
                 'phone' => '+44 7700 900001',
             ], $ownerOverrides),
         ];
+    }
+
+    private function onboardingPrice(): SaasPlanPrice
+    {
+        $plan = SaasPlan::query()->create([
+            'code' => 'owner-onboarding-'.str()->lower(str()->random(8)),
+            'name' => 'Owner Onboarding',
+            'status' => 'active',
+            'feature_limits' => ['members' => 500, 'branches' => 1, 'staff' => 8],
+            'payment_methods' => ['cash', 'bank_transfer', 'stripe'],
+        ]);
+
+        return SaasPlanPrice::query()->create([
+            'saas_plan_id' => $plan->id,
+            'currency' => Currency::GBP,
+            'billing_interval' => 'monthly',
+            'amount_minor' => 3900,
+            'trial_days' => 14,
+            'active' => true,
+        ]);
     }
 
     /** @return array<string, string> */

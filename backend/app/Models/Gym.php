@@ -18,6 +18,11 @@ class Gym extends Model
     protected $fillable = [
         'name', 'slug', 'legal_name', 'base_currency', 'country_code',
         'timezone', 'status', 'trial_ends_at', 'settings',
+        'onboarding_idempotency_key', 'onboarding_request_hash',
+    ];
+
+    protected $hidden = [
+        'onboarding_idempotency_key', 'onboarding_request_hash',
     ];
 
     protected function casts(): array

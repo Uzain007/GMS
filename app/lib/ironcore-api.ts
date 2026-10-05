@@ -58,12 +58,18 @@ export type UpdateGym = {
 };
 
 export type NewGym = {
+  idempotency_key: string;
   name: string;
   legal_name?: string;
   slug?: string;
   base_currency: GymSummary["base_currency"];
   country_code: string;
   timezone: string;
+  subscription: {
+    saas_plan_price_id: string;
+    billing_email: string;
+    grace_period_days: number;
+  };
   owner: {
     create_login_account: boolean;
     name?: string;
