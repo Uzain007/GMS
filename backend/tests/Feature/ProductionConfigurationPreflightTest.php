@@ -111,6 +111,22 @@ class ProductionConfigurationPreflightTest extends TestCase
         $this->assertSame(0, $exitCode);
     }
 
+    public function test_remote_addr_trusted_proxy_boundary_is_accepted(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['trustedproxy.proxies' => ['REMOTE_ADDR']]);
+
+        $this->assertSame(0, Artisan::call('ironcore:production-preflight'));
+    }
+
+    public function test_valid_proxy_ip_and_cidr_boundaries_remain_accepted(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['trustedproxy.proxies' => ['10.0.0.12', '10.0.0.0/8', '2001:db8::/32']]);
+
+        $this->assertSame(0, Artisan::call('ironcore:production-preflight'));
+    }
+
     public function test_provider_wildcard_cannot_be_mixed_with_proxy_addresses(): void
     {
         $this->configureSafeProductionShape();
@@ -120,6 +136,37 @@ class ProductionConfigurationPreflightTest extends TestCase
 
         $this->assertSame(1, $exitCode);
         $this->assertStringContainsString('TRUSTED_PROXIES must name', Artisan::output());
+    }
+
+    public function test_authenticated_public_rediss_url_is_accepted(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['database.redis.default.url' => 'rediss://:deployment-managed-redis-value@redis.example.com:6379']);
+
+        $this->assertSame(0, Artisan::call('ironcore:production-preflight'));
+    }
+
+    public function test_authenticated_railway_private_redis_url_is_accepted(): void
+    {
+        $this->configureSafeProductionShape();
+        config(['database.redis.default.url' => 'redis://:deployment-managed-redis-value@redis.railway.internal:6379']);
+
+        $this->assertSame(0, Artisan::call('ironcore:production-preflight'));
+    }
+
+    public function test_unauthenticated_railway_private_redis_url_is_rejected(): void
+    {
+        $this->assertRedisUrlFails('redis://redis.railway.internal:6379');
+    }
+
+    public function test_authenticated_public_plaintext_redis_url_is_rejected(): void
+    {
+        $this->assertRedisUrlFails('redis://:deployment-managed-redis-value@redis.example.com:6379');
+    }
+
+    public function test_lookalike_railway_private_redis_hostname_is_rejected(): void
+    {
+        $this->assertRedisUrlFails('redis://:deployment-managed-redis-value@redis.railway.internal.example.com:6379');
     }
 
     public function test_notification_ca_bundle_must_be_readable_without_echoing_its_path(): void
@@ -146,6 +193,18 @@ class ProductionConfigurationPreflightTest extends TestCase
         $this->assertSame(1, $exitCode);
         $this->assertStringContainsString('STRIPE_CA_BUNDLE must reference a readable PEM trust bundle', Artisan::output());
         $this->assertStringNotContainsString($marker, Artisan::output());
+    }
+
+    private function assertRedisUrlFails(string $url): void
+    {
+        $this->configureSafeProductionShape();
+        config(['database.redis.default.url' => $url]);
+
+        $this->assertSame(1, Artisan::call('ironcore:production-preflight'));
+        $this->assertStringContainsString(
+            'REDIS_URL must use authenticated TLS or authenticated Railway private networking.',
+            Artisan::output(),
+        );
     }
 
     private function configureSafeProductionShape(): void

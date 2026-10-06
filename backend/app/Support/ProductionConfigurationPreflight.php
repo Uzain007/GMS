@@ -93,7 +93,7 @@ final class ProductionConfigurationPreflight
         }
 
         if (! $this->hasSecureRedisConnection(config('database.redis.default'))) {
-            $failures[] = 'REDIS_URL must use rediss and include deployment-managed authentication.';
+            $failures[] = 'REDIS_URL must use authenticated TLS or authenticated Railway private networking.';
         }
 
         if (config('filesystems.default') !== 's3') {
@@ -279,6 +279,10 @@ final class ProductionConfigurationPreflight
         }
 
         $proxy = trim($value);
+        if ($proxy === 'REMOTE_ADDR') {
+            return true;
+        }
+
         [$address, $prefix] = array_pad(explode('/', $proxy, 2), 2, null);
         $version = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? 4 : (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? 6 : null);
         if ($version === null) {
@@ -370,11 +374,17 @@ final class ProductionConfigurationPreflight
 
         $parts = parse_url($connection['url']);
 
-        return is_array($parts)
-            && strtolower((string) ($parts['scheme'] ?? '')) === 'rediss'
-            && isset($parts['host'])
-            && isset($parts['pass'])
-            && rawurldecode((string) $parts['pass']) !== '';
+        if (! is_array($parts)
+            || ! isset($parts['host'], $parts['pass'])
+            || rawurldecode((string) $parts['pass']) === '') {
+            return false;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) $parts['host']);
+
+        return $scheme === 'rediss'
+            || ($scheme === 'redis' && str_ends_with($host, '.railway.internal'));
     }
 
     private function hasDeliveringSmtpConfiguration(mixed $smtp): bool

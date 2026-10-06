@@ -108,6 +108,19 @@ test("Laravel bootstrap defers trusted proxy resolution until request middleware
     /\$proxies === \['\*'\] \? '\*' : \$proxies/,
   );
   assert.match(phpPreflight, /config\('trustedproxy\.proxies'\)/);
+  assert.match(phpPreflight, /\$proxy === 'REMOTE_ADDR'/);
+  assert.match(phpPreflight, /str_ends_with\(\$host, '\.railway\.internal'\)/);
+  assert.match(
+    phpPreflight,
+    /REDIS_URL must use authenticated TLS or authenticated Railway private networking\./,
+  );
+  assert.match(phpTests, /test_remote_addr_trusted_proxy_boundary_is_accepted/);
+  assert.match(phpTests, /test_valid_proxy_ip_and_cidr_boundaries_remain_accepted/);
   assert.match(phpTests, /test_explicit_provider_wildcard_is_accepted/);
   assert.match(phpTests, /test_provider_wildcard_cannot_be_mixed/);
+  assert.match(phpTests, /test_authenticated_public_rediss_url_is_accepted/);
+  assert.match(phpTests, /test_authenticated_railway_private_redis_url_is_accepted/);
+  assert.match(phpTests, /test_unauthenticated_railway_private_redis_url_is_rejected/);
+  assert.match(phpTests, /test_authenticated_public_plaintext_redis_url_is_rejected/);
+  assert.match(phpTests, /test_lookalike_railway_private_redis_hostname_is_rejected/);
 });
