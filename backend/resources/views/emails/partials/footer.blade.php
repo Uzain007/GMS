@@ -1,0 +1,2 @@
+<p class="email-footer-copy" style="margin:0 0 8px;color:#5f6270;font-size:12px;line-height:19px;overflow-wrap:anywhere;word-wrap:break-word;">This is a transactional email from IronCore. Please do not share secure account links.</p>
+<p class="email-footer-copy" style="margin:0;color:#858794;font-size:11px;line-height:18px;overflow-wrap:anywhere;word-wrap:break-word;">&copy; {{ now()->year }} IronCore. Built for secure gym operations.</p>

@@ -120,7 +120,12 @@ class GymOwnerAccountService
         if ($sendInvite) {
             // The queue job creates and mails the broker token after commit, so
             // no setup secret is persisted in the request, response or audit.
-            SendPasswordResetLink::dispatch($email, 'owner_invitation')->afterCommit();
+            SendPasswordResetLink::dispatch(
+                $email,
+                'owner_invitation',
+                $payload['name'],
+                $this->tenant->gym()->name,
+            )->afterCommit();
         }
 
         return $payload;
@@ -181,7 +186,12 @@ class GymOwnerAccountService
             ->where('user_id', $user->getKey())
             ->update(['invite_sent_at' => now(), 'updated_at' => now()]);
         $this->audit->record('gym.owner_account.reset_link_sent', $profile, $actor, after: ['user_id' => $user->getKey()], reason: $reason, request: $request);
-        SendPasswordResetLink::dispatch($user->email, 'owner_invitation_resend')->afterCommit();
+        SendPasswordResetLink::dispatch(
+            $user->email,
+            'owner_invitation_resend',
+            $profile?->professionalName() ?? $user->name,
+            $this->tenant->gym()->name,
+        )->afterCommit();
 
         return $this->current();
     }

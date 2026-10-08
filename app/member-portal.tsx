@@ -209,6 +209,11 @@ function MemberPaymentsCard({ data, actions }: { data: MemberPortalData; actions
 
 export function MemberPortal({ data, actions }: { data: MemberPortalData; actions: MemberPortalActions }) {
   const [view, setView] = useState<MemberView>("home");
+  useEffect(() => {
+    const destination = new URLSearchParams(window.location.hash.slice(1)).get("email_destination");
+    if (destination === "member_training") setView("training");
+    if (destination === "member_account") setView("account");
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);

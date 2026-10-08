@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\SaasSubscriptionStatus;
 use App\Exceptions\SaasBillingReminderDeliveryException;
+use App\Mail\BrandedTransactionalMail;
 use App\Models\Gym;
 use App\Models\GymSubscription;
 use App\Models\SaasBillingNotification;
@@ -50,17 +51,20 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
                     return null;
                 }
                 $row->update(['status' => 'sending', 'attempts' => $row->attempts + 1, 'failure_code' => null]);
-                return $row->fresh(['invoice', 'subscription']);
+                return $row->fresh(['invoice', 'subscription', 'recipient']);
             });
             if (! $notification) {
                 return;
             }
 
-            [$subject, $body] = $this->message($gym, $notification);
+            [$subject, $view, $data] = $this->presentation($gym, $notification);
 
             try {
-                Mail::raw($body, fn ($message) => $message->to($notification->destination)
-                    ->subject($subject));
+                Mail::to($notification->destination)->send(new BrandedTransactionalMail(
+                    $subject,
+                    $view,
+                    $data,
+                ));
                 $notification->update(['status' => 'sent', 'sent_at' => now()]);
             } catch (Throwable) {
                 $notification->update(['status' => 'failed', 'failure_code' => 'mail_delivery_failed']);
@@ -76,23 +80,42 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
         });
     }
 
-    /** @return array{string,string} */
-    private function message(Gym $gym, SaasBillingNotification $notification): array
+    /** @return array{string,string,array<string,mixed>} */
+    private function presentation(Gym $gym, SaasBillingNotification $notification): array
     {
-        $billingUrl = rtrim((string) config('app.frontend_url'), '/');
+        $billingUrl = rtrim((string) config('app.frontend_url'), '/').'/#email_destination=saas_billing';
+        $recipientName = $notification->recipient?->name;
         if ($notification->template_key === 'saas_trial_ending') {
             $trialEnd = $notification->subscription?->trial_ends_at ?? $gym->trial_ends_at;
             $date = $trialEnd?->copy()->setTimezone($gym->timezone)->format('j M Y') ?? 'tomorrow';
+            $subject = 'Your IronCore trial ends tomorrow';
 
             return [
-                'Your IronCore trial ends tomorrow',
-                "Your IronCore trial for {$gym->name} ends on {$date}.\n\nSelect a plan and complete payment to keep normal gym operations available.\n\nSign in at {$billingUrl} to review plans and payment options.",
+                $subject,
+                'emails.saas.trial-ending',
+                [
+                    'subject' => $subject,
+                    'preheader' => "Your IronCore trial for {$gym->name} ends on {$date}.",
+                    'recipientName' => $recipientName,
+                    'gymName' => $gym->name,
+                    'trialEndsAt' => $date,
+                    'billingUrl' => $billingUrl,
+                ],
             ];
         }
         if ($notification->template_key === 'saas_trial_expired') {
+            $subject = 'Action required: your IronCore trial has ended';
+
             return [
-                'Action required: your IronCore trial has ended',
-                "Your IronCore trial for {$gym->name} has ended. Normal gym operations are now restricted, but you can still sign in, select a plan and complete payment.\n\nSign in at {$billingUrl} to restore access.",
+                $subject,
+                'emails.saas.trial-expired',
+                [
+                    'subject' => $subject,
+                    'preheader' => "Payment is required to restore normal gym operations for {$gym->name}.",
+                    'recipientName' => $recipientName,
+                    'gymName' => $gym->name,
+                    'billingUrl' => $billingUrl,
+                ],
             ];
         }
 
@@ -108,11 +131,26 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
             ? "Payment is required within {$days} days to avoid service interruption."
             : 'The grace period has ended and normal gym operations may be restricted.';
         $due = $notification->template_key === 'saas_invoice_due';
-        $timing = $due ? 'is due today' : 'is overdue';
+        $subject = $due
+            ? 'IronCore subscription payment due today'
+            : 'Action required: IronCore subscription payment overdue';
+        $dueDate = $invoice->due_at?->copy()->setTimezone($gym->timezone)->format('j M Y') ?? 'Due now';
 
         return [
-            $due ? 'IronCore subscription payment due today' : 'Action required: IronCore subscription payment overdue',
-            "Your IronCore subscription invoice {$invoice->number} {$timing}.\n\nAmount due: {$amount}\n{$warning}\n\nSign in at {$billingUrl} to review billing and payment options.",
+            $subject,
+            'emails.saas.invoice-status',
+            [
+                'subject' => $subject,
+                'preheader' => "Invoice {$invoice->number}: {$amount} is ".($due ? 'due today.' : 'overdue.'),
+                'recipientName' => $recipientName,
+                'gymName' => $gym->name,
+                'invoiceNumber' => $invoice->number,
+                'amount' => $amount,
+                'dueDate' => $dueDate,
+                'warning' => $warning,
+                'overdue' => ! $due,
+                'billingUrl' => $billingUrl,
+            ],
         ];
     }
 }

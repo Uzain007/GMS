@@ -196,6 +196,11 @@ class StaffInvitationService
                 'staff',
                 $invitation->getKey(),
                 $eventType,
+                null,
+                Str::headline($invitation->role->value),
+                $invitation->expires_at
+                    ?->setTimezone($this->context->gym()->timezone)
+                    ->format('j M Y, H:i T'),
             )->onQueue('notifications');
         } catch (Throwable) {
             // The invitation is already durable. A synchronous queue/provider

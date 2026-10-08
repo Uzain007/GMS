@@ -4,13 +4,13 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Jobs\SendPasswordResetLink;
+use App\Mail\BrandedTransactionalMail;
 use App\Models\Gym;
 use App\Models\User;
 use App\Tenancy\TenantContext;
-use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -42,15 +42,17 @@ class PhaseNineAccountSecurityTest extends TestCase
 
     public function test_reset_worker_uses_a_fragment_only_frontend_link(): void
     {
-        Notification::fake();
+        Mail::fake();
         $user = User::factory()->create(['email' => 'member@example.test']);
 
         (new SendPasswordResetLink($user->email))->handle();
 
-        Notification::assertSentTo($user, ResetPassword::class, function (ResetPassword $notification) use ($user): bool {
-            $url = (string) $notification->toMail($user)->actionUrl;
+        Mail::assertSent(BrandedTransactionalMail::class, function (BrandedTransactionalMail $mail) use ($user): bool {
+            $url = (string) ($mail->templateData['actionUrl'] ?? '');
 
-            return str_contains($url, '/#reset_email=member%40example.test&reset_token=')
+            return $mail->viewName === 'emails.security.account-access'
+                && $mail->hasTo($user->email)
+                && str_contains($url, '/#reset_email=member%40example.test&reset_token=')
                 && ! str_contains($url, '?token=');
         });
     }
@@ -58,7 +60,7 @@ class PhaseNineAccountSecurityTest extends TestCase
     #[DataProvider('recoverableRoles')]
     public function test_reset_email_is_available_to_every_identity_role(UserRole $role): void
     {
-        Notification::fake();
+        Mail::fake();
         $user = User::factory()->create([
             'email' => $role->value.'@example.test',
             'platform_role' => $role === UserRole::SuperAdmin ? UserRole::SuperAdmin : null,
@@ -75,7 +77,7 @@ class PhaseNineAccountSecurityTest extends TestCase
 
         (new SendPasswordResetLink($user->email))->handle();
 
-        Notification::assertSentTo($user, ResetPassword::class);
+        Mail::assertSent(BrandedTransactionalMail::class, fn (BrandedTransactionalMail $mail): bool => $mail->hasTo($user->email));
         $this->assertDatabaseHas('password_reset_tokens', ['email' => $user->email]);
     }
 

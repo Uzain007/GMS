@@ -81,7 +81,8 @@ class StaffInvitationWorkflowTest extends TestCase
     public function test_mail_transport_failure_keeps_pending_invitation_and_exposes_delivery_failure(): void
     {
         config(['queue.default' => 'sync']);
-        Mail::shouldReceive('raw')->once()->andThrow(new RuntimeException('simulated transport failure'));
+        Mail::shouldReceive('to')->once()->andReturnSelf();
+        Mail::shouldReceive('send')->once()->andThrow(new RuntimeException('simulated transport failure'));
         [$owner, $gym] = $this->tenant();
         Sanctum::actingAs($owner);
 

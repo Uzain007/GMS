@@ -7,7 +7,7 @@ import {
   Eye, HeartPulse, ReceiptText, RefreshCw, Search, Settings, ShieldCheck, Sparkles, TrendingUp, Users,
   Upload, UsersRound, WalletCards, X, type LucideIcon,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { BranchesView, MembershipsView, PlansView, type OperationData } from "./tenant-operations";
 import { FinancialManagement, type FinanceData } from "./financial-management";
 import { SaasBillingManagement, type SaasBillingData } from "./saas-billing-management";
@@ -444,6 +444,10 @@ export function IronCoreDashboard({ portalMode, operator = { name: "Servion Soft
   const [view, setView] = useState<View>(tenantViews?.[0] ?? "overview"); const [currency, setCurrency] = useState<Currency>("GBP"); const [sidebar, setSidebar] = useState(false); const [query, setQuery] = useState(""); const [gymModal, setGymModal] = useState(false); const [memberModal, setMemberModal] = useState(false); const [securityModal, setSecurityModal] = useState(false); const [gyms, setGyms] = useState(startingGyms);
   const [dismissedBillingGym, setDismissedBillingGym] = useState<string | null>(null);
   const [billingReminderClock] = useState(() => Date.now());
+  useEffect(() => {
+    const destination = new URLSearchParams(window.location.hash.slice(1)).get("email_destination");
+    if (destination === "saas_billing" && tenantViews?.includes("billing")) setView("billing");
+  }, [tenantViews]);
   const title = useMemo(() => navItems.find((item) => item.id === view)?.label ?? "Overview", [view]);
   const gymOverview = useMemo<GymOverviewData | null>(() => {
     if (resolvedPortalMode !== "gym" || !activeGym) return null;

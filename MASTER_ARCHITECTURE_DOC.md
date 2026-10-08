@@ -808,6 +808,8 @@ Measurements are never overwritten or physically deleted through the API. A mana
 
 Notification delivery runs only on Redis queues. Each job carries immutable `gym_id` and delivery ID, establishes tenant context, honours current preferences/quiet hours, selects a server-configured adapter and clears context in `finally`. Email uses Laravel Mail; SMS and push use configured HTTPS adapters. Provider credentials remain environment secrets and delivery payload variables never grant tenant authority.
 
+Transactional email presentation uses one server-rendered, responsive, email-safe IronCore Blade layout with shared header, footer, CTA, information-card and status components. Existing Redis jobs, SMTP transport, recipient selection, tenant context, ledgers, idempotency and one-time token URLs remain authoritative; branded views cover the currently triggered password-reset, owner/staff/member invitation, trial, SaaS invoice, membership-payment-due, workout-plan and generic email flows, while event types without existing domain triggers or data remain intentionally unimplemented. Non-secret email destination hints open only existing authorised billing, member-account or training views; invitation and password-reset secrets retain their separate fragment-only contracts, and Laravel authorization remains authoritative.
+
 ### Operational reporting read model — bounded tenant aggregates
 
 Milestone 6A adds no durable reporting table. `ReportService` builds a read model from existing tenant-owned members, memberships, invoices, payments, refunds, attendance, class sessions and bookings while normal Eloquent scoping and forced PostgreSQL RLS remain active.

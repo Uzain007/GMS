@@ -79,7 +79,8 @@ class SaasBillingReliabilityTest extends TestCase
     {
         [$gym, $notification, $recipient] = $this->trialReminderFixture();
         $providerEvidence = "SMTP AUTH password=super-secret recipient={$recipient} body={provider-response}";
-        Mail::shouldReceive('raw')->times(3)->andThrow(new RuntimeException($providerEvidence));
+        Mail::shouldReceive('to')->times(3)->andReturnSelf();
+        Mail::shouldReceive('send')->times(3)->andThrow(new RuntimeException($providerEvidence));
         Log::spy();
         $job = new SendSaasBillingReminder($gym->id, $notification->id);
         $this->assertSame(3, $job->tries);

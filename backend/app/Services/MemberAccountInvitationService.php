@@ -80,7 +80,22 @@ class MemberAccountInvitationService
         });
 
         $member = Member::query()->findOrFail($memberId);
-        SendAccountInvitation::dispatch($member->email, $this->context->id(), $this->context->gym()->name, $plainToken, 'member')->afterCommit();
+        /** @var MemberAccountInvitation $invitation */
+        $invitation = $result[0];
+        SendAccountInvitation::dispatch(
+            $member->email,
+            $this->context->id(),
+            $this->context->gym()->name,
+            $plainToken,
+            'member',
+            null,
+            'account_invitation',
+            $member->first_name,
+            null,
+            $invitation->expires_at
+                ->setTimezone($this->context->gym()->timezone)
+                ->format('j M Y, H:i T'),
+        )->afterCommit();
 
         return $result;
     }

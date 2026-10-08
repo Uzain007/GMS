@@ -9,6 +9,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\SaasPlanStatus;
 use App\Enums\UserRole;
 use App\Jobs\SendAccountInvitation;
+use App\Mail\BrandedTransactionalMail;
 use App\Models\AuditLog;
 use App\Models\Gym;
 use App\Models\Member;
@@ -157,10 +158,17 @@ class PostDeploymentStabilizationTest extends TestCase
 
     public function test_invitation_mail_job_uses_shared_mailer_and_keeps_token_out_of_logs(): void
     {
-        Mail::shouldReceive('raw')->once();
+        Mail::fake();
         config(['app.frontend_url' => 'https://app.ironcore.website']);
         $job = new SendAccountInvitation('member@example.test', 'gym-123', 'Northstar Fitness', str_repeat('a', 64), 'member');
         $job->handle();
+        Mail::assertSent(BrandedTransactionalMail::class, function (BrandedTransactionalMail $mail): bool {
+            $url = (string) ($mail->templateData['actionUrl'] ?? '');
+
+            return $mail->viewName === 'emails.invitations.account'
+                && $mail->hasTo('member@example.test')
+                && str_contains($url, '#activate_gym=gym-123&activate_token=');
+        });
         $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldBeEncrypted::class, $job);
     }
 

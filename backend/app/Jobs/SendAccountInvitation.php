@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Mail\BrandedTransactionalMail;
 use App\Models\Gym;
 use App\Models\StaffInvitation;
 use App\Tenancy\TenantContext;
@@ -29,6 +30,9 @@ class SendAccountInvitation implements ShouldBeEncrypted, ShouldQueue
         public readonly string $kind,
         public readonly ?string $staffInvitationId = null,
         public readonly string $eventType = 'account_invitation',
+        public readonly ?string $recipientName = null,
+        public readonly ?string $roleLabel = null,
+        public readonly ?string $expiresAt = null,
     ) {}
 
     public function handle(?TenantContext $tenant = null): void
@@ -42,9 +46,22 @@ class SendAccountInvitation implements ShouldBeEncrypted, ShouldQueue
 
         // The encrypted queue payload protects the one-time token at rest. Mail
         // uses the same configured production SMTP transport as password reset.
-        Mail::raw("You have been invited to the {$label} for {$this->gymName}.\n\nOpen this secure, expiring link:\n{$url}\n\nIf you did not expect this invitation, ignore this email.", function ($message): void {
-            $message->to($this->email)->subject('Your IronCore account invitation');
-        });
+        $subject = "You're invited to {$this->gymName} on IronCore";
+        Mail::to($this->email)->send(new BrandedTransactionalMail(
+            $subject,
+            'emails.invitations.account',
+            [
+                'subject' => $subject,
+                'preheader' => "Activate your secure {$label} access for {$this->gymName}.",
+                'recipientName' => $this->recipientName,
+                'gymName' => $this->gymName,
+                'portalLabel' => $label,
+                'roleLabel' => $this->roleLabel,
+                'expiresAt' => $this->expiresAt,
+                'isResend' => $this->eventType === 'staff_invitation_resend',
+                'actionUrl' => $url,
+            ],
+        ));
 
         $this->recordStaffDelivery($tenant ?? app(TenantContext::class), 'sent', null);
         Log::info('Account invitation email accepted by the configured mail transport.', [
