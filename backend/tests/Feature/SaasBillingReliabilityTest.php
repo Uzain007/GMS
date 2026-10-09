@@ -17,6 +17,7 @@ use App\Models\SaasPlan;
 use App\Models\SaasPlanPrice;
 use App\Models\User;
 use App\Services\AuditService;
+use App\Services\BillingNotificationService;
 use App\Services\AutomatedSaasBillingService;
 use App\Services\GymSaasStatusService;
 use App\Tenancy\TenantContext;
@@ -39,13 +40,13 @@ class SaasBillingReliabilityTest extends TestCase
         $gymB = Gym::factory()->create(['id' => '00000000-0000-4000-8000-000000000002', 'name' => 'Scheduler tenant B', 'status' => GymStatus::Active]);
         $gymC = Gym::factory()->create(['id' => '00000000-0000-4000-8000-000000000003', 'name' => 'Scheduler tenant C', 'status' => GymStatus::Active]);
         $context = app(TenantContext::class);
-        $billing = new class($context, app(AuditService::class), app(GymSaasStatusService::class), $gymB->id) extends AutomatedSaasBillingService {
+        $billing = new class($context, app(AuditService::class), app(GymSaasStatusService::class), app(BillingNotificationService::class), $gymB->id) extends AutomatedSaasBillingService {
             /** @var list<string> */
             public array $processed = [];
 
-            public function __construct(TenantContext $tenant, AuditService $audit, GymSaasStatusService $gymStatus, private readonly string $failingGymId)
+            public function __construct(TenantContext $tenant, AuditService $audit, GymSaasStatusService $gymStatus, BillingNotificationService $notifications, private readonly string $failingGymId)
             {
-                parent::__construct($tenant, $audit, $gymStatus);
+                parent::__construct($tenant, $audit, $gymStatus, $notifications);
             }
 
             public function processTenant(Gym $gym): array

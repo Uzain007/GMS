@@ -13,6 +13,7 @@ use App\Models\GymBranch;
 use App\Models\GymBankTransferSetting;
 use App\Models\Member;
 use App\Models\Payment;
+use App\Models\NotificationDelivery;
 use App\Models\PaymentGatewayAccount;
 use App\Models\User;
 use App\Services\PaymentService;
@@ -257,6 +258,10 @@ class OptionalPaymentMethodsTest extends TestCase
         app(TenantContext::class)->run($gym, fn () => $this->assertSame(
             $invoice['due_amount_minor'],
             \App\Models\Invoice::query()->findOrFail($invoice['id'])->due_amount_minor,
+        ));
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(
+            0,
+            NotificationDelivery::query()->where('template_key', 'membership_payment_paid')->count(),
         ));
 
         Sanctum::actingAs($memberUser);

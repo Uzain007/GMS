@@ -6,6 +6,7 @@ use App\Enums\NotificationChannel;
 use App\Enums\NotificationDeliveryStatus;
 use App\Jobs\SendNotificationDelivery;
 use App\Models\Member;
+use App\Models\Invoice;
 use App\Models\NotificationDelivery;
 use App\Models\NotificationPreference;
 use App\Models\User;
@@ -70,7 +71,7 @@ class NotificationService
 
         if ($delivery->wasRecentlyCreated) {
             SendNotificationDelivery::dispatch($delivery->gym_id, $delivery->getKey())
-                ->delay($scheduledAt)->onQueue('notifications');
+                ->delay($scheduledAt)->onQueue('notifications')->afterCommit();
         }
         return $delivery;
     }
@@ -82,8 +83,17 @@ class NotificationService
             if (! in_array($delivery->status, [NotificationDeliveryStatus::Queued, NotificationDeliveryStatus::Failed], true) || $delivery->attempts >= 3) {
                 return null;
             }
+            if (in_array($delivery->template_key, [
+                'membership_payment_due', 'membership_invoice_overdue', 'membership_access_restricted',
+            ], true)) {
+                $invoiceId = (string) data_get($delivery->variables, 'data.invoice_id', '');
+                if ($invoiceId !== '' && Invoice::query()->whereKey($invoiceId)->where('status', 'paid')->exists()) {
+                    $delivery->update(['status' => NotificationDeliveryStatus::Suppressed, 'failure_code' => 'invoice_paid']);
+                    return null;
+                }
+            }
             $preference = NotificationPreference::query()->where('member_id', $delivery->member_id)->first();
-            if (! $this->channelEnabled($delivery->channel, $preference)) {
+            if (! $this->channelEnabled($delivery, $preference)) {
                 $delivery->update(['status' => NotificationDeliveryStatus::Suppressed, 'failure_code' => 'preference_disabled']);
                 return null;
             }
@@ -127,9 +137,16 @@ class NotificationService
         ]);
     }
 
-    private function channelEnabled(NotificationChannel $channel, ?NotificationPreference $preference): bool
+    private function channelEnabled(NotificationDelivery $delivery, ?NotificationPreference $preference): bool
     {
-        return match ($channel) {
+        // Billing and access notices are required transactional evidence, not
+        // optional coaching/marketing reminders.
+        if ($delivery->channel === NotificationChannel::Email
+            && str_starts_with($delivery->template_key, 'membership_')) {
+            return true;
+        }
+
+        return match ($delivery->channel) {
             NotificationChannel::Email => $preference?->email_enabled ?? true,
             NotificationChannel::Sms => $preference?->sms_enabled ?? false,
             NotificationChannel::Push => $preference?->push_enabled ?? false,
@@ -165,7 +182,7 @@ class NotificationService
             'subject' => Str::limit((string) ($variables['subject'] ?? ''), 160),
             'body' => Str::limit((string) ($variables['body'] ?? ''), 2000),
             // Only bounded server-authored navigation metadata is queued.
-            'data' => array_slice((array) ($variables['data'] ?? []), 0, 10, true),
+            'data' => array_slice((array) ($variables['data'] ?? []), 0, 20, true),
         ];
     }
 }

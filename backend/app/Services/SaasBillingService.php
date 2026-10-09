@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\PaymentMethod;
+use App\Enums\GymStatus;
 use App\Enums\PaymentProvider;
 use App\Enums\PaymentStatus;
 use App\Enums\RefundStatus;
@@ -38,6 +39,7 @@ class SaasBillingService
         private readonly AuditService $audit,
         private readonly GymSaasStatusService $gymStatus,
         private readonly ReceiptFileProcessor $receiptFiles,
+        private readonly BillingNotificationService $billingNotifications,
     ) {}
 
     public function createPlan(array $data, User $actor, Request $request): SaasPlan
@@ -374,7 +376,7 @@ class SaasBillingService
             return ['invoice' => $existing, 'reused' => true];
         }
 
-        return DB::transaction(function () use ($gym, $price, $data, $actor, $request, $providerId): array {
+        $result = DB::transaction(function () use ($gym, $price, $data, $actor, $request, $providerId): array {
             $subscription = $this->currentSubscription();
             if ($subscription) {
                 if ($subscription->provider !== PaymentProvider::Manual) {
@@ -453,6 +455,9 @@ class SaasBillingService
 
             return ['invoice' => $invoice, 'reused' => false];
         });
+        $this->billingNotifications->saasInvoiceCreated($gym, $result['invoice']->loadMissing('subscription'));
+
+        return $result;
     }
 
     public function reviewManualPayment(
@@ -462,7 +467,9 @@ class SaasBillingService
         User $actor,
         Request $request,
     ): SaasSubscriptionPayment {
-        return DB::transaction(function () use ($gym, $payment, $data, $actor, $request): SaasSubscriptionPayment {
+        $createdInvoice = false;
+        $accessRestored = false;
+        $result = DB::transaction(function () use ($gym, $payment, $data, $actor, $request, &$createdInvoice, &$accessRestored): SaasSubscriptionPayment {
             $locked = SaasSubscriptionPayment::query()
                 ->with(['price.plan', 'submittedBy'])
                 ->lockForUpdate()
@@ -480,6 +487,8 @@ class SaasBillingService
             }
 
             $approved = $data['decision'] === 'approve';
+            $wasRestricted = $gym->status === GymStatus::PastDue
+                || $locked->subscription?->billing_restricted_at !== null;
             $before = ['status' => $locked->status->value];
             if (! $approved) {
                 $locked->update([
@@ -533,6 +542,7 @@ class SaasBillingService
                     'period_end' => $periodEnd,
                     'paid_at' => $periodStart,
                 ]);
+                $createdInvoice = ! $renewal;
                 if ($renewal) {
                     $periodStart = $invoice->period_start ?? $periodStart;
                     $periodEnd = $invoice->period_end ?? $periodEnd;
@@ -574,6 +584,9 @@ class SaasBillingService
                     reason: 'Approved SaaS '.$locked->method->value.' payment: '.$data['reason'],
                     request: $request,
                 );
+                $accessRestored = $wasRestricted
+                    && $subscription->fresh()->billing_restricted_at === null
+                    && $gym->fresh()->status === GymStatus::Active;
             }
 
             $fresh = $locked->fresh()->load(['price.plan', 'submittedBy:id,name,email', 'invoice', 'corrections.correctedBy:id,name', 'refunds.recordedBy:id,name', 'approvalReversal.reversedBy:id,name']);
@@ -593,6 +606,18 @@ class SaasBillingService
 
             return $fresh;
         });
+        if ($result->status === PaymentStatus::Paid && $result->invoice) {
+            $invoice = $result->invoice->loadMissing('subscription');
+            if ($createdInvoice) {
+                $this->billingNotifications->saasInvoiceCreated($gym, $invoice);
+            }
+            $this->billingNotifications->saasInvoicePaid($gym, $invoice, $result->id);
+            if ($accessRestored && $invoice->subscription) {
+                $this->billingNotifications->saasAccessRestored($gym, $invoice->subscription, $invoice, $result->id);
+            }
+        }
+
+        return $result;
     }
 
     public function refundManualPayment(

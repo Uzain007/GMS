@@ -27,6 +27,7 @@ class AutomatedSaasBillingService
         private readonly TenantContext $tenant,
         private readonly AuditService $audit,
         private readonly GymSaasStatusService $gymStatus,
+        private readonly BillingNotificationService $billingNotifications,
     ) {}
 
     /** @return array{gyms:int,invoices_created:int,reminders_queued:int,restricted:int,failed:int} */
@@ -108,6 +109,7 @@ class AutomatedSaasBillingService
                         ],
                         reason: 'Automated SaaS renewal invoice generation.',
                     );
+                    $this->billingNotifications->saasInvoiceCreated($gym, $invoice->loadMissing('subscription'));
                     $result['invoices_created']++;
                 }
             }
@@ -162,7 +164,7 @@ class AutomatedSaasBillingService
                 }
                 // Owners are notified on the due date and daily while overdue;
                 // the unique tenant key makes repeated scheduler runs harmless.
-                if ($this->queueOwnerReminder($gym, $invoice, $pastDue ? 'saas_invoice_overdue' : 'saas_invoice_due', $localNow)) {
+                if ($this->billingNotifications->saasInvoiceDue($gym, $invoice->loadMissing('subscription'), $pastDue, $localNow)) {
                     $result['reminders_queued']++;
                 }
 
@@ -173,6 +175,7 @@ class AutomatedSaasBillingService
                         'invoice_id' => $invoice->id,
                         'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String(),
                     ], reason: 'The 15-day payment grace period expired.');
+                    $this->billingNotifications->saasAccessRestricted($gym, $subscription->fresh(), $invoice);
                     $result['restricted']++;
                 }
             }
@@ -325,31 +328,4 @@ class AutomatedSaasBillingService
         return $notification->wasRecentlyCreated;
     }
 
-    private function queueOwnerReminder(Gym $gym, SaasBillingInvoice $invoice, string $template, Carbon $localNow): bool
-    {
-        $owner = $gym->users()->wherePivot('role', UserRole::GymOwner->value)
-            ->wherePivot('status', 'active')->orderBy('users.id')->first();
-        if (! $owner) {
-            return false;
-        }
-
-        $notificationDate = $localNow->toDateString();
-        $key = implode(':', [$template, $invoice->id, $notificationDate, $owner->id]);
-        $notification = SaasBillingNotification::query()->firstOrCreate(
-            ['idempotency_key' => $key],
-            [
-                'gym_subscription_id' => $invoice->gym_subscription_id,
-                'saas_billing_invoice_id' => $invoice->id,
-                'recipient_user_id' => $owner->id,
-                'destination' => $owner->email,
-                'template_key' => $template,
-                'notification_date' => $notificationDate,
-                'status' => 'queued',
-            ],
-        );
-        if ($notification->wasRecentlyCreated) {
-            SendSaasBillingReminder::dispatch($gym->id, $notification->id)->onQueue('notifications');
-        }
-        return $notification->wasRecentlyCreated;
-    }
 }

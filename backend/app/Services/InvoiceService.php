@@ -17,6 +17,7 @@ class InvoiceService
     public function __construct(
         private readonly AuditService $audit,
         private readonly ReportService $reports,
+        private readonly BillingNotificationService $billingNotifications,
     ) {}
 
     public function create(array $data, User $actor, Request $request): Invoice
@@ -92,6 +93,7 @@ class InvoiceService
         });
 
         $this->reports->invalidateGym((string) $invoice->gym_id);
+        $this->billingNotifications->memberInvoiceCreated($invoice);
 
         return $invoice;
     }

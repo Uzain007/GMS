@@ -74,9 +74,9 @@ test("existing queued email flows use branded views without replacing their secu
   assert.match(saas, /emails\.saas\.invoice-status/);
   assert.match(saas, /email_destination=saas_billing/);
   assert.match(saas, /mail_delivery_failed/);
-  assert.match(generic, /membership_payment_due.*emails\.membership\.payment-due/s);
+  assert.match(generic, /membership_payment_due.*emails\.billing\.invoice-status/s);
   assert.match(generic, /workout_plan_assigned.*emails\.training\.workout-plan-assigned/s);
-  assert.match(generic, /membership_payment_due' => 'member_account'/);
+  assert.match(generic, /membership_payment_due'.*'member_account'/s);
   assert.match(generic, /workout_plan_assigned' => 'member_training'/);
   assert.match(generic, /NotificationProviderException::rejected/);
 });

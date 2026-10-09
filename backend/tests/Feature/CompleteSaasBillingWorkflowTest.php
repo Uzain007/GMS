@@ -16,12 +16,14 @@ use App\Models\SaasPaymentApprovalReversal;
 use App\Models\SaasSubscriptionPayment;
 use App\Models\User;
 use App\Jobs\SendSaasBillingReminder;
+use App\Mail\BrandedTransactionalMail;
 use App\Services\AutomatedSaasBillingService;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -66,6 +68,7 @@ class CompleteSaasBillingWorkflowTest extends TestCase
         [$owner, $gym] = $this->tenant(UserRole::GymOwner);
         [, $price] = $this->plan('manual', 'active', ['cash', 'bank_transfer']);
         Sanctum::actingAs($owner);
+        Mail::fake();
 
         $prepared = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-invoice", [
             'saas_plan_price_id' => $price->id,
@@ -81,6 +84,18 @@ class CompleteSaasBillingWorkflowTest extends TestCase
             'idempotency_key' => 'prepare-cash-invoice-0001',
         ], ['X-Gym-ID' => $gym->id])->assertSuccessful()->assertJsonPath('data.id', $prepared['id']);
 
+        $createdNotice = app(TenantContext::class)->run($gym, fn () => SaasBillingNotification::query()
+            ->where('template_key', 'saas_invoice_created')->firstOrFail());
+        $this->assertSame('sent', $createdNotice->status);
+        Mail::assertSent(BrandedTransactionalMail::class, 1);
+        Mail::assertSent(BrandedTransactionalMail::class, function (BrandedTransactionalMail $mail) use ($owner, $prepared): bool {
+            return $mail->hasTo($owner->email)
+                && $mail->viewName === 'emails.billing.invoice-created'
+                && $mail->templateData['invoiceNumber'] === $prepared['number']
+                && str_contains($mail->templateData['actionUrl'], 'email_destination=saas_billing');
+        });
+        Mail::fake();
+
         $cash = $this->postJson("/api/v1/gyms/{$gym->id}/saas-subscription/manual-payments", [
             'saas_billing_invoice_id' => $prepared['id'],
             'method' => 'cash',
@@ -93,6 +108,8 @@ class CompleteSaasBillingWorkflowTest extends TestCase
             ->assertJsonPath('data.notes', 'Collected at IronCore billing desk.')
             ->assertJsonPath('data.invoice.number', $prepared['number'])
             ->json('data');
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(0, SaasBillingNotification::query()
+            ->where('template_key', 'saas_invoice_paid')->count()));
 
         $admin = User::factory()->create(['platform_role' => UserRole::SuperAdmin]);
         Sanctum::actingAs($admin);
@@ -107,7 +124,17 @@ class CompleteSaasBillingWorkflowTest extends TestCase
             $this->assertSame(1, GymSubscription::query()->count());
             $this->assertSame(1, SaasBillingInvoice::query()->count());
             $this->assertSame(1, AuditLog::query()->where('event', 'saas.subscription_payment.approved')->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_created')->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_paid')->count());
         });
+        $paidNotice = app(TenantContext::class)->run($gym, fn () => SaasBillingNotification::query()
+            ->where('template_key', 'saas_invoice_paid')->firstOrFail());
+        $this->assertSame('sent', $paidNotice->status);
+        Mail::assertSent(BrandedTransactionalMail::class, 1);
+        Mail::assertSent(BrandedTransactionalMail::class, fn (BrandedTransactionalMail $mail): bool =>
+            $mail->hasTo($owner->email)
+            && $mail->viewName === 'emails.billing.payment-paid'
+            && $mail->templateData['paymentMethod'] === 'Cash');
 
         [$otherOwner, $otherGym] = $this->tenant(UserRole::GymOwner);
         Sanctum::actingAs($otherOwner);
@@ -121,6 +148,8 @@ class CompleteSaasBillingWorkflowTest extends TestCase
             'receipt' => UploadedFile::fake()->create('proof.pdf', 20, 'application/pdf'),
         ], ['Accept' => 'application/json', 'X-Gym-ID' => $otherGym->id])
             ->assertCreated()->assertJsonPath('data.has_receipt', true);
+        app(TenantContext::class)->run($otherGym, fn () => $this->assertSame(0, SaasBillingNotification::query()
+            ->where('template_key', 'saas_invoice_paid')->count()));
     }
 
     public function test_saas_payment_and_invoice_dates_follow_the_selected_gym_calendar_day(): void
@@ -232,12 +261,16 @@ class CompleteSaasBillingWorkflowTest extends TestCase
         $this->travel(1)->day();
         app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
         app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
-        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, SaasBillingNotification::query()->where('saas_billing_invoice_id', $invoice['id'])->count()));
-        Queue::assertPushed(SendSaasBillingReminder::class, 1);
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, SaasBillingNotification::query()
+            ->where('saas_billing_invoice_id', $invoice['id'])->where('template_key', 'saas_invoice_overdue')->count()));
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(1, SaasBillingNotification::query()
+            ->where('saas_billing_invoice_id', $invoice['id'])->where('template_key', 'saas_account_restricted')->count()));
+        Queue::assertPushed(SendSaasBillingReminder::class, 3);
         $this->travel(1)->day();
         app(TenantContext::class)->run($gym, fn () => app(AutomatedSaasBillingService::class)->processTenant($gym));
-        app(TenantContext::class)->run($gym, fn () => $this->assertSame(2, SaasBillingNotification::query()->where('saas_billing_invoice_id', $invoice['id'])->count()));
-        Queue::assertPushed(SendSaasBillingReminder::class, 2);
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(2, SaasBillingNotification::query()
+            ->where('saas_billing_invoice_id', $invoice['id'])->where('template_key', 'saas_invoice_overdue')->count()));
+        Queue::assertPushed(SendSaasBillingReminder::class, 4);
 
         Sanctum::actingAs($owner);
         $this->getJson('/api/v1/platform/billing')->assertForbidden();

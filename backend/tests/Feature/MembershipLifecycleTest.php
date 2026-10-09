@@ -18,11 +18,14 @@ use App\Models\MembershipPlan;
 use App\Models\NotificationDelivery;
 use App\Models\Payment;
 use App\Models\User;
+use App\Jobs\SendNotificationDelivery;
+use App\Mail\BrandedTransactionalMail;
 use App\Services\AutomatedMembershipBillingService;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -343,9 +346,24 @@ class MembershipLifecycleTest extends TestCase
 
         $invoice = app(TenantContext::class)->run($gym, function () use ($membership): Invoice {
             $this->assertSame(1, Invoice::query()->where('membership_id', $membership->id)->count());
-            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_due')->count());
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_invoice_created')->count());
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_invoice_overdue')->count());
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_access_restricted')->count());
 
             return Invoice::query()->where('membership_id', $membership->id)->firstOrFail();
+        });
+        Mail::fake();
+        $overdueDelivery = app(TenantContext::class)->run($gym, fn () => NotificationDelivery::query()
+            ->where('template_key', 'membership_invoice_overdue')->firstOrFail());
+        $deliveryJob = new SendNotificationDelivery($gym->id, $overdueDelivery->id);
+        $deliveryJob->handle(app(TenantContext::class), app(\App\Services\NotificationService::class));
+        $deliveryJob->handle(app(TenantContext::class), app(\App\Services\NotificationService::class));
+        Mail::assertSent(BrandedTransactionalMail::class, 1);
+        Mail::assertSent(BrandedTransactionalMail::class, function (BrandedTransactionalMail $mail) use ($member, $invoice): bool {
+            return $mail->hasTo($member->email)
+                && $mail->viewName === 'emails.billing.invoice-status'
+                && $mail->templateData['invoiceNumber'] === $invoice->number
+                && str_contains($mail->templateData['actionUrl'], 'email_destination=member_account');
         });
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
             'branch_id' => $branch->id, 'member_code' => $member->member_code,
@@ -368,10 +386,56 @@ class MembershipLifecycleTest extends TestCase
             $this->assertNull($restored->billing_restricted_at);
             $this->assertTrue($restored->next_billing_at->isFuture());
             $this->assertDatabaseHas('audit_logs', ['gym_id' => $restored->gym_id, 'event' => 'membership.invoice.settled']);
+            $paid = Payment::query()->where('membership_id', $membership->id)->firstOrFail();
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_paid')->count());
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_access_restored')->count());
+            $this->assertSame('Overdue Member', trim($paid->member->first_name.' '.$paid->member->last_name));
+            app(\App\Services\BillingNotificationService::class)->memberPaymentPaid($paid, true);
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_paid')->count());
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_access_restored')->count());
         });
+        $restrictedDelivery = app(TenantContext::class)->run($gym, fn () => NotificationDelivery::query()
+            ->where('template_key', 'membership_access_restricted')->firstOrFail());
+        (new SendNotificationDelivery($gym->id, $restrictedDelivery->id))
+            ->handle(app(TenantContext::class), app(\App\Services\NotificationService::class));
+        $this->assertSame('suppressed', $restrictedDelivery->fresh()->status->value);
         $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
             'branch_id' => $branch->id, 'member_code' => $member->member_code,
         ], $headers)->assertCreated();
+    }
+
+    public function test_membership_due_date_queues_due_email_once_without_marking_it_overdue(): void
+    {
+        Queue::fake();
+        [$owner, $gym, $branch] = $this->tenant('DUE-TODAY');
+        app(TenantContext::class)->run($gym, function () use ($owner, $gym, $branch): void {
+            $member = Member::query()->create([
+                'home_branch_id' => $branch->id, 'member_number' => 'MBR-DUE-TODAY',
+                'first_name' => 'Due', 'last_name' => 'Member',
+                'email' => 'due.member@example.test', 'phone' => '+44 7700 901234',
+                'status' => MemberStatus::Active,
+            ]);
+            $plan = $this->createPlan($branch, 'DUE-TODAY', 6200);
+            Membership::query()->create([
+                'member_id' => $member->id, 'plan_id' => $plan->id, 'branch_id' => $branch->id,
+                'created_by' => $owner->id, 'status' => MembershipStatus::Active,
+                'starts_at' => today()->subMonth(), 'ends_at' => today()->addYear(),
+                'next_billing_at' => today(), 'price_amount_minor' => 6200,
+                'currency' => Currency::GBP, 'joining_fee_minor' => 0,
+                'billing_interval' => BillingInterval::Monthly, 'interval_count' => 1,
+                'auto_renew' => true, 'grace_period_days' => 7,
+            ]);
+
+            app(AutomatedMembershipBillingService::class)->processTenant($gym);
+            app(AutomatedMembershipBillingService::class)->processTenant($gym);
+
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_invoice_created')->count());
+            $due = NotificationDelivery::query()->where('template_key', 'membership_payment_due')->firstOrFail();
+            $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_due')->count());
+            $this->assertSame(0, NotificationDelivery::query()->where('template_key', 'membership_invoice_overdue')->count());
+            $this->assertSame('Lifecycle DUE-TODAY', data_get($due->variables, 'data.gym_name'));
+            $this->assertSame('62.00 GBP', data_get($due->variables, 'data.amount'));
+        });
     }
 
     private function createPlan(GymBranch $branch, string $suffix, int $price): MembershipPlan

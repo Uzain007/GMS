@@ -5,12 +5,9 @@ namespace App\Services;
 use App\Enums\BillingInterval;
 use App\Enums\InvoiceStatus;
 use App\Enums\MembershipStatus;
-use App\Enums\NotificationChannel;
 use App\Models\Gym;
 use App\Models\Invoice;
-use App\Models\Member;
 use App\Models\Membership;
-use App\Models\NotificationPreference;
 use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -24,7 +21,7 @@ class AutomatedMembershipBillingService
     public function __construct(
         private readonly TenantContext $tenant,
         private readonly AuditService $audit,
-        private readonly NotificationService $notifications,
+        private readonly BillingNotificationService $billingNotifications,
         private readonly ReportService $reports,
     ) {}
 
@@ -54,8 +51,8 @@ class AutomatedMembershipBillingService
             ->where('auto_renew', true)
             ->whereNotNull('next_billing_at')
             ->whereDate('next_billing_at', '<=', $today->addDays(self::INVOICE_LEAD_DAYS)->toDateString())
-            ->orderBy('id')->each(function (Membership $membership) use ($today, &$result): void {
-                DB::transaction(function () use ($membership, $today, &$result): void {
+            ->orderBy('id')->each(function (Membership $membership) use ($gym, $today, &$result): void {
+                DB::transaction(function () use ($gym, $membership, $today, &$result): void {
                     $locked = Membership::query()->with('member')->lockForUpdate()->findOrFail($membership->getKey());
                     $cycleDate = $locked->next_billing_at?->toDateString();
                     if (! $cycleDate || $locked->billing_interval === BillingInterval::OneTime) {
@@ -107,14 +104,22 @@ class AutomatedMembershipBillingService
                             'billing_cycle_date' => $cycleDate, 'amount_minor' => $invoice->total_amount_minor,
                             'currency' => $invoice->currency->value, 'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String(),
                         ], reason: 'Automated membership renewal invoice generation.');
+                        $this->billingNotifications->memberInvoiceCreated($invoice->loadMissing('member'));
                         $result['invoices_created']++;
                     }
 
-                    if ($invoice->status !== InvoiceStatus::Open || $invoice->due_at?->isFuture()) {
+                    if ($invoice->status !== InvoiceStatus::Open || ! $invoice->due_at) {
                         return;
                     }
-
-                    if ($this->queueReminder($locked->member, $invoice, $today)) {
+                    $dueDate = $invoice->due_at->copy()->setTimezone($gym->timezone)->toDateString();
+                    if ($dueDate > $today->toDateString()) {
+                        return;
+                    }
+                    // Billing reminders follow the gym's calendar date rather
+                    // than an end-of-day UTC instant, so the due-day notice is
+                    // not skipped by an hourly scheduler.
+                    $overdue = $dueDate < $today->toDateString();
+                    if ($this->billingNotifications->memberInvoiceDue($invoice->loadMissing('member'), $overdue, $today)) {
                         $result['reminders_queued']++;
                     }
 
@@ -123,6 +128,7 @@ class AutomatedMembershipBillingService
                         $this->audit->record('membership.billing_restricted', $locked->fresh(), null,
                             after: ['invoice_id' => $invoice->getKey(), 'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String()],
                             reason: 'The membership payment grace period expired.');
+                        $this->billingNotifications->memberAccessRestricted($locked->fresh(), $invoice->loadMissing('member'));
                         $result['restricted']++;
                     }
                 });
@@ -135,10 +141,10 @@ class AutomatedMembershipBillingService
         return $result;
     }
 
-    public function markInvoiceSettled(Invoice $invoice): void
+    public function markInvoiceSettled(Invoice $invoice): bool
     {
         if (! $invoice->membership_id || ! $invoice->billing_cycle_date || $invoice->status !== InvoiceStatus::Paid) {
-            return;
+            return false;
         }
         $membership = Membership::query()->lockForUpdate()->findOrFail($invoice->membership_id);
         $before = [
@@ -153,6 +159,8 @@ class AutomatedMembershipBillingService
             'invoice_id' => $invoice->getKey(), 'billing_restricted_at' => null,
             'next_billing_at' => $membership->fresh()->next_billing_at?->toDateString(),
         ], 'Membership invoice paid; access restored and renewal advanced.');
+
+        return $before['billing_restricted_at'] !== null;
     }
 
     private function nextCycle(Membership $membership): ?CarbonImmutable
@@ -168,21 +176,4 @@ class AutomatedMembershipBillingService
         };
     }
 
-    private function queueReminder(Member $member, Invoice $invoice, CarbonImmutable $today): bool
-    {
-        if (! $member->email) {
-            return false;
-        }
-        $preference = NotificationPreference::query()->where('member_id', $member->getKey())->first();
-        if (! ($preference?->payment_reminders_enabled ?? true) || ! ($preference?->email_enabled ?? true)) {
-            return false;
-        }
-        $delivery = $this->notifications->queue(
-            $member, null, NotificationChannel::Email, $member->email, 'membership_payment_due',
-            ['subject' => 'Your membership payment is due', 'body' => 'Please pay your open membership invoice before the grace period ends.', 'data' => ['invoice_id' => $invoice->getKey()]],
-            "membership-invoice:{$invoice->getKey()}:{$today->toDateString()}:email", $preference,
-        );
-
-        return $delivery->wasRecentlyCreated;
-    }
 }

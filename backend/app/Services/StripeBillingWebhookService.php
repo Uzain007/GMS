@@ -26,6 +26,7 @@ class StripeBillingWebhookService
         private readonly TenantContext $context,
         private readonly StripePlatformBillingService $stripe,
         private readonly GymSaasStatusService $gymStatus,
+        private readonly BillingNotificationService $billingNotifications,
     ) {}
 
     /** @return array{duplicate: bool} */
@@ -105,6 +106,9 @@ class StripeBillingWebhookService
 
         if (str_starts_with($type, 'invoice.')) {
             $invoice = $this->syncInvoice($customer, $object);
+            if ($invoice->wasRecentlyCreated) {
+                $this->billingNotifications->saasInvoiceCreated($this->context->gym(), $invoice->loadMissing('subscription'));
+            }
             $subscription = $invoice->subscription;
             if ($subscription && $type === 'invoice.payment_failed') {
                 $dueAt = $invoice->due_at ?? now();
@@ -125,6 +129,8 @@ class StripeBillingWebhookService
                 // Stripe may emit a zero-value paid invoice when a free trial
                 // starts. Only a genuinely settled billing period ends Trial.
                 $settledPaidPeriod = $invoice->amount_paid_minor > 0;
+                $wasRestricted = $subscription->billing_restricted_at !== null
+                    || $this->context->gym()->status->value === 'past_due';
                 $values = [
                     'latest_invoice_id' => $invoice->provider_invoice_id,
                     'failure_code' => null,
@@ -153,6 +159,16 @@ class StripeBillingWebhookService
                     $freshSubscription->trial_ends_at,
                     reason: 'Signed Stripe Billing paid-invoice synchronization.',
                 );
+                if ($settledPaidPeriod) {
+                    $paymentKey = (string) ($event['id'] ?? $invoice->provider_invoice_id);
+                    $this->billingNotifications->saasInvoicePaid($this->context->gym(), $invoice->fresh('subscription'), $paymentKey);
+                    if ($wasRestricted && $freshSubscription->billing_restricted_at === null
+                        && $this->context->gym()->fresh()->status->value === 'active') {
+                        $this->billingNotifications->saasAccessRestored(
+                            $this->context->gym(), $freshSubscription, $invoice->fresh(), $paymentKey,
+                        );
+                    }
+                }
             }
         }
     }

@@ -33,6 +33,7 @@ class PaymentService
         private readonly AutomatedMembershipBillingService $membershipBilling,
         private readonly ReceiptFileProcessor $receiptFiles,
         private readonly ReportService $reports,
+        private readonly BillingNotificationService $billingNotifications,
     ) {}
 
     /** @return array{payment: Payment, checkout_url: ?string, reused: bool} */
@@ -51,8 +52,9 @@ class PaymentService
         }
 
         $storedReceipt = null;
+        $accessRestored = false;
         try {
-            $payment = DB::transaction(function () use ($data, $actor, $request, $method, $receipt, &$storedReceipt): Payment {
+            $payment = DB::transaction(function () use ($data, $actor, $request, $method, $receipt, &$storedReceipt, &$accessRestored): Payment {
                 $member = Member::query()->findOrFail($data['member_id']);
                 $membership = isset($data['membership_id'])
                     ? Membership::query()->findOrFail($data['membership_id'])
@@ -116,7 +118,7 @@ class PaymentService
                 }
 
                 if (! $pending && $invoice) {
-                    $this->applyPaymentToInvoice($invoice, $payment->amount_minor);
+                    $accessRestored = $this->applyPaymentToInvoice($invoice, $payment->amount_minor);
                 }
                 $this->audit->record('payment.created', $payment, $actor, after: $payment->toArray(), request: $request);
 
@@ -130,6 +132,9 @@ class PaymentService
         }
 
         $this->reports->invalidateGym((string) $payment->gym_id);
+        if ($payment->status === PaymentStatus::Paid && $payment->invoice_id) {
+            $this->billingNotifications->memberPaymentPaid($payment, $accessRestored);
+        }
 
         if (! $method->isOnline()) {
             return ['payment' => $payment->load(['refunds', 'bankTransferReceipt']), 'checkout_url' => null, 'reused' => false];
@@ -211,7 +216,8 @@ class PaymentService
 
     public function markCheckoutSucceeded(string $paymentId, ?string $providerPaymentId): Payment
     {
-        $settled = DB::transaction(function () use ($paymentId, $providerPaymentId): Payment {
+        $accessRestored = false;
+        $settled = DB::transaction(function () use ($paymentId, $providerPaymentId, &$accessRestored): Payment {
             $payment = Payment::query()->lockForUpdate()->findOrFail($paymentId);
             if ($payment->status === PaymentStatus::Paid) {
                 return $payment;
@@ -230,7 +236,7 @@ class PaymentService
             ]);
             if ($payment->invoice_id) {
                 $invoice = Invoice::query()->lockForUpdate()->findOrFail($payment->invoice_id);
-                $this->applyPaymentToInvoice($invoice, $payment->amount_minor);
+                $accessRestored = $this->applyPaymentToInvoice($invoice, $payment->amount_minor);
             }
             $fresh = $payment->fresh();
             $this->audit->record('payment.paid', $fresh, null, after: $fresh->toArray());
@@ -238,6 +244,7 @@ class PaymentService
             return $fresh;
         });
         $this->reports->invalidateGym((string) $settled->gym_id);
+        $this->billingNotifications->memberPaymentPaid($settled, $accessRestored);
 
         return $settled;
     }
@@ -260,7 +267,8 @@ class PaymentService
 
     public function reviewBankTransfer(Payment $payment, array $data, User $actor, Request $request): Payment
     {
-        $reviewed = DB::transaction(function () use ($payment, $data, $actor, $request): Payment {
+        $accessRestored = false;
+        $reviewed = DB::transaction(function () use ($payment, $data, $actor, $request, &$accessRestored): Payment {
             $locked = Payment::query()->with('bankTransferReceipt')->lockForUpdate()->findOrFail($payment->getKey());
             if ($locked->method !== PaymentMethod::BankTransfer || ! $locked->bankTransferReceipt) {
                 throw ValidationException::withMessages(['payment' => ['This payment has no bank-transfer receipt to review.']]);
@@ -278,7 +286,7 @@ class PaymentService
                         'payment' => ['The linked invoice no longer has enough outstanding balance for this transfer.'],
                     ]);
                 }
-                $this->applyPaymentToInvoice($invoice, $locked->amount_minor);
+                $accessRestored = $this->applyPaymentToInvoice($invoice, $locked->amount_minor);
                 if ($invoice->fresh()->status === InvoiceStatus::Paid && $locked->membership_id) {
                     $membership = Membership::query()->lockForUpdate()->findOrFail($locked->membership_id);
                     $today = TenantClock::businessDate();
@@ -329,6 +337,9 @@ class PaymentService
             return $fresh;
         });
         $this->reports->invalidateGym((string) $reviewed->gym_id);
+        if ($reviewed->status === PaymentStatus::Paid) {
+            $this->billingNotifications->memberPaymentPaid($reviewed, $accessRestored);
+        }
 
         return $reviewed;
     }
@@ -428,7 +439,7 @@ class PaymentService
         }
     }
 
-    private function applyPaymentToInvoice(Invoice $invoice, int $amount): void
+    private function applyPaymentToInvoice(Invoice $invoice, int $amount): bool
     {
         $paid = min($invoice->total_amount_minor, $invoice->paid_amount_minor + $amount);
         $due = max(0, $invoice->total_amount_minor - $paid);
@@ -439,8 +450,10 @@ class PaymentService
             'paid_at' => $due === 0 ? now() : null,
         ]);
         if ($due === 0) {
-            $this->membershipBilling->markInvoiceSettled($invoice->fresh());
+            return $this->membershipBilling->markInvoiceSettled($invoice->fresh());
         }
+
+        return false;
     }
 
     private function historicalPaymentTime(array $data): CarbonImmutable

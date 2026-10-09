@@ -3,11 +3,14 @@
 namespace App\Jobs;
 
 use App\Enums\SaasSubscriptionStatus;
+use App\Enums\PaymentProvider;
+use App\Enums\PaymentStatus;
 use App\Exceptions\SaasBillingReminderDeliveryException;
 use App\Mail\BrandedTransactionalMail;
 use App\Models\Gym;
 use App\Models\GymSubscription;
 use App\Models\SaasBillingNotification;
+use App\Models\SaasSubscriptionPayment;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -46,8 +49,19 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
                     $row->update(['status' => 'suppressed', 'failure_code' => 'subscription_active']);
                     return null;
                 }
-                if (! $trialNotice && $row->invoice()->where('status', 'paid')->exists()) {
+                $invoiceReminder = in_array($row->template_key, ['saas_invoice_due', 'saas_invoice_overdue'], true);
+                if ($invoiceReminder && $row->invoice()->where('status', 'paid')->exists()) {
                     $row->update(['status' => 'suppressed', 'failure_code' => 'invoice_paid']);
+                    return null;
+                }
+                if (in_array($row->template_key, ['saas_invoice_paid', 'saas_account_restored'], true)
+                    && ! $row->invoice()->where('status', 'paid')->exists()) {
+                    $row->update(['status' => 'suppressed', 'failure_code' => 'invoice_not_paid']);
+                    return null;
+                }
+                if ($row->template_key === 'saas_account_restricted'
+                    && ! $row->subscription()->whereNotNull('billing_restricted_at')->exists()) {
+                    $row->update(['status' => 'suppressed', 'failure_code' => 'access_already_restored']);
                     return null;
                 }
                 $row->update(['status' => 'sending', 'attempts' => $row->attempts + 1, 'failure_code' => null]);
@@ -123,6 +137,76 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
         if (! $invoice) {
             throw new \LogicException('Invoice reminder is missing its invoice.');
         }
+        $amountDue = number_format($invoice->amount_due_minor / 100, 2).' '.$invoice->currency->value;
+        $dueDate = $invoice->due_at?->copy()->setTimezone($gym->timezone)->format('j M Y') ?? 'Due on receipt';
+        if ($notification->template_key === 'saas_invoice_created') {
+            $subject = 'Your IronCore subscription invoice is ready';
+
+            return [$subject, 'emails.billing.invoice-created', [
+                'subject' => $subject,
+                'preheader' => "Invoice {$invoice->number} for {$gym->name} is ready.",
+                'recipientName' => $recipientName,
+                'billingLabel' => 'IronCore subscription billing',
+                'heading' => 'Your subscription invoice is ready',
+                'gymName' => $gym->name,
+                'invoiceNumber' => $invoice->number,
+                'amount' => $amountDue,
+                'dueDate' => $dueDate,
+                'status' => str($invoice->status->value)->replace('_', ' ')->headline()->toString(),
+                'actionUrl' => $billingUrl,
+                'actionLabel' => 'Review billing',
+            ]];
+        }
+        if ($notification->template_key === 'saas_invoice_paid') {
+            $payment = SaasSubscriptionPayment::query()
+                ->where('saas_billing_invoice_id', $invoice->id)
+                ->whereIn('status', [PaymentStatus::Paid->value, PaymentStatus::PartiallyRefunded->value, PaymentStatus::Refunded->value])
+                ->latest('paid_at')->first();
+            $method = $payment?->method->value
+                ?? ($notification->subscription?->provider === PaymentProvider::Stripe ? 'stripe' : 'manual');
+            $paidAt = $payment?->paid_at ?? $invoice->paid_at;
+            $subject = 'Your IronCore subscription payment is confirmed';
+
+            return [$subject, 'emails.billing.payment-paid', [
+                'subject' => $subject,
+                'preheader' => "Payment for invoice {$invoice->number} has been confirmed.",
+                'recipientName' => $recipientName,
+                'billingLabel' => 'IronCore subscription billing',
+                'heading' => 'Your subscription payment is confirmed',
+                'gymName' => $gym->name,
+                'invoiceNumber' => $invoice->number,
+                'amountPaid' => number_format($invoice->amount_paid_minor / 100, 2).' '.$invoice->currency->value,
+                'paymentDate' => $paidAt?->copy()->setTimezone($gym->timezone)->format('j M Y') ?? 'Recorded now',
+                'paymentMethod' => str($method)->replace('_', ' ')->headline()->toString(),
+                'accessRestored' => false,
+                'actionUrl' => $billingUrl,
+                'actionLabel' => 'View billing',
+            ]];
+        }
+        if (in_array($notification->template_key, ['saas_account_restricted', 'saas_account_restored'], true)) {
+            $restricted = $notification->template_key === 'saas_account_restricted';
+            $subject = $restricted
+                ? 'Action required: your IronCore account is restricted'
+                : 'Your IronCore account access has been restored';
+
+            return [$subject, 'emails.billing.access-status', [
+                'subject' => $subject,
+                'preheader' => $restricted
+                    ? "Payment is required to restore normal operations for {$gym->name}."
+                    : "Normal operations for {$gym->name} are restored.",
+                'recipientName' => $recipientName,
+                'billingLabel' => 'IronCore subscription billing',
+                'heading' => $restricted ? 'Your IronCore account is restricted' : 'Your IronCore account is restored',
+                'gymName' => $gym->name,
+                'invoiceNumber' => $invoice->number,
+                'restricted' => $restricted,
+                'restored' => ! $restricted,
+                'accessNoun' => 'IronCore account access',
+                'actionUrl' => $billingUrl,
+                'actionLabel' => $restricted ? 'Restore access' : 'View billing',
+            ]];
+        }
+
         $localNow = now($gym->timezone);
         $graceEnd = $invoice->grace_ends_at?->copy()->setTimezone($gym->timezone)->startOfDay() ?? $localNow;
         $days = max(0, $localNow->copy()->startOfDay()->diffInDays($graceEnd, false));

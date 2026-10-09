@@ -243,6 +243,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         app(TenantContext::class)->run($gym, function () use ($subscription): void {
             $this->assertSame(SaasSubscriptionStatus::PastDue, $subscription->fresh()->status);
             $this->assertTrue(AuditLog::query()->where('event', 'gym.saas_status.synchronized')->exists());
+            $this->assertSame(0, SaasBillingNotification::query()->where('template_key', 'saas_invoice_paid')->count());
         });
     }
 
@@ -284,6 +285,10 @@ class SaasOptionalPaymentPublishingTest extends TestCase
             SaasSubscriptionStatus::Trialing,
             $subscription->fresh()->status,
         ));
+        app(TenantContext::class)->run($gym, fn () => $this->assertSame(
+            0,
+            SaasBillingNotification::query()->where('template_key', 'saas_invoice_paid')->count(),
+        ));
 
         app(StripeBillingWebhookService::class)->process([
             'id' => 'evt_invoice_paid_trial_001',
@@ -311,6 +316,7 @@ class SaasOptionalPaymentPublishingTest extends TestCase
             $this->assertNull($fresh->trial_ends_at);
             $this->assertSame($periodStart->timestamp, $fresh->current_period_start?->timestamp);
             $this->assertSame($periodEnd->timestamp, $fresh->current_period_end?->timestamp);
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_paid')->count());
         });
     }
 
@@ -485,7 +491,8 @@ class SaasOptionalPaymentPublishingTest extends TestCase
         $invoice = app(TenantContext::class)->run($gym, fn () => SaasBillingInvoice::query()->where('status', 'due')->firstOrFail());
         app(TenantContext::class)->run($gym, function (): void {
             $this->assertSame(1, SaasBillingInvoice::query()->count());
-            $this->assertSame(1, SaasBillingNotification::query()->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_created')->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_due')->count());
         });
 
         $this->travel(16)->days();

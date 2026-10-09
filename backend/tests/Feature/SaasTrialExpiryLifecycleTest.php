@@ -45,14 +45,14 @@ class SaasTrialExpiryLifecycleTest extends TestCase
         });
 
         $notification = app(TenantContext::class)->run($gym, function () use ($subscription): SaasBillingNotification {
-            $this->assertSame(1, SaasBillingNotification::query()->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_trial_ending')->count());
             return SaasBillingNotification::query()
                 ->where('gym_subscription_id', $subscription->id)
                 ->where('template_key', 'saas_trial_ending')
                 ->firstOrFail();
         });
         $this->assertSame($owner->id, $notification->recipient_user_id);
-        Queue::assertPushed(SendSaasBillingReminder::class, 1);
+        Queue::assertPushed(SendSaasBillingReminder::class, 2);
 
         config(['mail.default' => 'array']);
         (new SendSaasBillingReminder($gym->id, $notification->id))->handle(app(TenantContext::class));
@@ -117,6 +117,9 @@ class SaasTrialExpiryLifecycleTest extends TestCase
             $restored = GymSubscription::query()->firstOrFail();
             $this->assertSame(SaasSubscriptionStatus::Active, $restored->status);
             $this->assertNull($restored->billing_restricted_at);
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_created')->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_invoice_paid')->count());
+            $this->assertSame(1, SaasBillingNotification::query()->where('template_key', 'saas_account_restored')->count());
         });
         $this->assertSame(GymStatus::Active, $gym->fresh()->status);
 
