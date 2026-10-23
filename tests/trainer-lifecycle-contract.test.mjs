@@ -61,8 +61,9 @@ test("trainer images and non-destructive offboarding stay behind tenant API rout
   for (const column of ["display_name", "contact_email", "phone", "profile_image_path"]) assert.match(migration, new RegExp(column));
   assert.match(model, /BelongsToGym/);
   assert.match(routes, /\/staff\/\{staff\}\/profile-image/);
-  assert.match(service, /staff\.terminated/);
-  assert.match(service, /'status' => 'inactive'/);
+  assert.match(service, /staff\.employee_deleted/);
+  assert.match(service, /StaffStatus::Deleted/);
+  assert.match(service, /'status' => 'deleted'/);
   assert.match(service, /'permissions' => \[\]/);
   assert.match(service, /where\('gym_id', \$this->tenant->id\(\)\)/);
   assert.match(staff, /Remove access/);

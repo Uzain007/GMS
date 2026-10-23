@@ -117,6 +117,7 @@ test("SaaS financial corrections preserve original history and remain Super Admi
   assert.match(tenantUi, /Correct \/ replace/);
   assert.match(platformUi, /Use only when no money was received/);
   assert.match(planUi, /Archived plans/);
-  assert.match(planUi, /Delete unused draft/);
+  assert.match(planUi, /Permanently delete/);
+  assert.match(planUi, /This permanently deletes this SaaS plan\. This action cannot be undone\./);
   assert.match(planUi, /Location limit/);
 });

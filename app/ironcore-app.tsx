@@ -40,6 +40,7 @@ import {
   type SaasPaymentOptions,
   type SaasPlanRecord,
   type SaasSubscriptionPaymentRecord,
+  type SaasPlanChangeRequestRecord,
   type AttendanceRecord,
   type ClassBookingRecord,
   type ClassSessionRecord,
@@ -81,7 +82,7 @@ type OperationsState = { branches: BranchRecord[]; plans: MembershipPlanRecord[]
 type StaffState = { rows: StaffRecord[]; invitations: StaffInvitationRecord[]; loading: boolean; error: string | null };
 type TrainerProfileState = { profile: StaffRecord | null; loading: boolean; error: string | null };
 type FinanceState = { payments: PaymentRecord[]; invoices: InvoiceRecord[]; summary: PaymentSummaryRecord | null; gateway: PaymentGatewayRecord | null; stripeConfigured: boolean; stripeAvailable: boolean; loading: boolean; error: string | null };
-type SaasState = { plans: SaasPlanRecord[]; subscription: GymSubscriptionRecord | null; invoices: SaasBillingInvoiceRecord[]; payments: SaasSubscriptionPaymentRecord[]; paymentOptions: SaasPaymentOptions; loading: boolean; error: string | null };
+type SaasState = { plans: SaasPlanRecord[]; subscription: GymSubscriptionRecord | null; invoices: SaasBillingInvoiceRecord[]; payments: SaasSubscriptionPaymentRecord[]; planChangeRequests?: SaasPlanChangeRequestRecord[]; paymentOptions: SaasPaymentOptions; loading: boolean; error: string | null };
 type EngagementState = { attendance: AttendanceRecord[]; sessions: ClassSessionRecord[]; bookings: ClassBookingRecord[]; loading: boolean; error: string | null };
 type CoachingState = { assignments: TrainerAssignmentRecord[]; plans: WorkoutPlanRecord[]; sessions: WorkoutSessionRecord[]; measurements: ProgressMeasurementRecord[]; preference: NotificationPreferenceRecord | null; deliveries: NotificationDeliveryRecord[]; loading: boolean; error: string | null };
 type ReportState = { report: ReportOverviewRecord | null; from: string; to: string; currency: GymSummary["base_currency"]; branchId: string; loading: boolean; error: string | null };
@@ -900,9 +901,10 @@ export function IronCoreApp() {
         api.saasBillingInvoices(selectedGym.id),
         api.saasSubscriptionPayments(selectedGym.id),
         api.saasPaymentOptions(selectedGym.id),
-      ]).then(([plans, subscription, invoices, payments, paymentOptions]) => {
+        api.saasPlanChangeRequests(selectedGym.id),
+      ]).then(([plans, subscription, invoices, payments, paymentOptions, planChanges]) => {
         if (sequence !== saasSequence.current) return;
-        const failures = [plans, subscription, invoices, payments, paymentOptions]
+        const failures = [plans, subscription, invoices, payments, paymentOptions, planChanges]
           .filter((result): result is PromiseRejectedResult => result.status === "rejected");
         // Never combine a fresh subscription with stale financial rows after a
         // partial request failure; empty failed slices make the unavailable
@@ -913,6 +915,7 @@ export function IronCoreApp() {
           subscription: resolvedSubscription,
           invoices: invoices.status === "fulfilled" ? invoices.value.data : [],
           payments: payments.status === "fulfilled" ? payments.value.data : [],
+          planChangeRequests: planChanges.status === "fulfilled" ? planChanges.value.data : [],
           paymentOptions: paymentOptions.status === "fulfilled" ? paymentOptions.value : emptySaasPaymentOptions,
           loading: false,
           error: failures.length > 0
@@ -1171,6 +1174,12 @@ export function IronCoreApp() {
   async function updateMember(memberId: string, input: UpdateMember): Promise<void> {
     if (!api || !selectedGym) throw new Error("Select a gym before updating a member.");
     await api.updateMember(selectedGym.id, memberId, input);
+    const refreshed = await api.members(selectedGym.id, memberSearch);
+    setMembers({ rows: refreshed.data.map((member) => dashboardMember(member, selectedGym.name)), total: refreshed.meta.total, loading: false, error: null });
+  }
+  async function deleteMember(memberId: string, reason: string): Promise<void> {
+    if (!api || !selectedGym) throw new Error("Select a gym before removing a member.");
+    await api.deleteMember(selectedGym.id, memberId, reason);
     const refreshed = await api.members(selectedGym.id, memberSearch);
     setMembers({ rows: refreshed.data.map((member) => dashboardMember(member, selectedGym.name)), total: refreshed.meta.total, loading: false, error: null });
   }
@@ -1543,6 +1552,7 @@ export function IronCoreApp() {
     onUpdatePlan: updateSaasPlan,
     onDeletePlan: deleteSaasPlan,
     onLoadMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembers(params); },
+    onLoadStaff: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformStaff(params); },
     onExportMembers: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformMembersExport(params); },
     onLoadBilling: (params) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.platformBilling(params); },
     onCreateSaasInvoice: async (gymId, input) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.createSaasInvoice(gymId, input); },
@@ -1633,6 +1643,7 @@ export function IronCoreApp() {
     subscription: saas.subscription,
     invoices: saas.invoices,
     payments: saas.payments,
+    planChangeRequests: saas.planChangeRequests ?? [],
     paymentOptions: saas.paymentOptions,
     baseCurrency: selectedGym.base_currency,
     timezone: selectedGym.timezone,
@@ -1660,6 +1671,12 @@ export function IronCoreApp() {
     onExportPayments: user.platform_role === "super_admin" ? (format) => { if (!api) throw new Error("The IronCore API is unavailable."); return api.saasPaymentReport(selectedGym.id, format); } : undefined,
     onPortal: openSaasPortal,
     onCreatePlan: user.platform_role === "super_admin" ? createSaasPlan : undefined,
+    onRequestPlanChange: selectedGym.role === "gym_owner" ? async (priceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.requestSaasPlanChange(selectedGym.id, priceId, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onCancelPlanChange: selectedGym.role === "gym_owner" ? async (requestId) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.cancelSaasPlanChange(selectedGym.id, requestId); setSaasRefresh((value) => value + 1); } : undefined,
+    onReviewPlanChange: user.platform_role === "super_admin" ? async (requestId, decision, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.reviewSaasPlanChange(selectedGym.id, requestId, decision, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onSendPaymentReminder: user.platform_role === "super_admin" ? async (invoiceId, reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.sendSaasPaymentReminder(selectedGym.id, invoiceId, reason); setSaasRefresh((value) => value + 1); } : undefined,
+    onPreviewAllPaymentReminders: user.platform_role === "super_admin" ? async () => { if (!api) throw new Error("The IronCore API is unavailable."); return (await api.previewSaasPaymentReminders()).eligible; } : undefined,
+    onSendAllPaymentReminders: user.platform_role === "super_admin" ? async (reason) => { if (!api) throw new Error("The IronCore API is unavailable."); await api.sendAllSaasPaymentReminders(reason); setSaasRefresh((value) => value + 1); } : undefined,
   };
   const liveEngagement: EngagementData = {
     attendance: engagement.attendance,
@@ -1751,7 +1768,7 @@ export function IronCoreApp() {
     onLogout={logout}
     onChangePassword={changePassword}
     mfa={mfaActions}
-    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onView: viewMember, onInvitePortal: inviteMemberPortal, onUpdate: updateMember, onPreviewImport: previewMemberImport, onConfirmImport: confirmMemberImport, onPollImport: pollMemberImport, onDownloadTemplate: downloadMemberTemplate, onExport: exportMembers } : undefined}
+    liveMembers={canManageMembers ? { ...members, onSearch: setMemberSearch, onReload: () => setMemberRefresh((value) => value + 1), onView: viewMember, onInvitePortal: inviteMemberPortal, onUpdate: updateMember, onDelete: deleteMember, onPreviewImport: previewMemberImport, onConfirmImport: confirmMemberImport, onPollImport: pollMemberImport, onDownloadTemplate: downloadMemberTemplate, onExport: exportMembers } : undefined}
     liveOperations={liveOperations}
     liveStaff={canManageStaff ? liveStaff : undefined}
     liveFinance={canManageMembers ? liveFinance : undefined}

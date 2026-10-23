@@ -10,6 +10,7 @@ use App\Models\Member;
 use App\Models\MembershipPlan;
 use App\Models\SaasBillingInvoice;
 use App\Models\SaasSubscriptionPayment;
+use App\Models\StaffProfile;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -152,7 +153,8 @@ class PlatformInsightsService
                 $query = $base->with([
                     'homeBranch:id,gym_id,name',
                     'memberships' => fn ($q) => $q->with('plan:id,name')->latest('starts_at')->limit(1),
-                ])->orderBy('last_name')->orderBy('first_name')->orderBy('id');
+                ])->withCount(['memberships', 'payments', 'attendanceRecords'])
+                    ->orderBy('last_name')->orderBy('first_name')->orderBy('id');
                 if ($limit !== null) {
                     $query->offset($remainingOffset)->limit($remainingLimit);
                 }
@@ -172,6 +174,12 @@ class PlatformInsightsService
                         'membership_status' => $membership?->status?->value,
                         'plan' => $membership?->plan ? ['id' => $membership->plan->id, 'name' => $membership->plan->name] : null,
                         'joined_at' => $member->joined_at?->toDateString(),
+                        'created_at' => $member->created_at?->toIso8601String(),
+                        'lifecycle_changed_at' => $member->lifecycle_changed_at?->toIso8601String(),
+                        'lifecycle_reason' => $member->lifecycle_reason,
+                        'membership_history_count' => $member->memberships_count,
+                        'payment_history_count' => $member->payments_count,
+                        'attendance_history_count' => $member->attendance_records_count,
                     ]);
                 }
                 if ($remainingLimit !== null) {
@@ -183,6 +191,43 @@ class PlatformInsightsService
             });
         }
         return ['rows' => $rows->values()->all(), 'total' => $total];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function staff(array $filters): array
+    {
+        $rows = collect();
+        foreach ($this->gyms($filters['gym_id'] ?? null) as $gym) {
+            $this->tenant->run($gym, function () use ($gym, $filters, $rows): void {
+                $query = StaffProfile::query()->with(['user:id,name,email', 'homeBranch:id,gym_id,name'])
+                    ->withCount(['attendanceRecords', 'classSessions', 'memberAssignments', 'workoutPlans'])
+                    ->orderBy('created_at');
+                if (! empty($filters['status'])) $query->where('status', $filters['status']);
+                if (! empty($filters['search'])) {
+                    $like = '%'.addcslashes(mb_strtolower(trim($filters['search'])), '%_\\').'%';
+                    $query->where(fn ($q) => $q->whereRaw('LOWER(display_name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(contact_email) LIKE ?', [$like])->orWhere('employee_number', 'like', $like));
+                }
+                $query->each(function (StaffProfile $profile) use ($gym, $rows): void {
+                    $role = $profile->user ? $profile->user->gyms()->whereKey($gym->id)->first()?->pivot?->role : null;
+                    $rows->push([
+                        'id' => $profile->id, 'gym_id' => $gym->id, 'gym_name' => $gym->name,
+                        'name' => $profile->professionalName(), 'email' => $profile->professionalEmail(),
+                        'phone' => $profile->phone, 'employee_number' => $profile->employee_number,
+                        'role' => $role, 'job_title' => $profile->job_title,
+                        'branch' => $profile->homeBranch ? ['id' => $profile->homeBranch->id, 'name' => $profile->homeBranch->name] : null,
+                        'status' => $profile->status->value, 'created_at' => $profile->created_at?->toIso8601String(),
+                        'lifecycle_changed_at' => $profile->lifecycle_changed_at?->toIso8601String(),
+                        'lifecycle_reason' => $profile->lifecycle_reason,
+                        'attendance_history_count' => $profile->attendance_records_count,
+                        'class_history_count' => $profile->class_sessions_count,
+                        'member_assignment_history_count' => $profile->member_assignments_count,
+                        'workout_plan_history_count' => $profile->workout_plans_count,
+                    ]);
+                });
+            });
+        }
+        return $rows->values()->all();
     }
 
     private function memberQuery(array $filters): \Illuminate\Database\Eloquent\Builder

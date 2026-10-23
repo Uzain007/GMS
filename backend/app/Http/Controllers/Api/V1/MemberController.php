@@ -10,6 +10,8 @@ use App\Http\Requests\UpdateMemberRequest;
 use App\Http\Resources\MemberResource;
 use App\Models\Member;
 use App\Models\Membership;
+use App\Models\MemberAccessCredential;
+use App\Enums\AccessCredentialStatus;
 use App\Models\GymBranch;
 use App\Services\AuditService;
 use App\Services\MemberCodeService;
@@ -26,6 +28,10 @@ class MemberController extends Controller
 
         if (request()->filled('status')) {
             $query->where('status', request('status'));
+        } else {
+            // Removed members remain available to the platform historical directory,
+            // but no longer appear in the gym's active operational population.
+            $query->where('status', '!=', MemberStatus::Deleted->value);
         }
         if (request()->filled('branch_id')) {
             $query->where('home_branch_id', request('branch_id'));
@@ -95,14 +101,71 @@ class MemberController extends Controller
         if (($data['status'] ?? null) === MemberStatus::Archived->value) {
             $data['archived_at'] = now();
         }
+        if (isset($data['status'])) {
+            $status = MemberStatus::from($data['status']);
+            $data['lifecycle_changed_at'] = now();
+            $data['lifecycle_reason'] = (string) $request->string('reason');
+            if ($status === MemberStatus::Active) {
+                $data['archived_at'] = null;
+            }
+        }
 
         $fresh = DB::transaction(function () use ($model, $data, $audit, $request, $before): Member {
             $model->update($data);
+            if (isset($data['status'])) {
+                $active = $data['status'] === MemberStatus::Active->value;
+                if ($model->user_id) {
+                    DB::table('gym_user')->where('gym_id', $model->gym_id)->where('user_id', $model->user_id)
+                        ->update(['status' => $active ? 'active' : $data['status'], 'updated_at' => now()]);
+                }
+                if (! $active) {
+                    MemberAccessCredential::query()->where('member_id', $model->id)
+                        ->where('status', AccessCredentialStatus::Active->value)
+                        ->update(['status' => AccessCredentialStatus::Revoked->value, 'revoked_at' => now()]);
+                }
+            }
             $fresh = $model->fresh();
-            $audit->record('member.updated', $fresh, $request->user(), $before, $fresh->toArray(), (string) $request->string('reason'), $request);
+            $event = ! isset($data['status']) || ($before['status'] ?? null) === $fresh->status->value
+                ? 'member.updated'
+                : match ($fresh->status) {
+                    MemberStatus::Suspended => 'member.suspended',
+                    MemberStatus::Inactive => 'member.deactivated',
+                    MemberStatus::Deleted => 'member.deleted',
+                    MemberStatus::Active => 'member.reactivated',
+                    default => 'member.updated',
+                };
+            $audit->record($event, $fresh, $request->user(), $before, $fresh->toArray(), (string) $request->string('reason'), $request);
             return $fresh;
         });
 
+        return new MemberResource($fresh);
+    }
+
+    public function destroy(\Illuminate\Http\Request $request, string $member, AuditService $audit): MemberResource
+    {
+        $data = $request->validate(['reason' => ['required', 'string', 'min:5', 'max:500']]);
+        $model = Member::query()->findOrFail($member);
+        if ($model->status === MemberStatus::Deleted) {
+            return new MemberResource($model);
+        }
+        $before = $model->toArray();
+        $fresh = DB::transaction(function () use ($model, $data, $request, $audit, $before): Member {
+            $model->update([
+                'status' => MemberStatus::Deleted,
+                'lifecycle_changed_at' => now(),
+                'lifecycle_reason' => $data['reason'],
+            ]);
+            if ($model->user_id) {
+                DB::table('gym_user')->where('gym_id', $model->gym_id)->where('user_id', $model->user_id)
+                    ->update(['status' => 'deleted', 'updated_at' => now()]);
+            }
+            MemberAccessCredential::query()->where('member_id', $model->id)
+                ->where('status', AccessCredentialStatus::Active->value)
+                ->update(['status' => AccessCredentialStatus::Revoked->value, 'revoked_at' => now()]);
+            $fresh = $model->fresh();
+            $audit->record('member.deleted', $fresh, $request->user(), $before, $fresh->toArray(), $data['reason'], $request);
+            return $fresh;
+        });
         return new MemberResource($fresh);
     }
 

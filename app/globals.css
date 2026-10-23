@@ -1171,3 +1171,19 @@ body{font-size:14px;line-height:1.55}
 .class-roster-empty span{font-size:12px;line-height:1.5}
 @media(max-width:820px){.manage-class-grid{grid-template-columns:minmax(0,1fr)}.manage-class-wide{grid-column:auto}}
 @media(max-width:620px){.manage-class-modal-layer{padding:10px}.manage-class-modal{width:min(100%,720px);max-width:100%}.manage-class-modal .manage-class-actions{align-items:stretch;flex-direction:column-reverse;flex-wrap:nowrap}.manage-class-modal .manage-class-actions button{width:100%;flex:0 0 auto}.class-roster-row{align-items:start;grid-template-columns:minmax(0,1fr)}.class-roster-side{align-items:flex-start;justify-content:flex-start}.class-roster-side>.status{align-self:flex-start}.class-roster-attendance-actions{flex-wrap:wrap}.class-roster-attendance-actions button{flex:1 1 120px}}
+/* Dynamic tenant names, references and descriptions must wrap without hiding business data. */
+:where(.panel, .modal-card, .data-table td, .data-table th, button, label, dd, .table-sub, .saas-reference) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+:where(.modal-card, .panel, .table-scroll) {
+  max-width: 100%;
+}
+
+:where(input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}

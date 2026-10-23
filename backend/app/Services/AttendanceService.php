@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AccessCredentialStatus;
 use App\Enums\AttendanceMethod;
 use App\Enums\AttendanceStatus;
+use App\Enums\CheckoutType;
 use App\Enums\BranchStatus;
 use App\Enums\MembershipStatus;
 use App\Enums\MemberStatus;
@@ -22,7 +23,7 @@ use Illuminate\Validation\ValidationException;
 
 class AttendanceService
 {
-    private const MAX_OPEN_HOURS = 24;
+    private const MAX_OPEN_HOURS = 6;
 
     public function __construct(private readonly AuditService $audit) {}
 
@@ -231,6 +232,7 @@ class AttendanceService
                 'status' => AttendanceStatus::CheckedOut,
                 'checked_out_by' => $actor->getKey(),
                 'checked_out_at' => now(),
+                'checkout_type' => CheckoutType::Manual,
             ]);
             $this->audit->record('attendance.checked_out', $attendance, $actor, after: [
                 'member_id' => $attendance->member_id,
@@ -311,14 +313,15 @@ class AttendanceService
                     'status' => AttendanceStatus::CheckedOut,
                     'checked_out_at' => $automaticCheckoutAt,
                     'checked_out_by' => null,
+                    'checkout_type' => CheckoutType::Automatic,
                 ]);
                 $this->audit->record(
-                    'attendance.stale_session_closed',
+                    'attendance.member_auto_checked_out',
                     $record->fresh(),
                     $actor,
                     before: ['status' => AttendanceStatus::CheckedIn->value],
                     after: ['status' => AttendanceStatus::CheckedOut->value, 'checked_out_at' => $automaticCheckoutAt->toIso8601String()],
-                    reason: 'Open attendance exceeded the 24-hour safety window.',
+                    reason: 'The member session reached the six-hour automatic checkout limit.',
                     request: $request,
                 );
             }

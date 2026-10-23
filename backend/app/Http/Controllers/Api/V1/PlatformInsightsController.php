@@ -53,6 +53,16 @@ class PlatformInsightsController extends Controller
         return response()->json($page);
     }
 
+    public function staff(Request $request, PlatformInsightsService $insights): JsonResponse
+    {
+        $filters = $request->validate([
+            'gym_id' => ['nullable', 'uuid', 'exists:gyms,id'],
+            'status' => ['nullable', Rule::in(['active', 'inactive', 'suspended', 'deleted'])],
+            'search' => ['nullable', 'string', 'max:100'],
+        ]);
+        return response()->json(['data' => $insights->staff($filters)]);
+    }
+
     public function exportMembers(Request $request, PlatformInsightsService $insights, AuditService $audit): Response|StreamedResponse
     {
         $filters = $this->memberFilters($request);

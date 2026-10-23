@@ -14,7 +14,7 @@ export type StaffRow = {
   branchId: string | null;
   employeeNumber: string;
   jobTitle: string | null;
-  status: "active" | "suspended" | "inactive";
+  status: "active" | "suspended" | "inactive" | "deleted";
   hiredAt: string | null;
   hasProfileImage: boolean;
 };

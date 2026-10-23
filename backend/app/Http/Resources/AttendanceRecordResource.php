@@ -27,6 +27,7 @@ class AttendanceRecordResource extends JsonResource
             ]),
             'method' => $this->method->value,
             'status' => $this->status->value,
+            'checkout_type' => $this->checkout_type?->value,
             'checked_in_at' => $this->checked_in_at?->toIso8601String(),
             'checked_out_at' => $this->checked_out_at?->toIso8601String(),
         ];

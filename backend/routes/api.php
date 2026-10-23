@@ -27,10 +27,14 @@ use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\PaymentGatewayController;
 use App\Http\Controllers\Api\V1\PlatformInsightsController;
 use App\Http\Controllers\Api\V1\PlatformSaasPlanController;
+use App\Http\Controllers\Api\V1\PlatformSaasPlanChangeRequestController;
+use App\Http\Controllers\Api\V1\PlatformSaasReminderController;
 use App\Http\Controllers\Api\V1\ProgressMeasurementController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SaasSubscriptionController;
+use App\Http\Controllers\Api\V1\SaasPlanChangeRequestController;
 use App\Http\Controllers\Api\V1\StaffInvitationController;
+use App\Http\Controllers\Api\V1\StaffAttendanceController;
 use App\Http\Controllers\Api\V1\StaffProfileController;
 use App\Http\Controllers\Api\V1\StripeBillingWebhookController;
 use App\Http\Controllers\Api\V1\StripeWebhookController;
@@ -97,9 +101,21 @@ Route::prefix('v1')->group(function (): void {
             ->middleware('role:super_admin');
         Route::delete('/platform/saas-plans/{plan}', [PlatformSaasPlanController::class, 'destroy'])
             ->middleware('role:super_admin');
+        Route::get('/platform/saas-plan-change-requests', [PlatformSaasPlanChangeRequestController::class, 'index'])
+            ->middleware('role:super_admin');
+        Route::post('/platform/saas-plan-change-requests/{gym}/{change}/review', [PlatformSaasPlanChangeRequestController::class, 'review'])
+            ->middleware('role:super_admin');
+        Route::post('/platform/saas-payment-reminders', [PlatformSaasReminderController::class, 'sendAll'])
+            ->middleware('role:super_admin');
+        Route::get('/platform/saas-payment-reminders/preview', [PlatformSaasReminderController::class, 'preview'])
+            ->middleware('role:super_admin');
+        Route::post('/platform/saas-payment-reminders/{gym}/{invoice}', [PlatformSaasReminderController::class, 'sendOne'])
+            ->middleware('role:super_admin');
         Route::get('/platform/members/export', [MemberRosterController::class, 'platformExport'])
             ->middleware('role:super_admin');
         Route::get('/platform/member-directory', [PlatformInsightsController::class, 'members'])
+            ->middleware('role:super_admin');
+        Route::get('/platform/staff-directory', [PlatformInsightsController::class, 'staff'])
             ->middleware('role:super_admin');
         Route::get('/platform/member-directory/export', [PlatformInsightsController::class, 'exportMembers'])
             ->middleware('role:super_admin');
@@ -171,6 +187,8 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::patch('/members/{member}', [MemberController::class, 'update'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::delete('/members/{member}', [MemberController::class, 'destroy'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::get('/members/{member}/access-credential', [AttendanceController::class, 'credential'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::post('/members/{member}/access-credential', [AttendanceController::class, 'issueCredential'])
@@ -319,12 +337,25 @@ Route::prefix('v1')->group(function (): void {
                     ->middleware('role:super_admin,gym_owner,gym_manager');
                 Route::post('/saas-subscription/portal', [SaasSubscriptionController::class, 'portal'])
                     ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::get('/saas-plan-change-requests', [SaasPlanChangeRequestController::class, 'index'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager');
+                Route::post('/saas-plan-change-requests', [SaasPlanChangeRequestController::class, 'store'])
+                    ->middleware('role:gym_owner');
+                Route::post('/saas-plan-change-requests/{change}/cancel', [SaasPlanChangeRequestController::class, 'cancel'])
+                    ->middleware('role:gym_owner');
 
                 Route::get('/attendance', [AttendanceController::class, 'index'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist,trainer');
                 Route::post('/attendance/check-ins', [AttendanceController::class, 'checkIn'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
                 Route::post('/attendance/{attendance}/check-out', [AttendanceController::class, 'checkOut'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+
+                Route::get('/staff-attendance', [StaffAttendanceController::class, 'index'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::post('/staff-attendance/check-ins', [StaffAttendanceController::class, 'checkIn'])
+                    ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
+                Route::post('/staff-attendance/{attendance}/check-out', [StaffAttendanceController::class, 'checkOut'])
                     ->middleware('role:super_admin,gym_owner,gym_manager,receptionist');
 
                 Route::get('/class-sessions', [ClassSessionController::class, 'index'])

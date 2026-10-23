@@ -15,6 +15,7 @@ use App\Models\Invoice;
 use App\Models\Member;
 use App\Models\Membership;
 use App\Models\MembershipPlan;
+use App\Models\MembershipRenewal;
 use App\Models\NotificationDelivery;
 use App\Models\Payment;
 use App\Models\User;
@@ -341,6 +342,11 @@ class MembershipLifecycleTest extends TestCase
         $second = app(TenantContext::class)->run($gym, fn () => app(AutomatedMembershipBillingService::class)->processTenant($gym));
         $this->assertSame(['invoices_created' => 1, 'reminders_queued' => 1, 'restricted' => 1], $first);
         $this->assertSame(['invoices_created' => 0, 'reminders_queued' => 0, 'restricted' => 0], $second);
+        app(TenantContext::class)->run($gym, function () use ($membership): void {
+            $renewal = MembershipRenewal::query()->where('membership_id', $membership->id)->sole();
+            $this->assertSame('pending_payment', $renewal->status);
+            $this->assertNull($renewal->renewed_at);
+        });
         $this->assertNotSame('before-automated-invoice', $afterFirst);
         $this->assertSame($afterFirst, Cache::get($revisionKey));
 
@@ -385,7 +391,10 @@ class MembershipLifecycleTest extends TestCase
             $restored = Membership::query()->findOrFail($membership->id);
             $this->assertNull($restored->billing_restricted_at);
             $this->assertTrue($restored->next_billing_at->isFuture());
-            $this->assertDatabaseHas('audit_logs', ['gym_id' => $restored->gym_id, 'event' => 'membership.invoice.settled']);
+            $this->assertDatabaseHas('audit_logs', ['gym_id' => $restored->gym_id, 'event' => 'membership.auto_renewed']);
+            $renewal = MembershipRenewal::query()->where('membership_id', $membership->id)->sole();
+            $this->assertSame('paid', $renewal->status);
+            $this->assertNotNull($renewal->renewed_at);
             $paid = Payment::query()->where('membership_id', $membership->id)->firstOrFail();
             $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_payment_paid')->count());
             $this->assertSame(1, NotificationDelivery::query()->where('template_key', 'membership_access_restored')->count());

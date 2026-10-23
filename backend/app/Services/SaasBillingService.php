@@ -13,6 +13,7 @@ use App\Enums\SaasSubscriptionStatus;
 use App\Enums\SubscriptionCheckoutStatus;
 use App\Models\Gym;
 use App\Models\GymSubscription;
+use App\Models\AuditLog;
 use App\Models\PlatformBillingCustomer;
 use App\Models\SaasBillingInvoice;
 use App\Models\SaasPlan;
@@ -125,15 +126,14 @@ class SaasBillingService
 
     public function deleteUnusedDraftPlan(SaasPlan $plan, string $reason, User $actor, Request $request): void
     {
-        if ($plan->status !== SaasPlanStatus::Draft) {
-            throw ValidationException::withMessages(['plan' => ['Only an unused draft plan can be permanently deleted. Archive published plans instead.']]);
+        if (AuditLog::query()->where('auditable_type', SaasPlan::class)->where('auditable_id', $plan->id)->exists()) {
+            throw ValidationException::withMessages(['plan' => ['This plan has subscription, invoice, payment, checkout, or other protected history and cannot be deleted. Archive it instead.']]);
         }
-
         try {
             DB::transaction(function () use ($plan, $reason, $actor, $request): void {
                 $locked = SaasPlan::query()->with('prices')->lockForUpdate()->findOrFail($plan->id);
                 $before = $locked->toArray();
-                $this->audit->record('platform.saas_plan.deleted', $locked, $actor, before: $before, reason: $reason, request: $request);
+                $this->audit->record('platform.saas_plan.permanently_deleted', $locked, $actor, before: $before, reason: $reason, request: $request);
                 // Database RESTRICT foreign keys are the final cross-tenant
                 // guard: any checkout, payment or subscription history blocks
                 // removal without bypassing tenant RLS for a global pre-check.
@@ -141,7 +141,7 @@ class SaasBillingService
                 $locked->delete();
             });
         } catch (QueryException) {
-            throw ValidationException::withMessages(['plan' => ['This draft has billing history or other dependencies and cannot be deleted. Archive it instead.']]);
+            throw ValidationException::withMessages(['plan' => ['This plan has subscription, invoice, payment, checkout, or other protected history and cannot be deleted. Archive it instead.']]);
         }
     }
 

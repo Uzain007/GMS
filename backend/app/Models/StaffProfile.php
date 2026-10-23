@@ -18,6 +18,7 @@ class StaffProfile extends Model
     protected $fillable = [
         'user_id', 'home_branch_id', 'display_name', 'contact_email', 'phone',
         'employee_number', 'job_title', 'status', 'hired_at', 'terminated_at',
+        'lifecycle_changed_at', 'lifecycle_reason',
         'permissions', 'profile_image_disk', 'profile_image_path',
         'profile_image_mime', 'profile_image_size',
     ];
@@ -28,6 +29,7 @@ class StaffProfile extends Model
             'status' => StaffStatus::class,
             'hired_at' => 'date',
             'terminated_at' => 'date',
+            'lifecycle_changed_at' => 'immutable_datetime',
             'permissions' => 'array',
             'profile_image_size' => 'integer',
         ];
@@ -64,6 +66,11 @@ class StaffProfile extends Model
     public function classSessions(): HasMany
     {
         return $this->hasMany(ClassSession::class, 'trainer_staff_profile_id');
+    }
+
+    public function attendanceRecords(): HasMany
+    {
+        return $this->hasMany(StaffAttendanceRecord::class);
     }
 
     public function memberAssignments(): HasMany { return $this->hasMany(TrainerMemberAssignment::class, 'trainer_staff_profile_id'); }

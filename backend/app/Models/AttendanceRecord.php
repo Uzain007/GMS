@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AttendanceMethod;
 use App\Enums\AttendanceStatus;
+use App\Enums\CheckoutType;
 use App\Models\Concerns\BelongsToGym;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -15,7 +16,7 @@ class AttendanceRecord extends Model
 
     protected $fillable = [
         'member_id', 'membership_id', 'branch_id', 'access_credential_id',
-        'checked_in_by', 'checked_out_by', 'method', 'status',
+        'checked_in_by', 'checked_out_by', 'method', 'status', 'checkout_type',
         'checked_in_at', 'checked_out_at',
     ];
 
@@ -24,6 +25,7 @@ class AttendanceRecord extends Model
         return [
             'method' => AttendanceMethod::class,
             'status' => AttendanceStatus::class,
+            'checkout_type' => CheckoutType::class,
             'checked_in_at' => 'immutable_datetime',
             'checked_out_at' => 'immutable_datetime',
         ];

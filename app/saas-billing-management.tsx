@@ -9,7 +9,7 @@ import {
 import type {
   GymSubscriptionRecord, IronCoreRole, NewSaasPlan, SaasBillingInvoiceRecord,
   SaasPaymentOptions, SaasPlanRecord, SaasSubscriptionPaymentRecord,
-  NewSaasPaymentCorrection, ReplaceSaasBillingInvoice,
+  NewSaasPaymentCorrection, ReplaceSaasBillingInvoice, SaasPlanChangeRequestRecord,
 } from "./lib/ironcore-api";
 import { isoDateInputValue } from "./lib/form-values";
 import { dateInputValueInTimeZone } from "./lib/gym-time";
@@ -21,6 +21,7 @@ export type SaasBillingData = {
   subscription: GymSubscriptionRecord | null;
   invoices: SaasBillingInvoiceRecord[];
   payments: SaasSubscriptionPaymentRecord[];
+  planChangeRequests?: SaasPlanChangeRequestRecord[];
   paymentOptions: SaasPaymentOptions;
   baseCurrency: Currency;
   timezone: string;
@@ -46,6 +47,12 @@ export type SaasBillingData = {
   onExportPayments?: (format: "csv" | "xlsx" | "pdf") => Promise<Blob>;
   onPortal: () => Promise<string>;
   onCreatePlan?: (input: NewSaasPlan) => Promise<void>;
+  onRequestPlanChange?: (priceId: string, reason: string) => Promise<void>;
+  onCancelPlanChange?: (requestId: string) => Promise<void>;
+  onReviewPlanChange?: (requestId: string, decision: "approve" | "reject", reason: string) => Promise<void>;
+  onSendPaymentReminder?: (invoiceId: string, reason: string) => Promise<void>;
+  onPreviewAllPaymentReminders?: () => Promise<number>;
+  onSendAllPaymentReminders?: (reason: string) => Promise<void>;
 };
 
 function money(minor: number, currency: Currency): string {
@@ -379,6 +386,40 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
     finally { setBusy(null); }
   }
 
+  async function requestPlanChange(priceId: string) {
+    if (!data.onRequestPlanChange) return;
+    const reason = window.prompt("Why do you want to change this subscription plan?");
+    if (!reason || reason.trim().length < 5) return;
+    setBusy(`change-${priceId}`); setNotice(null);
+    try { await data.onRequestPlanChange(priceId, reason.trim()); setNotice("Plan change request sent for Super Admin approval."); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "Plan change request could not be sent."); }
+    finally { setBusy(null); }
+  }
+
+  async function sendReminder(invoiceId?: string) {
+    const all = !invoiceId;
+    if (all) {
+      setBusy("remind-all"); setNotice(null);
+      try {
+        const eligible = await data.onPreviewAllPaymentReminders?.() ?? 0;
+        if (eligible === 0) { setNotice("No gyms currently have a due or overdue SaaS invoice."); return; }
+        if (!window.confirm(`You are about to send a payment reminder to ${eligible} gym${eligible === 1 ? "" : "s"}.`)) return;
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "The reminder count could not be loaded.");
+        return;
+      } finally { setBusy(null); }
+    }
+    const reason = window.prompt("Audit reason for sending the payment reminder");
+    if (!reason || reason.trim().length < 5) return;
+    setBusy(all ? "remind-all" : `remind-${invoiceId}`); setNotice(null);
+    try {
+      if (all) await data.onSendAllPaymentReminders?.(reason.trim());
+      else await data.onSendPaymentReminder?.(invoiceId, reason.trim());
+      setNotice("Payment reminder queued. Duplicate sends for today are automatically suppressed.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "The reminder could not be queued."); }
+    finally { setBusy(null); }
+  }
+
   async function downloadReceipt(payment: SaasSubscriptionPaymentRecord) {
     setBusy(`receipt-${payment.id}`); setNotice(null);
     try {
@@ -411,14 +452,15 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
   }
 
   return <section className="saas-workspace">
-    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym’s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current?.provider === "stripe" && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
+    <div className="module-heading"><div><p className="eyebrow">Platform subscription</p><h1>IronCore SaaS billing</h1><p>{data.readOnly ? "Representative subscription records for product review." : "Manage the selected gym’s plan, recurring invoices and payment recovery separately from member collections."}</p></div>{!data.readOnly && <div className="finance-actions">{data.actorRole === "super_admin" && data.onSendAllPaymentReminders && <button className="secondary-button" disabled={busy === "remind-all"} onClick={() => void sendReminder()}>{busy === "remind-all" ? "Sending…" : "Send all due reminders"}</button>}{data.actorRole === "super_admin" && data.onCreatePlan && <button className="secondary-button" onClick={() => setModal(true)}><Plus size={17} /> New plan</button>}<button className="secondary-button" onClick={data.onReload}><RefreshCw size={16} /> Refresh</button>{current?.provider === "stripe" && canManage && <button className="primary-button" disabled={busy === "portal"} onClick={() => void portal()}><CreditCard size={17} /> Manage billing</button>}</div>}</div>
     <div className="billing-separation"><ShieldCheck size={19} /><span><strong>Money flows are isolated</strong><small>Gym-member payments use the gym’s connected account. This subscription is collected only by IronCore’s platform account.</small></span></div>
     {data.error && <div className="form-error" role="alert">{data.error}</div>}
     {notice && <div className="form-notice" role="status">{notice}</div>}
     {trialEnding && <div className="form-notice billing-warning trial-ending-warning" role="status"><strong>Your IronCore trial ends tomorrow</strong><span>Select a plan and complete payment before {date(trialEndsAt)} to keep normal gym operations available.</span></div>}
     {paymentRequired && <div className="form-error billing-warning payment-required-panel" role="alert"><strong>Payment required</strong><span>Your trial has ended. Normal gym operations are restricted, but billing details, plan selection and payment remain available. Your gym data is safe and access restores automatically after a valid payment.</span>{data.actorRole === "super_admin" && data.onOverrideBilling && <button className="secondary-button" onClick={() => setOverrideOpen(true)}>Add temporary override</button>}</div>}
-    {!paymentRequired && payableInvoice && <div className="form-notice billing-warning" role="status"><strong>{pendingPayment ? "Payment under review" : payableInvoice.status === "past_due" ? "Payment overdue" : "Renewal payment available"}</strong><span>{pendingPayment ? "IronCore is reviewing the submitted payment evidence." : `Due ${date(payableInvoice.due_at)} · Grace ends ${date(payableInvoice.grace_ends_at ?? null)}${payableInvoice.status === "past_due" && graceDaysRemaining !== null ? ` · ${graceDaysRemaining} day${graceDaysRemaining === 1 ? "" : "s"} remaining` : ""}`}</span>{canManage && !pendingPayment && <div className="finance-actions">{data.paymentOptions.bank_transfer_available && <button className="secondary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><FileUp size={15} /> Pay by bank transfer</button>}<button className="primary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><Banknote size={15} /> Pay by cash</button></div>}</div>}
+    {!paymentRequired && payableInvoice && <div className="form-notice billing-warning" role="status"><strong>{pendingPayment ? "Payment under review" : payableInvoice.status === "past_due" ? "Payment overdue" : "Renewal payment available"}</strong><span>{pendingPayment ? "IronCore is reviewing the submitted payment evidence." : `Due ${date(payableInvoice.due_at)} · Grace ends ${date(payableInvoice.grace_ends_at ?? null)}${payableInvoice.status === "past_due" && graceDaysRemaining !== null ? ` · ${graceDaysRemaining} day${graceDaysRemaining === 1 ? "" : "s"} remaining` : ""}`}</span>{data.actorRole === "super_admin" && data.onSendPaymentReminder && <button className="secondary-button" disabled={busy === `remind-${payableInvoice.id}`} onClick={() => void sendReminder(payableInvoice.id)}>{busy === `remind-${payableInvoice.id}` ? "Sending…" : `Send reminder to ${data.subscription?.plan_name ? "this gym" : "gym"}`}</button>}{canManage && !pendingPayment && <div className="finance-actions">{data.paymentOptions.bank_transfer_available && <button className="secondary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "bank_transfer", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><FileUp size={15} /> Pay by bank transfer</button>}<button className="primary-button" onClick={() => setManualChoice({ invoiceId: payableInvoice.id, planName: current?.plan_name ?? "SaaS subscription", method: "cash", amountMinor: payableInvoice.amount_remaining_minor, currency: payableInvoice.currency, invoiceNumber: payableInvoice.number })}><Banknote size={15} /> Pay by cash</button></div>}</div>}
     {data.loading && <div className="table-state"><LoaderCircle className="spin" size={21} /><span>Loading protected billing records…</span></div>}
+    {data.planChangeRequests?.some((request) => request.status === "pending") && <div className="form-notice billing-warning" role="status"><strong>Plan change pending approval</strong><span>Your current plan remains active until a Super Admin reviews the request.</span></div>}
 
     <section className="saas-metrics">
       <article className="panel saas-current"><span className="saas-icon violet"><Building2 size={20} /></span><div><small>Current plan</small><strong>{current?.plan_name ?? "No subscription"}</strong><p>{current ? `${money(current.amount_minor, current.currency)} / ${current.billing_interval === "monthly" ? "month" : "year"}` : "Choose a plan and an available payment method."}</p></div><span className={`status ${current?.billing_restricted_at ? "restricted" : pendingPayment ? "pending" : payableInvoice?.status ?? current?.status ?? "inactive"}`}><i />{subscriptionLabel}</span></article>
@@ -449,8 +491,10 @@ export function SaasBillingManagement({ data }: { data: SaasBillingData }) {
           {price && methods.includes("cash") && <button className="secondary-button" disabled={busy === `prepare-cash-${price.id}`} onClick={() => void prepareManualPayment(price.id, plan.name, "cash")}><Banknote size={15} /> {busy === `prepare-cash-${price.id}` ? "Preparing…" : "Pay by cash"}</button>}
           {price && methods.includes("stripe") && <button className="primary-button" disabled={!data.paymentOptions.stripe_configured || busy === price.id} onClick={() => void checkout(price.id)}><CreditCard size={15} /> {busy === price.id ? "Opening…" : data.paymentOptions.stripe_configured ? "Debit/Credit Card" : "Stripe · Not configured"}</button>}
         </div>}
+        {current && !selected && data.actorRole === "gym_owner" && price && data.onRequestPlanChange && <div className="saas-plan-actions"><button className="primary-button" disabled={busy === `change-${price.id}` || data.planChangeRequests?.some((request) => request.status === "pending")} onClick={() => void requestPlanChange(price.id)}><ArrowUpRight size={15} /> {busy === `change-${price.id}` ? "Sending…" : "Request plan change"}</button></div>}
       </article>;
     })}</section>
+    {data.planChangeRequests && data.planChangeRequests.length > 0 && <section className="panel table-scroll"><div className="panel-title"><div><p className="eyebrow">Approval workflow</p><h3>Plan change requests</h3></div></div><table className="data-table"><thead><tr><th>Requested change</th><th>Requested by</th><th>Status</th><th>Actions</th></tr></thead><tbody>{data.planChangeRequests.map((request) => <tr key={request.id}><td><strong>{request.current_plan.name} → {request.requested_plan.name}</strong><small className="table-sub">{readable(request.change_type)} · {request.reason}</small></td><td>{request.requested_by.name}<small className="table-sub">{date(request.requested_at)}</small></td><td><span className={`status ${request.status}`}><i />{readable(request.status)}</span></td><td>{request.status === "pending" && data.actorRole === "gym_owner" && data.onCancelPlanChange && <button className="secondary-button" onClick={() => void data.onCancelPlanChange?.(request.id)}>Cancel request</button>}{request.status === "pending" && data.actorRole === "super_admin" && data.onReviewPlanChange && <div className="finance-actions"><button className="secondary-button" onClick={() => { const reason = window.prompt("Reason for rejection"); if (reason) void data.onReviewPlanChange?.(request.id, "reject", reason); }}>Reject</button><button className="primary-button" onClick={() => { const reason = window.prompt("Reason for approval"); if (reason) void data.onReviewPlanChange?.(request.id, "approve", reason); }}>Approve</button></div>}</td></tr>)}</tbody></table></section>}
     {!data.loading && visiblePlans.length === 0 && <div className="empty-state panel"><Sparkles size={25} /><strong>{data.error ? "Plans temporarily unavailable" : "No active SaaS plans"}</strong><span>{data.error ? "Retry the catalogue without losing access to existing billing history." : "A super administrator can publish the first platform price."}</span><button className="secondary-button" onClick={data.onReload}>Retry</button></div>}
 
     <section className="panel table-scroll saas-manual-payments"><div className="panel-title"><div><p className="eyebrow">Cash and bank transfer</p><h3>{data.actorRole === "super_admin" ? "Manual payment reviews" : "Payment submissions"}</h3></div>{data.actorRole === "super_admin" && data.onExportPayments ? <div className="report-export-actions">{(["csv", "xlsx", "pdf"] as const).map((format) => <button key={format} className="secondary-button" disabled={busy !== null} onClick={() => void exportPayments(format)}><Download size={14} /> {format.toUpperCase()}</button>)}</div> : <small>IronCore subscription payments</small>}</div><table className="data-table action-column-table"><thead><tr><th>Plan</th><th>Method / date</th><th>Reference</th><th>Amount</th><th>Status</th><th /></tr></thead><tbody>{data.payments.map((payment) => <tr key={payment.id}><td><strong>{payment.plan?.name ?? "SaaS plan"}</strong><small className="table-sub">{date(payment.created_at)}{payment.corrections?.length ? ` · ${payment.corrections.length} correction(s)` : ""}</small>{payment.notes && <small className="table-sub">{payment.notes}</small>}</td><td>{readable(payment.effective_method ?? payment.method)}<small className="table-sub">{payment.effective_payment_date ?? payment.payment_date ?? "No reported date"}</small></td><td><span className="saas-reference">{payment.effective_reference ?? payment.reference ?? "—"}</span></td><td><strong>{money(payment.effective_amount_minor ?? payment.amount_minor, payment.currency)}</strong>{Boolean(payment.refunded_amount_minor) && <small className="table-sub">Refunded {money(payment.refunded_amount_minor ?? 0, payment.currency)}</small>}</td><td><span className={`status ${payment.status}`}><i />{payment.status === "pending" ? "Pending review" : payment.approval_reversal ? "Approval reversed" : readable(payment.status)}</span>{payment.approval_reversal && <small className="table-sub">{payment.approval_reversal.reason}</small>}{payment.review_reason && !payment.approval_reversal && <small className="table-sub">{payment.review_reason}</small>}</td><td><div className="table-actions">{payment.has_receipt && <button className="table-action" disabled={busy === `receipt-${payment.id}`} onClick={() => void downloadReceipt(payment)}><Download size={13} /> Proof</button>}{["paid", "partially_refunded", "refunded"].includes(payment.status) && data.onLoadIronCoreReceipt && <button className="table-action" disabled={busy === `generated-${payment.id}`} onClick={() => void downloadGenerated(payment)}><Download size={13} /> IronCore receipt</button>}{data.actorRole === "super_admin" && payment.status === "pending" && <button className="table-action" onClick={() => setReviewing(payment)}>Review</button>}{data.actorRole === "super_admin" && data.onCorrectManualPayment && <button className="table-action" onClick={() => setCorrecting(payment)}>Correct</button>}{data.actorRole === "super_admin" && data.onRefundManualPayment && ["paid", "partially_refunded"].includes(payment.status) && <button className="table-action" onClick={() => setRefunding(payment)}>Refund</button>}{data.actorRole === "super_admin" && data.onReverseManualPaymentApproval && payment.status === "paid" && !payment.refunded_amount_minor && !payment.approval_reversal && <button className="table-action danger-text" onClick={() => setReversing(payment)}>Reverse approval</button>}</div></td></tr>)}</tbody></table>{data.payments.length === 0 && <div className="empty-state"><Banknote size={24} /><strong>No SaaS payment submissions</strong><span>Cash and bank-transfer submissions will appear here.</span></div>}</section>

@@ -14,6 +14,8 @@ use App\Models\NotificationPreference;
 use App\Models\Payment;
 use App\Models\SaasBillingInvoice;
 use App\Models\SaasBillingNotification;
+use App\Models\SaasPlanChangeRequest;
+use App\Models\User;
 use Carbon\CarbonInterface;
 
 class BillingNotificationService
@@ -111,6 +113,29 @@ class BillingNotificationService
             "saas-subscription:{$subscription->id}:payment:{$paymentKey}:restored");
     }
 
+    public function manualSaasPaymentReminder(Gym $gym, SaasBillingInvoice $invoice, User $actor): bool
+    {
+        return $this->queueSaas($gym, $invoice, $invoice->subscription, 'saas_invoice_overdue',
+            "manual-reminder:{$invoice->id}:".now($gym->timezone)->toDateString());
+    }
+
+    public function saasPlanChangeRequested(Gym $gym, SaasPlanChangeRequest $change): void
+    {
+        User::query()->where('platform_role', UserRole::SuperAdmin->value)->orderBy('id')->each(function (User $recipient) use ($gym, $change): void {
+            $this->queueSaasRecipient($gym, null, $change->subscription, $recipient, 'saas_plan_change_requested', "plan-change:{$change->id}:requested");
+        });
+    }
+
+    public function saasPlanChangeReviewed(Gym $gym, SaasPlanChangeRequest $change): void
+    {
+        $recipient = $change->requestedBy;
+        if ($recipient) {
+            $this->queueSaasRecipient($gym, null, $change->subscription, $recipient,
+                $change->status->value === 'approved' ? 'saas_plan_change_approved' : 'saas_plan_change_rejected',
+                "plan-change:{$change->id}:{$change->status->value}");
+        }
+    }
+
     private function queueMemberInvoice(Invoice $invoice, string $template, string $key, string $subject, string $body): bool
     {
         $member = $invoice->relationLoaded('member') ? $invoice->member : $invoice->member()->first();
@@ -144,16 +169,21 @@ class BillingNotificationService
         if (! $owner) {
             return false;
         }
+        return $this->queueSaasRecipient($gym, $invoice, $subscription, $owner, $template, $eventKey);
+    }
+
+    private function queueSaasRecipient(Gym $gym, ?SaasBillingInvoice $invoice, ?GymSubscription $subscription, User $recipient, string $template, string $eventKey): bool
+    {
         // Hash the server-authored event identity so Stripe identifiers cannot
         // exceed the ledger's bounded unique key while retaining determinism.
-        $idempotencyKey = 'billing-email:'.hash('sha256', $eventKey.'|'.$owner->id);
+        $idempotencyKey = 'billing-email:'.hash('sha256', $eventKey.'|'.$recipient->id);
         $notification = SaasBillingNotification::query()->firstOrCreate(
             ['idempotency_key' => $idempotencyKey],
             [
                 'gym_subscription_id' => $subscription?->id ?? $invoice?->gym_subscription_id,
                 'saas_billing_invoice_id' => $invoice?->id,
-                'recipient_user_id' => $owner->id,
-                'destination' => $owner->email,
+                'recipient_user_id' => $recipient->id,
+                'destination' => $recipient->email,
                 'template_key' => $template,
                 'notification_date' => now($gym->timezone)->toDateString(),
                 'status' => 'queued',

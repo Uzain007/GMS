@@ -78,6 +78,10 @@ class StaffProfileController extends Controller
         $query = $this->staffQuery()->with('user')->orderBy('staff_name_sort');
         if (request()->filled('status')) {
             $query->where('staff_profiles.status', request('status'));
+        } else {
+            // Historical profiles remain queryable by Super Admin through the
+            // platform directory, while tenant operations omit removed staff.
+            $query->where('staff_profiles.status', '!=', StaffStatus::Deleted->value);
         }
 
         return StaffProfileResource::collection(
@@ -140,7 +144,9 @@ class StaffProfileController extends Controller
         }
         if ($request->filled('status')) {
             $status = StaffStatus::from((string) $request->string('status'));
-            if ($status === StaffStatus::Inactive) {
+            $data['lifecycle_changed_at'] = now();
+            $data['lifecycle_reason'] = (string) $request->string('reason');
+            if (in_array($status, [StaffStatus::Inactive, StaffStatus::Suspended, StaffStatus::Deleted], true)) {
                 $data['terminated_at'] = $data['terminated_at'] ?? TenantClock::businessDate();
                 $data['permissions'] = [];
             } elseif ($status === StaffStatus::Active) {
@@ -176,8 +182,16 @@ class StaffProfileController extends Controller
                     ->update(array_merge($pivot, ['updated_at' => now()]));
             }
             $fresh = $this->staffQuery()->with('user')->findOrFail($profile->getKey());
+            $event = ! isset($data['status']) || ($before['status'] ?? null) === $fresh->status->value
+                ? 'staff.employee_updated'
+                : match ($fresh->status) {
+                    StaffStatus::Suspended => 'staff.employee_suspended',
+                    StaffStatus::Inactive => 'staff.employee_deactivated',
+                    StaffStatus::Deleted => 'staff.employee_deleted',
+                    StaffStatus::Active => 'staff.employee_reactivated',
+                };
             $audit->record(
-                'staff.updated',
+                $event,
                 $fresh,
                 $request->user(),
                 $before,

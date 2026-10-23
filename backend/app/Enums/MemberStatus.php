@@ -7,6 +7,9 @@ enum MemberStatus: string
 {
     case Lead = 'lead';
     case Active = 'active';
+    case Inactive = 'inactive';
+    case Suspended = 'suspended';
+    case Deleted = 'deleted';
     case Paused = 'paused';
     case Cancelled = 'cancelled';
     case Archived = 'archived';

@@ -24,6 +24,8 @@ class MemberResource extends JsonResource
             'status' => $this->status->value,
             'joined_at' => $this->joined_at?->toIso8601String(),
             'archived_at' => $this->archived_at?->toIso8601String(),
+            'lifecycle_changed_at' => $this->lifecycle_changed_at?->toIso8601String(),
+            'lifecycle_reason' => $this->lifecycle_reason,
             // Metadata is already selected through a tenant-scoped model query.
             'metadata' => $this->metadata,
             'current_membership' => $this->when(

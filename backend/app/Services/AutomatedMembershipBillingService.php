@@ -8,6 +8,7 @@ use App\Enums\MembershipStatus;
 use App\Models\Gym;
 use App\Models\Invoice;
 use App\Models\Membership;
+use App\Models\MembershipRenewal;
 use App\Support\TenantClock;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
@@ -105,6 +106,17 @@ class AutomatedMembershipBillingService
                             'currency' => $invoice->currency->value, 'grace_ends_at' => $invoice->grace_ends_at?->toIso8601String(),
                         ], reason: 'Automated membership renewal invoice generation.');
                         $this->billingNotifications->memberInvoiceCreated($invoice->loadMissing('member'));
+                        $periodStart = CarbonImmutable::parse($cycleDate, 'UTC');
+                        MembershipRenewal::query()->firstOrCreate(
+                            ['invoice_id' => $invoice->id],
+                            [
+                                'membership_id' => $locked->id,
+                                'period_start' => $periodStart->toDateString(),
+                                'period_end' => $this->cycleAfter($locked, $periodStart)->subDay()->toDateString(),
+                                'status' => 'pending_payment',
+                                'source' => 'automatic',
+                            ],
+                        );
                         $result['invoices_created']++;
                     }
 
@@ -147,18 +159,25 @@ class AutomatedMembershipBillingService
             return false;
         }
         $membership = Membership::query()->lockForUpdate()->findOrFail($invoice->membership_id);
+        $renewal = MembershipRenewal::query()->where('invoice_id', $invoice->id)->lockForUpdate()->first();
         $before = [
             'billing_restricted_at' => $membership->billing_restricted_at?->toIso8601String(),
             'next_billing_at' => $membership->next_billing_at?->toDateString(),
         ];
         $membership->update([
             'billing_restricted_at' => null,
-            'next_billing_at' => $this->nextCycle($membership),
+            'ends_at' => $renewal && (! $membership->ends_at || $membership->ends_at->lt($renewal->period_end))
+                ? $renewal->period_end : $membership->ends_at,
+            'next_billing_at' => $renewal ? $renewal->period_end->addDay() : $this->nextCycle($membership),
         ]);
-        $this->audit->record('membership.invoice.settled', $membership->fresh(), null, $before, [
+        if ($renewal && $renewal->status !== 'paid') {
+            $renewal->update(['status' => 'paid', 'renewed_at' => now()]);
+        }
+        $this->audit->record($renewal ? 'membership.auto_renewed' : 'membership.invoice.settled', $membership->fresh(), null, $before, [
             'invoice_id' => $invoice->getKey(), 'billing_restricted_at' => null,
             'next_billing_at' => $membership->fresh()->next_billing_at?->toDateString(),
-        ], 'Membership invoice paid; access restored and renewal advanced.');
+            'renewal_id' => $renewal?->id, 'period_end' => $renewal?->period_end?->toDateString(),
+        ], 'Membership invoice paid; access restored and the paid renewal period was activated.');
 
         return $before['billing_restricted_at'] !== null;
     }
@@ -167,12 +186,21 @@ class AutomatedMembershipBillingService
     {
         $from = CarbonImmutable::parse($membership->next_billing_at ?? TenantClock::businessDate(), 'UTC');
 
+        if ($membership->billing_interval === BillingInterval::OneTime) {
+            return null;
+        }
+
+        return $this->cycleAfter($membership, $from);
+    }
+
+    private function cycleAfter(Membership $membership, CarbonImmutable $from): CarbonImmutable
+    {
         return match ($membership->billing_interval) {
             BillingInterval::Weekly => $from->addWeeks($membership->interval_count),
             BillingInterval::Monthly => $from->addMonthsNoOverflow($membership->interval_count),
             BillingInterval::Quarterly => $from->addMonthsNoOverflow(3 * $membership->interval_count),
             BillingInterval::Yearly => $from->addYearsNoOverflow($membership->interval_count),
-            BillingInterval::OneTime => null,
+            BillingInterval::OneTime => throw new \LogicException('One-time memberships do not have a renewal cycle.'),
         };
     }
 

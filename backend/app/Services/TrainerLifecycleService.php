@@ -196,16 +196,17 @@ class TrainerLifecycleService
 
         return DB::transaction(function () use ($profile, $actor, $reason, $request): StaffProfile {
             $locked = StaffProfile::query()->with('user')->lockForUpdate()->findOrFail($profile->getKey());
-            if ($locked->status === StaffStatus::Inactive) {
-                throw ValidationException::withMessages([
-                    'staff' => ['This employee is already inactive.'],
-                ]);
+            if ($locked->status === StaffStatus::Deleted) {
+                $locked->setAttribute('tenant_role', $profile->tenant_role);
+                return $locked;
             }
 
             $before = $this->auditSnapshot($profile);
             $locked->update([
-                'status' => StaffStatus::Inactive,
+                'status' => StaffStatus::Deleted,
                 'terminated_at' => TenantClock::businessDate(),
+                'lifecycle_changed_at' => now(),
+                'lifecycle_reason' => $reason,
                 'permissions' => [],
             ]);
 
@@ -215,12 +216,12 @@ class TrainerLifecycleService
             DB::table('gym_user')
                 ->where('gym_id', $this->tenant->id())
                 ->where('user_id', $locked->user_id)
-                ->update(['status' => 'inactive', 'updated_at' => now()]);
+                ->update(['status' => 'deleted', 'updated_at' => now()]);
 
             $fresh = $locked->fresh('user');
             $fresh->setAttribute('tenant_role', $profile->tenant_role);
             $this->audit->record(
-                'staff.terminated',
+                'staff.employee_deleted',
                 $fresh,
                 $actor,
                 $before,

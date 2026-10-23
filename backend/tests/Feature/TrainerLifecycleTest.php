@@ -357,19 +357,19 @@ class TrainerLifecycleTest extends TestCase
             'reason' => 'Employment ended and gym access must be revoked',
         ], $headers)
             ->assertOk()
-            ->assertJsonPath('data.status', 'inactive');
+            ->assertJsonPath('data.status', 'deleted');
 
         app(TenantContext::class)->run($gym, function () use ($gym, $trainerId, $userId, $assignmentId): void {
             $this->assertDatabaseHas('staff_profiles', [
                 'gym_id' => $gym->id,
                 'id' => $trainerId,
                 'user_id' => $userId,
-                'status' => 'inactive',
+                'status' => 'deleted',
             ]);
             $this->assertDatabaseHas('gym_user', [
                 'gym_id' => $gym->id,
                 'user_id' => $userId,
-                'status' => 'inactive',
+                'status' => 'deleted',
             ]);
             $this->assertDatabaseHas('trainer_member_assignments', [
                 'gym_id' => $gym->id,

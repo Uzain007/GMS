@@ -18,7 +18,8 @@ class Member extends Model
 
     protected $fillable = [
         'home_branch_id', 'user_id', 'member_number', 'member_code', 'first_name', 'last_name',
-        'email', 'phone', 'date_of_birth', 'status', 'joined_at', 'archived_at', 'metadata',
+        'email', 'phone', 'date_of_birth', 'status', 'joined_at', 'archived_at',
+        'lifecycle_changed_at', 'lifecycle_reason', 'metadata',
     ];
 
     protected static function booted(): void
@@ -38,6 +39,7 @@ class Member extends Model
             'status' => MemberStatus::class,
             'joined_at' => 'immutable_datetime',
             'archived_at' => 'immutable_datetime',
+            'lifecycle_changed_at' => 'immutable_datetime',
             'metadata' => 'array',
         ];
     }
@@ -71,6 +73,11 @@ class Member extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 
     public function classBookings(): HasMany

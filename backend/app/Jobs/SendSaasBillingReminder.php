@@ -133,6 +133,30 @@ class SendSaasBillingReminder implements ShouldBeEncrypted, ShouldQueue
             ];
         }
 
+        if (str_starts_with($notification->template_key, 'saas_plan_change_')) {
+            $requested = str_replace('saas_plan_change_', '', $notification->template_key);
+            $heading = match ($requested) {
+                'requested' => 'A gym requested a subscription plan change',
+                'approved' => 'Your subscription plan change was approved',
+                default => 'Your subscription plan change was not approved',
+            };
+            $subject = match ($requested) {
+                'requested' => "Plan change request from {$gym->name}",
+                'approved' => 'Your IronCore plan change was approved',
+                default => 'Update on your IronCore plan change request',
+            };
+
+            return [$subject, 'emails.saas.plan-change', [
+                'subject' => $subject,
+                'preheader' => $heading.'.',
+                'recipientName' => $recipientName,
+                'gymName' => $gym->name,
+                'heading' => $heading,
+                'status' => str($requested)->headline()->toString(),
+                'billingUrl' => $billingUrl,
+            ]];
+        }
+
         $invoice = $notification->invoice;
         if (! $invoice) {
             throw new \LogicException('Invoice reminder is missing its invoice.');

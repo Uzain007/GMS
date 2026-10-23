@@ -26,6 +26,8 @@ class StaffProfileResource extends JsonResource
             'status' => $this->status->value,
             'hired_at' => $this->hired_at?->toDateString(),
             'terminated_at' => $this->terminated_at?->toDateString(),
+            'lifecycle_changed_at' => $this->lifecycle_changed_at?->toIso8601String(),
+            'lifecycle_reason' => $this->lifecycle_reason,
             'permissions' => $this->permissions,
             'has_profile_image' => $this->profile_image_path !== null,
             'created_at' => $this->created_at?->toIso8601String(),

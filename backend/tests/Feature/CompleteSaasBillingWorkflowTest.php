@@ -365,7 +365,7 @@ class CompleteSaasBillingWorkflowTest extends TestCase
         });
     }
 
-    public function test_only_unused_draft_saas_plans_can_be_permanently_deleted(): void
+    public function test_only_unreferenced_saas_plans_can_be_permanently_deleted(): void
     {
         [$draft] = $this->plan('unused-draft', 'draft', ['cash']);
         [$published] = $this->plan('published-plan', 'active', ['cash']);
@@ -377,9 +377,20 @@ class CompleteSaasBillingWorkflowTest extends TestCase
         ])->assertNoContent();
         $this->assertDatabaseMissing('saas_plans', ['id' => $draft->id]);
         $this->deleteJson("/api/v1/platform/saas-plans/{$published->id}", [
-            'reason' => 'Published plans must be archived instead.',
+            'reason' => 'Permanently remove an unreferenced published test plan.',
+        ])->assertNoContent();
+        $this->assertDatabaseMissing('saas_plans', ['id' => $published->id]);
+
+        [$audited] = $this->plan('audited-plan', 'draft', ['cash']);
+        AuditLog::query()->create([
+            'actor_id' => $admin->id, 'event' => 'platform.saas_plan.created',
+            'auditable_type' => SaasPlan::class, 'auditable_id' => $audited->id,
+            'reason' => 'Protected catalogue history.', 'created_at' => now(),
+        ]);
+        $this->deleteJson("/api/v1/platform/saas-plans/{$audited->id}", [
+            'reason' => 'Attempt removal of a plan with protected audit history.',
         ])->assertUnprocessable();
-        $this->assertDatabaseHas('saas_plans', ['id' => $published->id, 'status' => 'active']);
+        $this->assertDatabaseHas('saas_plans', ['id' => $audited->id]);
     }
 
     /** @return array{User,Gym} */

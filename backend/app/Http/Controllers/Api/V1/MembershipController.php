@@ -37,7 +37,7 @@ class MembershipController extends Controller
 
     public function show(string $membership): MembershipResource
     {
-        return new MembershipResource(Membership::query()->findOrFail($membership));
+        return new MembershipResource(Membership::query()->with(['plan', 'branch', 'renewals'])->findOrFail($membership));
     }
 
     public function update(

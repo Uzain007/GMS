@@ -498,7 +498,7 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
         app(TenantContext::class)->run($gym, function () use ($stale, $createdId): void {
             $this->assertSame(AttendanceStatus::CheckedOut, $stale->fresh()->status);
             $this->assertSame(
-                $stale->checked_in_at->addHours(24)->toIso8601String(),
+                $stale->checked_in_at->addHours(6)->toIso8601String(),
                 $stale->fresh()->checked_out_at->toIso8601String(),
             );
             $this->assertSame(1, AttendanceRecord::query()
@@ -510,31 +510,40 @@ class PhaseFiveAttendanceBookingIsolationTest extends TestCase
 
     public function test_previous_day_open_presence_stays_visible_and_blocks_a_duplicate(): void
     {
-        [$owner, $gym, $branch] = $this->tenant();
-        $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-OPEN'));
-        $open = app(TenantContext::class)->run($gym, function () use ($member, $branch, $owner): AttendanceRecord {
-            $membership = Membership::query()->where('member_id', $member->id)->firstOrFail();
+        $this->travelTo(CarbonImmutable::parse('2026-10-08 20:00:00', 'UTC'));
 
-            return AttendanceRecord::query()->create([
-                'member_id' => $member->id,
-                'membership_id' => $membership->id,
+        try {
+            [$owner, $gym, $branch] = $this->tenant();
+            $gym->update(['timezone' => 'Asia/Karachi']);
+            $member = app(TenantContext::class)->run($gym, fn () => $this->memberWithMembership($branch, 'MBR-OPEN'));
+            $open = app(TenantContext::class)->run($gym, function () use ($member, $branch, $owner): AttendanceRecord {
+                $membership = Membership::query()->where('member_id', $member->id)->firstOrFail();
+
+                return AttendanceRecord::query()->create([
+                    'member_id' => $member->id,
+                    'membership_id' => $membership->id,
+                    'branch_id' => $branch->id,
+                    'checked_in_by' => $owner->id,
+                    'method' => AttendanceMethod::Manual,
+                    'status' => AttendanceStatus::CheckedIn,
+                    // 11 PM in Karachi: previous local day but below the
+                    // approved six-hour automatic-checkout threshold.
+                    'checked_in_at' => now()->subHours(2),
+                ]);
+            });
+
+            Sanctum::actingAs($owner);
+            $headers = ['X-Gym-ID' => $gym->id];
+            $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
+                ->assertOk()
+                ->assertJsonFragment(['id' => $open->id]);
+            $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
                 'branch_id' => $branch->id,
-                'checked_in_by' => $owner->id,
-                'method' => AttendanceMethod::Manual,
-                'status' => AttendanceStatus::CheckedIn,
-                'checked_in_at' => now()->subHours(23),
-            ]);
-        });
-
-        Sanctum::actingAs($owner);
-        $headers = ['X-Gym-ID' => $gym->id];
-        $this->getJson("/api/v1/gyms/{$gym->id}/attendance", $headers)
-            ->assertOk()
-            ->assertJsonFragment(['id' => $open->id]);
-        $this->postJson("/api/v1/gyms/{$gym->id}/attendance/check-ins", [
-            'branch_id' => $branch->id,
-            'member_code' => $member->member_code,
-        ], $headers)->assertUnprocessable()->assertJsonValidationErrors('member');
+                'member_code' => $member->member_code,
+            ], $headers)->assertUnprocessable()->assertJsonValidationErrors('member');
+        } finally {
+            $this->travelBack();
+        }
     }
 
     public function test_full_class_waitlists_and_cancellation_promotes_fifo_member(): void

@@ -117,7 +117,7 @@ export type UpdateGymOwnerAccount = {
 };
 
 export type CreatedGym = { gym: GymSummary; owner_account: GymOwnerAccount | null };
-export type AuditLogRecord = { id: string; created_at: string; user: { id: string; name: string; email: string } | null; role: string | null; gym: { id: string; name: string } | null; action: string; resource: string | null; resource_id: string | null; old_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null; reason: string | null; ip_address: string | null; device: string | null };
+export type AuditLogRecord = { id: string; created_at: string; user: { id: string; name: string; email: string } | null; role: string | null; gym: { id: string; name: string } | null; action: string; friendly_title: string; friendly_description: string; resource: string | null; resource_id: string | null; old_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null; reason: string | null; ip_address: string | null; device: string | null };
 export type AuditLogFilters = { from?: string; to?: string; gym_id?: string; actor_id?: string; role?: string; action?: string; resource?: string; search?: string; page?: number; per_page?: number };
 
 export type MemberRecord = {
@@ -132,8 +132,10 @@ export type MemberRecord = {
   email: string | null;
   phone: string | null;
   date_of_birth: string | null;
-  status: "lead" | "active" | "paused" | "cancelled" | "archived";
+  status: "lead" | "active" | "inactive" | "suspended" | "deleted" | "paused" | "cancelled" | "archived";
   joined_at: string | null;
+  lifecycle_changed_at?: string | null;
+  lifecycle_reason?: string | null;
   current_membership?: MembershipRecord | null;
   created_at: string | null;
 };
@@ -165,7 +167,7 @@ export type NewMembership = { member_id: string; plan_id: string; branch_id?: st
 export type UpdateMembership = { plan_id?: string; status: MembershipRecord["status"]; ends_at?: string | null; next_billing_at?: string | null; auto_renew: boolean; cancellation_reason?: string | null; reason: string };
 export type UpdateMemberSelf = { first_name?: string; last_name?: string; email?: string; phone?: string; date_of_birth?: string | null };
 export type StaffRole = "gym_owner" | "gym_manager" | "receptionist" | "trainer";
-export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; phone: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive"; hired_at: string | null; terminated_at: string | null; has_profile_image: boolean; created_at: string | null };
+export type StaffRecord = { id: string; gym_id: string; user: { id: string; name: string; email: string }; role: StaffRole; home_branch_id: string | null; phone: string | null; employee_number: string; job_title: string | null; status: "active" | "suspended" | "inactive" | "deleted"; hired_at: string | null; terminated_at: string | null; lifecycle_changed_at?: string | null; lifecycle_reason?: string | null; has_profile_image: boolean; created_at: string | null };
 export type StaffInvitationRecord = { id: string; gym_id: string; home_branch_id: string | null; email: string; role: StaffRole; employee_number: string; job_title: string | null; status: "pending" | "accepted" | "revoked" | "expired"; expires_at: string; accepted_at: string | null; delivery?: { event_type: string | null; status: "queued" | "accepted" | "failed" | "unknown"; updated_at: string | null; failure_reason: string | null }; created_at: string | null };
 export type StaffAccountActivationPreview = { gym_name: string; role: StaffRole; masked_email: string; existing_account: boolean };
 export type NewStaffInvitation = { email: string; role: StaffRole; employee_number: string; job_title?: string; home_branch_id?: string; expires_in_days?: number };
@@ -212,8 +214,9 @@ export type NewSaasSubscriptionPayment = { saas_plan_price_id?: string; saas_bil
 export type NewSaasBillingInvoice = { saas_plan_price_id: string; amount_minor: number; currency: GymSummary["base_currency"]; due_date: string; idempotency_key: string; reason: string };
 export type ReplaceSaasBillingInvoice = { saas_plan_price_id: string; period_start: string; due_date: string; idempotency_key: string; reason: string };
 export type PrepareSaasSubscriptionInvoice = { saas_plan_price_id: string; method: "cash" | "bank_transfer"; idempotency_key: string };
-export type PlatformMemberRecord = { id: string; gym_id: string; gym_name: string; name: string; email: string | null; phone: string | null; member_code: string; status: string; branch: { id: string; name: string } | null; membership_status: string | null; plan: { id: string; name: string } | null; joined_at: string | null };
+export type PlatformMemberRecord = { id: string; gym_id: string; gym_name: string; name: string; email: string | null; phone: string | null; member_code: string; status: string; branch: { id: string; name: string } | null; membership_status: string | null; plan: { id: string; name: string } | null; joined_at: string | null; created_at: string | null; lifecycle_changed_at: string | null; lifecycle_reason: string | null; membership_history_count: number; payment_history_count: number; attendance_history_count: number };
 export type PlatformMemberPage = Paginated<PlatformMemberRecord> & { meta: Paginated<PlatformMemberRecord>["meta"] & { facets: { plans: Array<{ id: string; name: string; gym_id: string; gym_name: string }>; branches: Array<{ id: string; name: string; gym_id: string; gym_name: string }> } } };
+export type PlatformStaffRecord = { id: string; gym_id: string; gym_name: string; name: string; email: string; phone: string | null; employee_number: string; role: string | null; job_title: string | null; branch: { id: string; name: string } | null; status: "active" | "inactive" | "suspended" | "deleted"; created_at: string | null; lifecycle_changed_at: string | null; lifecycle_reason: string | null; attendance_history_count: number; class_history_count: number; member_assignment_history_count: number; workout_plan_history_count: number };
 export type PlatformSaasPaymentRecord = { id: string; gym_id: string; gym_name: string; plan_name: string | null; billing_interval: string | null; invoice_id: string | null; invoice_number: string | null; method: "cash" | "bank_transfer"; effective_method: "cash" | "bank_transfer"; status: SaasSubscriptionPaymentRecord["status"]; amount_minor: number; effective_amount_minor: number; refunded_amount_minor: number; currency: GymSummary["base_currency"]; reference: string | null; effective_reference: string | null; payment_date: string | null; effective_payment_date: string | null; notes: string | null; has_receipt: boolean; submitted_by: { id: string; name: string; email: string } | null; review_reason: string | null; correction_count: number; refund_count: number; approval_reversal: { reason: string; reversed_at: string | null } | null; created_at: string | null };
 export type PlatformBillingRecord = { metrics: { total_gyms: number; active_gyms: number; trial_gyms: number; paid_gyms: number; unpaid_gyms: number; past_due_gyms: number; billing_suspended_gyms: number; cancelled_archived_gyms: number; mrr_by_currency: Record<string, number>; revenue_this_month_by_currency: Record<string, number>; outstanding_by_currency: Record<string, number>; overdue_by_currency: Record<string, number>; upcoming_renewals: number; trial_conversions: number }; subscriptions: Array<{ id: string; gym_id: string; gym_name: string; plan_id: string; plan_name: string; status: string; currency: GymSummary["base_currency"]; amount_minor: number; billing_interval: string; next_billing_at: string | null; grace_period_days: number; billing_restricted_at: string | null }>; invoices: Paginated<{ id: string; gym_id: string; gym_name: string; subscription_id: string; plan_price_id: string | null; plan_name: string | null; number: string | null; status: string; currency: GymSummary["base_currency"]; amount_due_minor: number; amount_paid_minor: number; amount_remaining_minor: number; period_start: string | null; period_end: string | null; due_at: string | null; grace_ends_at: string | null; paid_at: string | null }>; payments: Paginated<PlatformSaasPaymentRecord> };
 export type PlatformAnalyticsPoint = { month: string; new_gyms: number; total_gyms: number; active_gyms: number; members_added: number; revenue_by_currency: Record<string, number> };
@@ -221,6 +224,7 @@ export type PlatformAnalyticsRecord = { from: string; to: string; timeline: Plat
 export type NewSaasPlan = { code: string; name: string; description?: string; sort_order?: number; feature_limits: SaasFeatureLimits; payment_methods: SaasPaymentMethod[]; currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly"; amount_minor: number; trial_days?: number };
 export type UpdateSaasPlan = { name?: string; description?: string | null; status?: SaasPlanRecord["status"]; sort_order?: number; feature_limits?: SaasFeatureLimits; payment_methods?: SaasPaymentMethod[]; price?: Omit<NewSaasPlanPrice, "reason">; prices?: Array<Omit<NewSaasPlanPrice, "reason">>; reason: string };
 export type NewSaasPlanPrice = { currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly"; amount_minor: number; trial_days?: number; reason: string };
+export type SaasPlanChangeRequestRecord = { id: string; gym_id: string; gym?: { id: string; name: string }; subscription_id: string; current_plan: { id: string; name: string }; current_price: { id: string; amount_minor: number; currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly" }; requested_plan: { id: string; name: string }; requested_price: { id: string; amount_minor: number; currency: GymSummary["base_currency"]; billing_interval: "monthly" | "yearly" }; change_type: "upgrade" | "downgrade" | "change"; status: "pending" | "approved" | "rejected" | "cancelled"; reason: string; review_reason: string | null; requested_by: { id: string; name: string; email: string }; reviewed_by: { id: string; name: string } | null; requested_at: string; reviewed_at: string | null; cancelled_at: string | null };
 export type MemberAccessCredentialRecord = { id: string; gym_id: string; member_id: string; member_code: string; credential_hint: string; status: "active" | "revoked" | "expired"; expires_at: string | null; last_used_at: string | null; created_at: string | null; credential?: string };
 export type MemberSelfCredentialRecord = Pick<MemberAccessCredentialRecord,
   "credential_hint" | "status" | "expires_at" | "last_used_at" | "created_at"
@@ -641,6 +645,10 @@ export class IronCoreApi {
     return this.request<PlatformMemberPage>(`/api/v1/platform/member-directory?${params.toString()}`);
   }
 
+  async platformStaff(params: URLSearchParams): Promise<PlatformStaffRecord[]> {
+    return (await this.request<ApiEnvelope<PlatformStaffRecord[]>>(`/api/v1/platform/staff-directory?${params.toString()}`)).data;
+  }
+
   async platformMembersExport(params: URLSearchParams): Promise<Blob> {
     return (await this.performRequest(`/api/v1/platform/member-directory/export?${params.toString()}`, { headers: { Accept: "application/octet-stream" } })).blob();
   }
@@ -663,6 +671,15 @@ export class IronCoreApi {
 
   updateMember(gymId: string, memberId: string, input: UpdateMember): Promise<MemberRecord> {
     return this.updateTenantRecord<MemberRecord>(gymId, "members", memberId, input);
+  }
+
+  async deleteMember(gymId: string, memberId: string, reason: string): Promise<MemberRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<MemberRecord>>(
+      `/api/v1/gyms/${encodeURIComponent(gymId)}/members/${encodeURIComponent(memberId)}`,
+      { method: "DELETE", body: JSON.stringify({ reason }) },
+      gymId,
+    )).data;
   }
 
   async createMemberAccountInvitation(gymId: string, memberId: string): Promise<CreatedMemberAccountInvitation> {
@@ -840,6 +857,39 @@ export class IronCoreApi {
 
   async saasSubscription(gymId: string): Promise<GymSubscriptionRecord | null> {
     return (await this.request<ApiEnvelope<GymSubscriptionRecord | null>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-subscription`, {}, gymId)).data;
+  }
+
+  async saasPlanChangeRequests(gymId: string): Promise<Paginated<SaasPlanChangeRequestRecord>> {
+    return this.tenantCollection<SaasPlanChangeRequestRecord>(gymId, "saas-plan-change-requests");
+  }
+
+  async requestSaasPlanChange(gymId: string, priceId: string, reason: string): Promise<SaasPlanChangeRequestRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<SaasPlanChangeRequestRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-plan-change-requests`, { method: "POST", body: JSON.stringify({ saas_plan_price_id: priceId, reason }) }, gymId)).data;
+  }
+
+  async cancelSaasPlanChange(gymId: string, requestId: string): Promise<SaasPlanChangeRequestRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<SaasPlanChangeRequestRecord>>(`/api/v1/gyms/${encodeURIComponent(gymId)}/saas-plan-change-requests/${encodeURIComponent(requestId)}/cancel`, { method: "POST" }, gymId)).data;
+  }
+
+  async reviewSaasPlanChange(gymId: string, requestId: string, decision: "approve" | "reject", reason: string): Promise<SaasPlanChangeRequestRecord> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<SaasPlanChangeRequestRecord>>(`/api/v1/platform/saas-plan-change-requests/${encodeURIComponent(gymId)}/${encodeURIComponent(requestId)}/review`, { method: "POST", body: JSON.stringify({ decision, reason }) })).data;
+  }
+
+  async sendSaasPaymentReminder(gymId: string, invoiceId: string, reason: string): Promise<{ queued: number; duplicate_suppressed: number }> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<{ queued: number; duplicate_suppressed: number }>>(`/api/v1/platform/saas-payment-reminders/${encodeURIComponent(gymId)}/${encodeURIComponent(invoiceId)}`, { method: "POST", body: JSON.stringify({ reason }) })).data;
+  }
+
+  async previewSaasPaymentReminders(): Promise<{ eligible: number }> {
+    return (await this.request<ApiEnvelope<{ eligible: number }>>('/api/v1/platform/saas-payment-reminders/preview')).data;
+  }
+
+  async sendAllSaasPaymentReminders(reason: string): Promise<{ eligible: number; queued: number; duplicate_suppressed: number }> {
+    await this.csrf();
+    return (await this.request<ApiEnvelope<{ eligible: number; queued: number; duplicate_suppressed: number }>>('/api/v1/platform/saas-payment-reminders', { method: "POST", body: JSON.stringify({ confirmed: true, reason }) })).data;
   }
 
   saasBillingInvoices(gymId: string): Promise<Paginated<SaasBillingInvoiceRecord>> {

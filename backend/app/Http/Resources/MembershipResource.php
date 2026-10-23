@@ -47,6 +47,15 @@ class MembershipResource extends JsonResource
                 'id' => $this->branch->id,
                 'name' => $this->branch->name,
             ]),
+            'renewals' => $this->whenLoaded('renewals', fn () => $this->renewals->map(fn ($renewal) => [
+                'id' => $renewal->id,
+                'invoice_id' => $renewal->invoice_id,
+                'period_start' => $renewal->period_start?->toDateString(),
+                'period_end' => $renewal->period_end?->toDateString(),
+                'status' => $renewal->status,
+                'source' => $renewal->source,
+                'renewed_at' => $renewal->renewed_at?->toIso8601String(),
+            ])->values()),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
